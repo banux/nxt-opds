@@ -13,7 +13,7 @@
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
 - [ ] Add test coverage for opds feed serialization
 - [ ] Add test coverage for HTTP handlers
-- [ ] Add pagination link headers (first/last/next/prev) to feeds
+- [x] Add pagination link headers (first/last/next/prev) to feeds - **Done: RelFirst/Last/Next/Previous consts in opds/feed.go; addPaginationLinks helper in handlers.go; applied to all 6 paginated OPDS handlers**
 - [x] Add cover image serving endpoint - **Done: EPUB cover extraction (EPUB2+EPUB3), /covers/{id} HTTP endpoint, CoverProvider interface**
 - [x] Add password authentication with login form - **Done: session-cookie auth, POST /login form, GET /login page (Tailwind), POST /logout, Basic Auth fallback for OPDS readers, HttpOnly cookie, constant-time comparison, 30-day sessions**
 - [x] Vue+Tailwind CSS frontend - **Done: web/index.html (CDN Vue3+Tailwind CSS), embedded via Go embed.FS, served at /, GET /api/books JSON endpoint, Feedbooks-style book grid with covers, search, upload dialog, detail dialog, dark mode, color gradients for missing covers, pagination**

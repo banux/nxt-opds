@@ -51,6 +51,36 @@ func parsePagination(r *http.Request) (offset, limit int) {
 	return
 }
 
+// paginationLink builds a URL for the given page by replacing the offset and
+// limit query parameters while preserving all other query parameters (e.g. q=).
+func paginationLink(r *http.Request, offset, limit int) string {
+	q := r.URL.Query()
+	q.Set("offset", strconv.Itoa(offset))
+	q.Set("limit", strconv.Itoa(limit))
+	return r.URL.Path + "?" + q.Encode()
+}
+
+// addPaginationLinks appends OPDS-standard first/previous/next/last link elements
+// to feed when the result set spans more than one page.
+func addPaginationLinks(feed *opds.Feed, r *http.Request, offset, limit, total int, mimeType string) {
+	if total <= 0 || limit <= 0 {
+		return
+	}
+	lastOffset := ((total - 1) / limit) * limit
+	feed.AddLink(opds.RelFirst, paginationLink(r, 0, limit), mimeType)
+	if offset > 0 {
+		prevOffset := offset - limit
+		if prevOffset < 0 {
+			prevOffset = 0
+		}
+		feed.AddLink(opds.RelPrevious, paginationLink(r, prevOffset, limit), mimeType)
+	}
+	if offset+limit < total {
+		feed.AddLink(opds.RelNext, paginationLink(r, offset+limit, limit), mimeType)
+	}
+	feed.AddLink(opds.RelLast, paginationLink(r, lastOffset, limit), mimeType)
+}
+
 // bookToEntry converts a catalog.Book to an opds.Entry for an acquisition feed.
 func bookToEntry(b catalog.Book) opds.Entry {
 	entry := opds.Entry{
@@ -165,6 +195,7 @@ func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 	)
 	feed.AddLink(opds.RelSelf, "/opds/books", opds.MIMEAcquisitionFeed)
 	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
 		feed.AddEntry(bookToEntry(bk))
@@ -221,6 +252,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
 	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
 		feed.AddEntry(bookToEntry(bk))
@@ -245,6 +277,7 @@ func (s *Server) handleAuthors(w http.ResponseWriter, r *http.Request) {
 	)
 	feed.AddLink(opds.RelSelf, "/opds/authors", opds.MIMENavigationFeed)
 	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMENavigationFeed)
 
 	now := time.Now()
 	for _, name := range authors {
@@ -283,6 +316,7 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
 	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
 		feed.AddEntry(bookToEntry(bk))
@@ -307,6 +341,7 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	)
 	feed.AddLink(opds.RelSelf, "/opds/tags", opds.MIMENavigationFeed)
 	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMENavigationFeed)
 
 	now := time.Now()
 	for _, tag := range tags {
@@ -345,6 +380,7 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
 	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
 		feed.AddEntry(bookToEntry(bk))

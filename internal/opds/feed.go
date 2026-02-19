@@ -31,6 +31,10 @@ const (
 	RelSelf                = "self"
 	RelStart               = "start"
 	RelSearch              = "search"
+	RelFirst               = "first"
+	RelLast                = "last"
+	RelNext                = "next"
+	RelPrevious            = "previous"
 
 	// MIME types
 	MIMEAtomFeed         = "application/atom+xml"
