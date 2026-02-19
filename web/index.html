@@ -220,7 +220,8 @@
           class="group cursor-pointer"
         >
           <!-- Cover -->
-          <div class="relative overflow-hidden rounded-lg shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover mb-2">
+          <div class="relative overflow-hidden shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
+               :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
             <img
               v-if="book.coverUrl"
               :src="book.coverUrl"
@@ -237,14 +238,14 @@
               </svg>
               <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
             </div>
-            <!-- Read overlay strip -->
-            <div v-if="book.isRead"
-                 class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-green-700/90 to-transparent pt-6 pb-2 px-2 flex items-end gap-1">
-              <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-              </svg>
-              <span class="text-white text-xs font-bold leading-none">Lu</span>
-            </div>
+          </div>
+          <!-- Read banner (below cover) -->
+          <div v-if="book.isRead"
+               class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+            <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span class="text-white text-xs font-bold leading-none">Lu</span>
           </div>
 
           <!-- Meta -->
