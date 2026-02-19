@@ -772,6 +772,56 @@ func TestHandleAPIRefresh_BackendError(t *testing.T) {
 	}
 }
 
+// ---- API single book ----
+
+func TestHandleAPIBook_NotFound(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/api/books/nonexistent", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rr.Code)
+	}
+}
+
+func TestHandleAPIBook_Found(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	uploadBook(t, srv, "single.epub", "Single Book", "Solo Author")
+
+	// Get the book ID from the list
+	req := httptest.NewRequest(http.MethodGet, "/api/books", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	var listResp struct {
+		Books []bookJSON `json:"books"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listResp.Books) == 0 {
+		t.Fatal("expected book in list")
+	}
+	id := listResp.Books[0].ID
+
+	// Fetch single book
+	req2 := httptest.NewRequest(http.MethodGet, "/api/books/"+id, nil)
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr2.Code)
+	}
+	var b bookJSON
+	if err := json.NewDecoder(rr2.Body).Decode(&b); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if b.ID != id {
+		t.Errorf("id: got %q, want %q", b.ID, id)
+	}
+	if b.DownloadURL == "" {
+		t.Error("downloadUrl must not be empty")
+	}
+}
+
 // ---- Health check ----
 
 func TestHandleHealth_ReturnsJSON(t *testing.T) {

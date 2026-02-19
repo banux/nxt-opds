@@ -511,6 +511,38 @@ type bookUpdateRequest struct {
 	IsRead      *bool    `json:"isRead"`
 }
 
+// handleAPIBook handles GET /api/books/{id} to fetch a single book as JSON.
+func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	bk, err := s.catalog.BookByID(id)
+	if err != nil {
+		http.Error(w, "book not found", http.StatusNotFound)
+		return
+	}
+
+	j := bookJSON{
+		ID:          bk.ID,
+		Title:       bk.Title,
+		CoverURL:    bk.CoverURL,
+		Tags:        bk.Tags,
+		Language:    bk.Language,
+		Publisher:   bk.Publisher,
+		Summary:     bk.Summary,
+		Series:      bk.Series,
+		SeriesIndex: bk.SeriesIndex,
+		IsRead:      bk.IsRead,
+		DownloadURL: "/opds/books/" + bk.ID + "/download",
+	}
+	for _, a := range bk.Authors {
+		j.Authors = append(j.Authors, a.Name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(j)
+}
+
 // handleAPIUpdateBook handles PATCH /api/books/{id} to update book metadata.
 func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	if s.updater == nil {

@@ -111,6 +111,9 @@ func (s *Server) registerRoutes() {
 	// API: JSON books list for the web frontend
 	protected.HandleFunc("/api/books", s.handleAPIBooks).Methods(http.MethodGet)
 
+	// API: get single book by ID
+	protected.HandleFunc("/api/books/{id}", s.handleAPIBook).Methods(http.MethodGet)
+
 	// API: update book metadata (enabled when backend supports it)
 	protected.HandleFunc("/api/books/{id}", s.handleAPIUpdateBook).Methods(http.MethodPatch)
 

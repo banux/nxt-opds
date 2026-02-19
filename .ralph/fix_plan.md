@@ -8,6 +8,7 @@
 - [x] Implement a file-system catalog backend (scan directory for EPUB/PDF files) - **Done: internal/backend/fs/fs.go**
 - [x] Connect catalog backend to server handlers (wire up real data) - **Done: server.New() now takes catalog.Catalog**
 - [x] Implement EPUB metadata extraction (title, author, cover from .epub files) - **Done: OPF metadata via stdlib archive/zip + encoding/xml**
+- [x] Implement book page instead of dialog - **Done: hash-based routing in Vue SPA (#/books/{id}), dedicated book detail page with cover/metadata/download/edit; GET /api/books/{id} endpoint; detail modal removed**
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
