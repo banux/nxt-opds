@@ -1,0 +1,13 @@
+services:
+  nxt-opds:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./books:/data/books
+    environment:
+      LISTEN_ADDR: ":8080"
+      BOOKS_DIR: "/data/books"
+      BACKEND: "sqlite"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-changeme}"
+    restart: unless-stopped

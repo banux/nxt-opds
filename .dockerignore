@@ -1,0 +1,21 @@
+# Version control
+.git
+.gitignore
+
+# Ralph development tool
+.ralph/
+.ralphrc
+
+# Build artefacts
+nxt-opds
+*.test
+
+# Local book library (should never be baked into the image)
+books/
+
+# Config files with secrets
+nxt-opds.yaml
+*.env
+
+# Go test caches
+*_test.go

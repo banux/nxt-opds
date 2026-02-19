@@ -25,8 +25,8 @@
 ## Low Priority
 - [ ] Performance optimization (feed caching, background indexing)
 - [ ] Code cleanup and refactoring
-- [ ] Docker / container support
-- [ ] SQLite index for large collections
+- [x] Docker / container support - **Done: Dockerfile (multi-stage, debian-slim runtime, CGO_ENABLED=0), .dockerignore, docker-compose.yml, README.md updated with full docs**
+- [x] SQLite index for large collections - **Done: internal/backend/sqlite/sqlite.go, selected via backend: "sqlite" in config or BACKEND=sqlite env var; epub metadata extraction refactored into internal/epub/epub.go shared package; 9 tests in sqlite_test.go**
 
 ## Completed
 - [x] Project enabled for Ralph
