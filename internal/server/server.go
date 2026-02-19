@@ -29,6 +29,7 @@ type Server struct {
 	coverProvider catalog.CoverProvider // optional; nil if backend doesn't support cover serving
 	updater       catalog.Updater       // optional; nil if backend doesn't support metadata editing
 	refresher     catalog.Refresher     // optional; nil if backend doesn't support manual refresh
+	deleter       catalog.Deleter       // optional; nil if backend doesn't support deletion
 	sessions      *sessionStore
 	opts          Options
 }
@@ -56,6 +57,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if rf, ok := cat.(catalog.Refresher); ok {
 		s.refresher = rf
+	}
+	if dl, ok := cat.(catalog.Deleter); ok {
+		s.deleter = dl
 	}
 	s.registerRoutes()
 	return s
@@ -116,6 +120,9 @@ func (s *Server) registerRoutes() {
 
 	// API: update book metadata (enabled when backend supports it)
 	protected.HandleFunc("/api/books/{id}", s.handleAPIUpdateBook).Methods(http.MethodPatch)
+
+	// API: delete a book (enabled when backend supports it)
+	protected.HandleFunc("/api/books/{id}", s.handleAPIDeleteBook).Methods(http.MethodDelete)
 
 	// API: upload a new book (enabled when backend supports it)
 	protected.HandleFunc("/api/upload", s.handleUpload).Methods(http.MethodPost)

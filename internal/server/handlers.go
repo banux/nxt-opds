@@ -610,6 +610,25 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(j)
 }
 
+// handleAPIDeleteBook handles DELETE /api/books/{id} to remove a book from the catalog.
+func (s *Server) handleAPIDeleteBook(w http.ResponseWriter, r *http.Request) {
+	if s.deleter == nil {
+		http.Error(w, "deletion not supported by this backend", http.StatusNotImplemented)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	if err := s.deleter.DeleteBook(id); err != nil {
+		http.Error(w, "delete failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 // handleCover serves the cached cover image for a book by its ID.
 // Returns 501 if the backend does not support cover serving.
 // Returns 404 if no cover image exists for the given ID.

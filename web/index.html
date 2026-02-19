@@ -412,6 +412,15 @@
               </svg>
               Modifier les métadonnées
             </button>
+
+            <!-- Delete button -->
+            <button @click="deleteBook(currentBook)" :disabled="deleting"
+              class="flex items-center gap-2 px-4 py-2 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ml-auto">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+              {{ deleting ? 'Suppression…' : 'Supprimer' }}
+            </button>
           </div>
 
         </div><!-- end right column -->
@@ -841,6 +850,25 @@ createApp({
       }
     }
 
+    // ---- Delete book ----
+    const deleting = ref(false)
+
+    async function deleteBook(book) {
+      if (!book) return
+      if (!window.confirm(`Supprimer « ${book.title} » ? Cette action est irréversible.`)) return
+      deleting.value = true
+      try {
+        const res = await fetch('/api/books/' + book.id, { method: 'DELETE' })
+        if (!res.ok) throw new Error(await res.text() || 'Échec de la suppression')
+        showToast('Livre supprimé', 'success')
+        navigateTo('/')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        deleting.value = false
+      }
+    }
+
     // ---- Refresh catalog ----
     const refreshing = ref(false)
 
@@ -934,6 +962,7 @@ createApp({
       loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       togglingRead, toggleRead,
+      deleting, deleteBook,
       editDialog, editForm, editSaving, editError, openEdit, closeEdit, saveEdits,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,

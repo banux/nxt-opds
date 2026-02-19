@@ -497,6 +497,48 @@ func (b *Backend) Tags(offset, limit int) ([]string, int, error) {
 	return tagList[offset:end], total, nil
 }
 
+// DeleteBook removes the book with the given ID from the catalog and deletes
+// its file(s) and cover image from disk. It implements catalog.Deleter.
+func (b *Backend) DeleteBook(id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bk, ok := b.byID[id]
+	if !ok {
+		return fmt.Errorf("book %q not found", id)
+	}
+
+	// Delete each associated file.
+	for _, f := range bk.Files {
+		_ = os.Remove(f.Path)
+	}
+
+	// Delete the cached cover image if it exists.
+	coverPath := filepath.Join(b.coversDir, id+".jpg")
+	_ = os.Remove(coverPath)
+
+	// Remove from in-memory indexes.
+	for name, ids := range b.authors {
+		b.authors[name] = removeID(ids, id)
+	}
+	for tag, ids := range b.tags {
+		b.tags[tag] = removeID(ids, id)
+	}
+	delete(b.byID, id)
+	for i, bk := range b.books {
+		if bk.ID == id {
+			b.books = append(b.books[:i], b.books[i+1:]...)
+			break
+		}
+	}
+
+	// Remove override entry and persist.
+	delete(b.overrides, id)
+	_ = b.saveOverrides()
+
+	return nil
+}
+
 // StoreBook writes src to the backend's root directory as filename, then
 // parses and indexes it immediately. It implements catalog.Uploader.
 func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, error) {

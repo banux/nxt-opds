@@ -254,6 +254,32 @@ func (b *Backend) CoverPath(id string) (string, error) {
 	return epub.CoverPath(b.coversDir, id)
 }
 
+// DeleteBook removes the book with the given ID from the DB and deletes its
+// file and cover image from disk. It implements catalog.Deleter.
+func (b *Backend) DeleteBook(id string) error {
+	// Look up the file path before deleting the row.
+	var filePath string
+	err := b.db.QueryRow(`SELECT file_path FROM books WHERE id = ?`, id).Scan(&filePath)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("book %q not found", id)
+	}
+	if err != nil {
+		return fmt.Errorf("query book %q: %w", id, err)
+	}
+
+	// Delete the DB row (CASCADE removes book_authors and book_tags).
+	if _, err := b.db.Exec(`DELETE FROM books WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete book %q from DB: %w", id, err)
+	}
+
+	// Best-effort: delete file and cover from disk.
+	_ = os.Remove(filePath)
+	coverPath := filepath.Join(b.coversDir, id+".jpg")
+	_ = os.Remove(coverPath)
+
+	return nil
+}
+
 // Root returns top-level navigation entries.
 func (b *Backend) Root() ([]catalog.NavEntry, error) {
 	return []catalog.NavEntry{

@@ -189,3 +189,11 @@ type Refresher interface {
 	// database index to reflect the current state of the books directory.
 	Refresh() error
 }
+
+// Deleter is an optional interface for catalog backends that support deleting
+// a book and its associated files from the catalog.
+type Deleter interface {
+	// DeleteBook removes the book with the given ID from the catalog and
+	// deletes its file(s) and cover image from disk.
+	DeleteBook(id string) error
+}
