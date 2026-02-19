@@ -24,7 +24,7 @@
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
-- [ ] Code cleanup and refactoring
+- [x] Code cleanup and refactoring - **Done: tests for POST /api/refresh (success, 501, 500 paths); 6 tests for refresh_interval config parsing; updated package doc in config.go; updated Architecture Notes to reflect current package layout**
 - [x] Docker / container support - **Done: Dockerfile (multi-stage, debian-slim runtime, CGO_ENABLED=0), .dockerignore, docker-compose.yml, README.md updated with full docs**
 - [x] SQLite index for large collections - **Done: internal/backend/sqlite/sqlite.go, selected via backend: "sqlite" in config or BACKEND=sqlite env var; epub metadata extraction refactored into internal/epub/epub.go shared package; 9 tests in sqlite_test.go**
 
@@ -46,15 +46,21 @@
 ### Packages
 - `internal/opds` - Pure OPDS/Atom types and XML serialization, no I/O
 - `internal/catalog` - Domain model + Catalog interface (backend-agnostic)
-- `internal/server` - HTTP server, routes, handlers
-- Future: `internal/backend/fs` - Filesystem catalog backend
-- Future: `internal/backend/sqlite` - SQLite-indexed backend
+- `internal/server` - HTTP server, routes, handlers, auth
+- `internal/epub` - Shared EPUB/PDF metadata extraction (archive/zip + encoding/xml)
+- `internal/config` - YAML config loading with env-var overrides
+- `internal/backend/fs` - In-memory filesystem backend (.metadata.json overrides)
+- `internal/backend/sqlite` - SQLite-indexed backend (.catalog.db)
+- `web/` - Embedded Vue 3 + Tailwind CSS frontend (go:embed)
 
 ### Key Design Decisions
 - Catalog backend is injected via interface (testable, swappable)
+- Optional interfaces (Uploader, CoverProvider, Updater, Refresher) let backends
+  opt-in to additional capabilities; server detects each via type assertion
 - OPDS XML serialization uses stdlib encoding/xml
 - gorilla/mux for URL parameter extraction
 - Handlers are thin; business logic stays in catalog backends
+- modernc.org/sqlite is pure Go (CGO_ENABLED=0 works, Docker scratch/slim OK)
 
 ## Notes
 - Focus on MVP functionality first

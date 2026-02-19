@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/config"
 )
@@ -176,6 +177,85 @@ func TestFindConfigFile_NoFile_ReturnsEmpty(t *testing.T) {
 	// test machine, so only verify the env-var and local-file cases don't fire.
 	if found == "nxt-opds.yaml" {
 		t.Error("should not return local nxt-opds.yaml from temp dir")
+	}
+}
+
+// ---- refresh_interval config ----
+
+func TestDefault_RefreshInterval(t *testing.T) {
+	cfg := config.Default()
+	if cfg.RefreshInterval != 5*time.Minute {
+		t.Errorf("default RefreshInterval: got %v, want 5m", cfg.RefreshInterval)
+	}
+	if cfg.RefreshIntervalStr != "5m" {
+		t.Errorf("default RefreshIntervalStr: got %q, want 5m", cfg.RefreshIntervalStr)
+	}
+}
+
+func TestLoad_RefreshInterval_FromYAML(t *testing.T) {
+	yaml := `refresh_interval: "10m"`
+	path := writeTemp(t, "refresh.yaml", yaml)
+	t.Setenv("REFRESH_INTERVAL", "")
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.RefreshInterval != 10*time.Minute {
+		t.Errorf("RefreshInterval: got %v, want 10m", cfg.RefreshInterval)
+	}
+}
+
+func TestLoad_RefreshInterval_DisabledWithZero(t *testing.T) {
+	yaml := `refresh_interval: "0"`
+	path := writeTemp(t, "refresh_zero.yaml", yaml)
+	t.Setenv("REFRESH_INTERVAL", "")
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.RefreshInterval != 0 {
+		t.Errorf("RefreshInterval with '0' string: got %v, want 0 (disabled)", cfg.RefreshInterval)
+	}
+}
+
+func TestLoad_RefreshInterval_FromEnv(t *testing.T) {
+	t.Setenv("REFRESH_INTERVAL", "30s")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.RefreshInterval != 30*time.Second {
+		t.Errorf("RefreshInterval from env: got %v, want 30s", cfg.RefreshInterval)
+	}
+}
+
+func TestLoad_RefreshInterval_EnvDisable(t *testing.T) {
+	t.Setenv("REFRESH_INTERVAL", "0")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.RefreshInterval != 0 {
+		t.Errorf("RefreshInterval with REFRESH_INTERVAL=0: got %v, want 0 (disabled)", cfg.RefreshInterval)
+	}
+}
+
+func TestLoad_RefreshInterval_InvalidString_KeepsDefault(t *testing.T) {
+	yaml := `refresh_interval: "not-a-duration"`
+	path := writeTemp(t, "refresh_bad.yaml", yaml)
+	t.Setenv("REFRESH_INTERVAL", "")
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	// Invalid duration string is silently ignored; default (5m) is preserved.
+	if cfg.RefreshInterval != 5*time.Minute {
+		t.Errorf("RefreshInterval with invalid string: got %v, want 5m (preserved default)", cfg.RefreshInterval)
 	}
 }
 

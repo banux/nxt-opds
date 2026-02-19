@@ -3,15 +3,42 @@ package server
 import (
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	fsbackend "github.com/banux/nxt-opds/internal/backend/fs"
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/opds"
 )
+
+// ---- mock types for refresh tests ----
+
+// noRefreshCatalog implements catalog.Catalog but NOT catalog.Refresher.
+// Used to verify that POST /api/refresh returns 501 when backend lacks support.
+type noRefreshCatalog struct{}
+
+func (noRefreshCatalog) Root() ([]catalog.NavEntry, error)                             { return nil, nil }
+func (noRefreshCatalog) AllBooks(_, _ int) ([]catalog.Book, int, error)                { return nil, 0, nil }
+func (noRefreshCatalog) BookByID(_ string) (*catalog.Book, error)                      { return nil, fmt.Errorf("not found") }
+func (noRefreshCatalog) Search(_ catalog.SearchQuery) ([]catalog.Book, int, error)     { return nil, 0, nil }
+func (noRefreshCatalog) BooksByAuthor(_ string, _, _ int) ([]catalog.Book, int, error) { return nil, 0, nil }
+func (noRefreshCatalog) BooksByTag(_ string, _, _ int) ([]catalog.Book, int, error)    { return nil, 0, nil }
+func (noRefreshCatalog) Authors(_, _ int) ([]string, int, error)                       { return nil, 0, nil }
+func (noRefreshCatalog) Tags(_, _ int) ([]string, int, error)                          { return nil, 0, nil }
+
+// failRefreshBackend wraps an fs.Backend and overrides Refresh() to return an error.
+// Used to verify that POST /api/refresh propagates backend errors as 500.
+type failRefreshBackend struct {
+	*fsbackend.Backend
+}
+
+func (f *failRefreshBackend) Refresh() error {
+	return fmt.Errorf("simulated refresh failure")
+}
 
 // uploadBook is a test helper that uploads a minimal EPUB and returns the resulting Book.
 func uploadBook(t *testing.T, srv *Server, filename, title, author string) catalog.Book {
@@ -692,6 +719,56 @@ func TestAddPaginationLinks_ZeroTotal(t *testing.T) {
 	addPaginationLinks(feed, req, 0, 50, 0, opds.MIMEAcquisitionFeed)
 	if len(feed.Links) != 0 {
 		t.Errorf("expected no pagination links for empty result set, got %d", len(feed.Links))
+	}
+}
+
+// ---- API refresh ----
+
+func TestHandleAPIRefresh_Success(t *testing.T) {
+	// newTestServer uses fs.Backend which implements catalog.Refresher.
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]bool
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp["ok"] {
+		t.Errorf("expected {\"ok\":true}, got %v", resp)
+	}
+}
+
+func TestHandleAPIRefresh_NotSupported(t *testing.T) {
+	// Use a catalog that does NOT implement catalog.Refresher.
+	srv := New(noRefreshCatalog{}, Options{})
+	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501 when backend lacks Refresher, got %d", rr.Code)
+	}
+}
+
+func TestHandleAPIRefresh_BackendError(t *testing.T) {
+	// Use a backend whose Refresh() always returns an error.
+	dir := t.TempDir()
+	base, err := fsbackend.New(dir)
+	if err != nil {
+		t.Fatalf("backend.New: %v", err)
+	}
+	srv := New(&failRefreshBackend{base}, Options{})
+	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when Refresh() fails, got %d", rr.Code)
 	}
 }
 

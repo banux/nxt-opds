@@ -6,11 +6,13 @@
 //	listen_addr: ":8080"
 //	books_dir: "./books"
 //	auth_password: "mysecretpassword"
+//	backend: "sqlite"
+//	refresh_interval: "5m"
 //
 // Configuration sources, in increasing priority order:
 //  1. Built-in defaults
 //  2. YAML config file (located by FindConfigFile or explicit path)
-//  3. Environment variables (LISTEN_ADDR, BOOKS_DIR, AUTH_PASSWORD)
+//  3. Environment variables (LISTEN_ADDR, BOOKS_DIR, AUTH_PASSWORD, BACKEND, REFRESH_INTERVAL)
 package config
 
 import (
