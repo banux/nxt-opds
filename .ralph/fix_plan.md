@@ -30,12 +30,14 @@
 - [x] Add an OPDS 2.0 feed that follow https://drafts.opds.io/opds-2.0 - **Done: internal/opds2/feed.go (types + JSON serialization); 7 handlers in handlers.go (root, publications, search, authors, author-books, tags, tag-books); routes registered in server.go at /opds/v2/**
 - [x] Add a github action that build the docker and push it to docker hub - **Done: .github/workflows/docker.yml – triggers on push to main and version tags; multi-platform (amd64+arm64); uses DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets; semantic version tags + sha tags; GHA cache**
 - [x] Add a github action that build binary and release it on github repository - **Done: .github/workflows/release.yml – triggers on version tags; matrix: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64; CGO_ENABLED=0; SHA256SUMS.txt; uses softprops/action-gh-release@v2**
+- [x] Add a button delete on book page - **Done: catalog.Deleter interface; DeleteBook on fs+sqlite backends (removes file + cover); DELETE /api/books/{id} handler; red "Supprimer" button with trash icon + confirmation dialog in book detail page; navigates back to library on success**
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
 - [x] Code cleanup and refactoring - **Done: tests for POST /api/refresh (success, 501, 500 paths); 6 tests for refresh_interval config parsing; updated package doc in config.go; updated Architecture Notes to reflect current package layout**
 - [x] Docker / container support - **Done: Dockerfile (multi-stage, debian-slim runtime, CGO_ENABLED=0), .dockerignore, docker-compose.yml, README.md updated with full docs**
 - [x] SQLite index for large collections - **Done: internal/backend/sqlite/sqlite.go, selected via backend: "sqlite" in config or BACKEND=sqlite env var; epub metadata extraction refactored into internal/epub/epub.go shared package; 9 tests in sqlite_test.go**
+- [x] Make the "has been read" mark on cover more visible - **Done: replaced tiny top-right ✓ pill with a prominent bottom-of-cover green gradient overlay strip showing a bold checkmark + "Lu" text**
 
 ## Completed
 - [x] Project enabled for Ralph

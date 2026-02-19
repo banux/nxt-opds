@@ -237,10 +237,13 @@
               </svg>
               <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
             </div>
-            <!-- Read badge -->
+            <!-- Read overlay strip -->
             <div v-if="book.isRead"
-                 class="absolute top-1.5 right-1.5 bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-              ✓
+                 class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-green-700/90 to-transparent pt-6 pb-2 px-2 flex items-end gap-1">
+              <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+              </svg>
+              <span class="text-white text-xs font-bold leading-none">Lu</span>
             </div>
           </div>
 
