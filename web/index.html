@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="fr" class="h-full">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>nxt-opds Library</title>
+  <title>nxt-opds Bibliothèque</title>
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -46,7 +46,7 @@
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
           </svg>
-          <span class="text-sm font-medium hidden sm:inline">Library</span>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
         </button>
         <span v-if="currentBook" class="font-semibold text-base truncate flex-1 min-w-0 text-gray-900 dark:text-gray-100">
           {{ currentBook.title }}
@@ -74,7 +74,7 @@
             <input
               v-model="searchQuery"
               type="search"
-              placeholder="Search books, authors…"
+              placeholder="Rechercher livres, auteurs…"
               @input="onSearchInput"
               class="w-full pl-9 pr-4 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent text-sm"
             />
@@ -85,7 +85,7 @@
       <!-- Actions (grid-only: OPDS, refresh, upload; always: dark mode, logout) -->
       <div class="flex items-center gap-2 shrink-0">
         <template v-if="currentView !== 'book'">
-          <a href="/opds" target="_blank" title="OPDS Feed"
+          <a href="/opds" target="_blank" title="Flux OPDS"
              class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M5 3a1 1 0 000 2c5.523 0 10 4.477 10 10a1 1 0 102 0C17 8.373 11.627 3 5 3z"/>
@@ -93,7 +93,7 @@
             </svg>
           </a>
 
-          <button @click="doRefresh" :disabled="refreshing" title="Refresh catalog"
+          <button @click="doRefresh" :disabled="refreshing" title="Rafraîchir le catalogue"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">
             <svg class="w-5 h-5" :class="refreshing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -101,16 +101,16 @@
             </svg>
           </button>
 
-          <button @click="uploadDialog = true" title="Upload book"
+          <button @click="uploadDialog = true" title="Téléverser un livre"
             class="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
             </svg>
-            <span class="hidden sm:inline">Upload</span>
+            <span class="hidden sm:inline">Téléverser</span>
           </button>
         </template>
 
-        <button @click="toggleDark" title="Toggle dark mode"
+        <button @click="toggleDark" title="Basculer le mode sombre"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
           <svg v-if="isDark" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -124,7 +124,7 @@
 
         <!-- Logout (POST form so the server clears the session cookie) -->
         <form method="POST" action="/logout" class="inline">
-          <button type="submit" title="Sign out"
+          <button type="submit" title="Se déconnecter"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -142,11 +142,40 @@
     <!-- ===== GRID VIEW ===== -->
     <template v-if="currentView === 'grid'">
 
-      <!-- Stats -->
-      <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        <span v-if="searchQuery">{{ total }} result{{ total !== 1 ? 's' : '' }} for "<strong>{{ searchQuery }}</strong>"</span>
-        <span v-else>{{ total }} book{{ total !== 1 ? 's' : '' }} in library</span>
-      </p>
+      <!-- Filter bar -->
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+          <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
+          <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
+          <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }} dans la bibliothèque</span>
+        </p>
+
+        <!-- Unread filter toggle -->
+        <button @click="toggleUnreadFilter"
+          :class="unreadOnly
+            ? 'bg-brand-600 text-white border-brand-600'
+            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-600 hover:text-brand-600'"
+          class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+          </svg>
+          Non lus seulement
+        </button>
+
+        <!-- Sort selector -->
+        <div class="ml-auto flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9M3 12h5m10 4l-4-4 4-4"/>
+          </svg>
+          <select v-model="sortOrder" @change="onSortChange"
+            class="text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer">
+            <option value="added_desc">Ajout récent</option>
+            <option value="added_asc">Ajout ancien</option>
+            <option value="title_asc">Titre A→Z</option>
+            <option value="title_desc">Titre Z→A</option>
+          </select>
+        </div>
+      </div>
 
       <!-- Loading spinner -->
       <div v-if="loading" class="flex justify-center items-center py-24">
@@ -163,14 +192,22 @@
             d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
         </svg>
         <p class="text-lg font-medium text-gray-500 dark:text-gray-400">
-          {{ searchQuery ? 'No books match your search' : 'Your library is empty' }}
+          <span v-if="searchQuery">Aucun livre ne correspond à votre recherche</span>
+          <span v-else-if="unreadOnly">Tous vos livres ont été lus !</span>
+          <span v-else>Votre bibliothèque est vide</span>
         </p>
         <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">
-          {{ searchQuery ? 'Try a different search term' : 'Upload an EPUB or PDF to get started' }}
+          <span v-if="searchQuery">Essayez un autre terme de recherche</span>
+          <span v-else-if="unreadOnly">Retirez le filtre pour voir tous les livres</span>
+          <span v-else>Téléversez un EPUB ou PDF pour commencer</span>
         </p>
-        <button v-if="!searchQuery" @click="uploadDialog = true"
+        <button v-if="unreadOnly" @click="toggleUnreadFilter"
+          class="mt-4 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium rounded-lg transition-colors">
+          Voir tous les livres
+        </button>
+        <button v-else-if="!searchQuery" @click="uploadDialog = true"
           class="mt-4 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
-          Upload your first book
+          Téléverser votre premier livre
         </button>
       </div>
 
@@ -213,7 +250,7 @@
               {{ book.title }}
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate" :title="(book.authors || []).join(', ')">
-              {{ (book.authors || []).join(', ') || 'Unknown author' }}
+              {{ (book.authors || []).join(', ') || 'Auteur inconnu' }}
             </p>
           </div>
         </div>
@@ -256,9 +293,9 @@
 
       <!-- Book not found -->
       <div v-else-if="!currentBook" class="flex flex-col items-center justify-center py-24 text-center">
-        <p class="text-lg font-medium text-gray-500 dark:text-gray-400">Book not found</p>
+        <p class="text-lg font-medium text-gray-500 dark:text-gray-400">Livre introuvable</p>
         <button @click="navigateTo('/')" class="mt-4 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
-          Back to library
+          Retour à la bibliothèque
         </button>
       </div>
 
@@ -287,7 +324,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
-            Download
+            Télécharger
           </a>
         </div>
 
@@ -320,20 +357,20 @@
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            Read
+            Lu
           </div>
 
           <!-- Metadata table -->
           <dl v-if="currentBook.publisher || currentBook.language" class="flex flex-wrap gap-x-8 gap-y-1 text-sm mb-4">
             <template v-if="currentBook.publisher">
               <div class="flex gap-2">
-                <dt class="text-gray-500 dark:text-gray-400">Publisher</dt>
+                <dt class="text-gray-500 dark:text-gray-400">Éditeur</dt>
                 <dd class="text-gray-900 dark:text-gray-100 font-medium">{{ currentBook.publisher }}</dd>
               </div>
             </template>
             <template v-if="currentBook.language">
               <div class="flex gap-2">
-                <dt class="text-gray-500 dark:text-gray-400">Language</dt>
+                <dt class="text-gray-500 dark:text-gray-400">Langue</dt>
                 <dd class="text-gray-900 dark:text-gray-100 font-medium">{{ currentBook.language }}</dd>
               </div>
             </template>
@@ -355,12 +392,25 @@
 
           <!-- Action buttons -->
           <div class="flex flex-wrap gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+
+            <!-- Toggle read button -->
+            <button @click="toggleRead(currentBook)" :disabled="togglingRead"
+              :class="currentBook.isRead
+                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-200 dark:hover:bg-green-900/50'
+                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
+              class="flex items-center gap-2 px-4 py-2 border text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+              </svg>
+              {{ currentBook.isRead ? 'Marquer comme non lu' : 'Marquer comme lu' }}
+            </button>
+
             <button @click="openEdit(currentBook)"
               class="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium rounded-lg transition-colors">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
               </svg>
-              Edit Metadata
+              Modifier les métadonnées
             </button>
           </div>
 
@@ -382,7 +432,7 @@
         </svg>
       </button>
 
-      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Upload Book</h2>
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Téléverser un livre</h2>
 
       <!-- Drop zone -->
       <div
@@ -399,9 +449,9 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
         </svg>
         <p class="text-sm text-gray-600 dark:text-gray-300">
-          Drop an EPUB or PDF here, or <span class="text-brand-600 font-medium">browse</span>
+          Déposez un EPUB ou PDF ici, ou <span class="text-brand-600 font-medium">parcourir</span>
         </p>
-        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">EPUB, PDF · max 100 MB</p>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">EPUB, PDF · max 100 Mo</p>
         <input ref="fileInput" type="file" accept=".epub,.pdf" class="hidden" @change="onFileSelect" />
       </div>
 
@@ -419,7 +469,7 @@
         <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
           <div class="bg-brand-600 h-1.5 rounded-full animate-pulse w-3/4"></div>
         </div>
-        <p class="text-xs text-gray-400 mt-1 text-center">Uploading…</p>
+        <p class="text-xs text-gray-400 mt-1 text-center">Téléversement en cours…</p>
       </div>
 
       <!-- Errors / success -->
@@ -433,18 +483,18 @@
         <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
-        "{{ uploadSuccess }}" added to your library!
+        « {{ uploadSuccess }} » ajouté à votre bibliothèque !
       </div>
 
       <!-- Actions -->
       <div class="mt-5 flex justify-end gap-3">
         <button @click="closeUpload"
           class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
-          Cancel
+          Annuler
         </button>
         <button @click="doUpload" :disabled="!uploadFile || uploading"
           class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
-          {{ uploading ? 'Uploading…' : 'Upload' }}
+          {{ uploading ? 'Téléversement…' : 'Téléverser' }}
         </button>
       </div>
     </div>
@@ -461,35 +511,35 @@
         </svg>
       </button>
 
-      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-5">Edit Metadata</h2>
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-5">Modifier les métadonnées</h2>
 
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Titre</label>
           <input v-model="editForm.title" type="text"
             class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Authors <span class="font-normal text-gray-400">(comma-separated)</span></label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Auteurs <span class="font-normal text-gray-400">(séparés par des virgules)</span></label>
           <input v-model="editForm.authorsStr" type="text"
             class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tags <span class="font-normal text-gray-400">(comma-separated)</span></label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Étiquettes <span class="font-normal text-gray-400">(séparées par des virgules)</span></label>
           <input v-model="editForm.tagsStr" type="text"
             class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
         </div>
 
         <div class="flex gap-3">
           <div class="flex-1">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Series</label>
-            <input v-model="editForm.series" type="text" placeholder="Series name"
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Série</label>
+            <input v-model="editForm.series" type="text" placeholder="Nom de la série"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
           <div class="w-24">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Index</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Numéro</label>
             <input v-model="editForm.seriesIndex" type="text" placeholder="1"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
@@ -497,28 +547,22 @@
 
         <div class="flex gap-3">
           <div class="flex-1">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Publisher</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Éditeur</label>
             <input v-model="editForm.publisher" type="text"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
           <div class="w-28">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Language</label>
-            <input v-model="editForm.language" type="text" placeholder="en"
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Langue</label>
+            <input v-model="editForm.language" type="text" placeholder="fr"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Summary</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Résumé</label>
           <textarea v-model="editForm.summary" rows="3"
             class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 resize-none"></textarea>
         </div>
-
-        <label class="flex items-center gap-3 cursor-pointer">
-          <input v-model="editForm.isRead" type="checkbox"
-            class="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-600"/>
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Mark as read</span>
-        </label>
       </div>
 
       <div v-if="editError" class="mt-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-lg text-sm">
@@ -528,11 +572,11 @@
       <div class="mt-6 flex justify-end gap-3">
         <button @click="closeEdit"
           class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
-          Cancel
+          Annuler
         </button>
         <button @click="saveEdits" :disabled="editSaving"
           class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
-          {{ editSaving ? 'Saving…' : 'Save' }}
+          {{ editSaving ? 'Enregistrement…' : 'Enregistrer' }}
         </button>
       </div>
     </div>
@@ -565,12 +609,14 @@ createApp({
     }
 
     // ---- Books state ----
-    const books     = ref([])
-    const total     = ref(0)
-    const loading   = ref(false)
-    const page      = ref(1)
-    const PAGE_SIZE = 48
+    const books       = ref([])
+    const total       = ref(0)
+    const loading     = ref(false)
+    const page        = ref(1)
+    const PAGE_SIZE   = 48
     const searchQuery = ref('')
+    const unreadOnly  = ref(false)
+    const sortOrder   = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
     const totalPages = computed(() => Math.ceil(total.value / PAGE_SIZE))
@@ -600,13 +646,15 @@ createApp({
           offset: (page.value - 1) * PAGE_SIZE,
         })
         if (searchQuery.value.trim()) params.set('q', searchQuery.value.trim())
+        if (unreadOnly.value) params.set('unread', '1')
+        if (sortOrder.value) params.set('sort', sortOrder.value)
         const res = await fetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
         const data = await res.json()
         books.value = data.books || []
         total.value = data.total  || 0
       } catch (e) {
-        showToast('Failed to load books: ' + e.message, 'error')
+        showToast('Échec du chargement des livres : ' + e.message, 'error')
       } finally {
         loading.value = false
       }
@@ -615,6 +663,18 @@ createApp({
     function onSearchInput() {
       clearTimeout(searchTimer)
       searchTimer = setTimeout(() => { page.value = 1; loadBooks() }, 350)
+    }
+
+    function toggleUnreadFilter() {
+      unreadOnly.value = !unreadOnly.value
+      page.value = 1
+      loadBooks()
+    }
+
+    function onSortChange() {
+      localStorage.setItem('nxt-sort', sortOrder.value)
+      page.value = 1
+      loadBooks()
     }
 
     function goPage(p) {
@@ -658,7 +718,7 @@ createApp({
         if (!res.ok) throw new Error('HTTP ' + res.status)
         currentBook.value = await res.json()
       } catch (e) {
-        showToast('Book not found', 'error')
+        showToast('Livre introuvable', 'error')
         navigateTo('/')
       } finally {
         bookLoading.value = false
@@ -680,6 +740,36 @@ createApp({
       }
     }
 
+    // ---- Toggle read ----
+    const togglingRead = ref(false)
+
+    async function toggleRead(book) {
+      if (!book) return
+      togglingRead.value = true
+      try {
+        const newIsRead = !book.isRead
+        const res = await fetch('/api/books/' + book.id, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ isRead: newIsRead }),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        const updated = await res.json()
+        // Update current book page
+        if (currentBook.value && currentBook.value.id === updated.id) {
+          currentBook.value = updated
+        }
+        // Update books grid list in place
+        const idx = books.value.findIndex(b => b.id === updated.id)
+        if (idx !== -1) books.value[idx] = updated
+        showToast(newIsRead ? 'Marqué comme lu' : 'Marqué comme non lu', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        togglingRead.value = false
+      }
+    }
+
     // ---- Edit dialog ----
     const editDialog  = ref(false)
     const editBook    = ref(null)
@@ -687,7 +777,7 @@ createApp({
     const editError   = ref('')
     const editForm    = ref({
       title: '', authorsStr: '', tagsStr: '', summary: '',
-      publisher: '', language: '', series: '', seriesIndex: '', isRead: false,
+      publisher: '', language: '', series: '', seriesIndex: '',
     })
 
     function openEdit(book) {
@@ -701,7 +791,6 @@ createApp({
         language:    book.language  || '',
         series:      book.series    || '',
         seriesIndex: book.seriesIndex || '',
-        isRead:      !!book.isRead,
       }
       editError.value = ''
       editDialog.value = true
@@ -728,14 +817,13 @@ createApp({
           language:    editForm.value.language,
           series:      editForm.value.series,
           seriesIndex: editForm.value.seriesIndex,
-          isRead:      editForm.value.isRead,
         }
         const res = await fetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(body),
         })
-        if (!res.ok) throw new Error(await res.text() || 'Save failed')
+        if (!res.ok) throw new Error(await res.text() || 'Échec de l\'enregistrement')
         const updated = await res.json()
         // Update books grid list in place
         const idx = books.value.findIndex(b => b.id === updated.id)
@@ -744,7 +832,7 @@ createApp({
         if (currentBook.value && currentBook.value.id === updated.id) {
           currentBook.value = updated
         }
-        showToast('Metadata saved!', 'success')
+        showToast('Métadonnées enregistrées !', 'success')
         closeEdit()
       } catch (e) {
         editError.value = e.message
@@ -762,9 +850,9 @@ createApp({
         const res = await fetch('/api/refresh', { method: 'POST' })
         if (!res.ok) throw new Error('HTTP ' + res.status)
         await loadBooks()
-        showToast('Catalog refreshed', 'success')
+        showToast('Catalogue mis à jour', 'success')
       } catch (e) {
-        showToast('Refresh failed: ' + e.message, 'error')
+        showToast('Échec de la mise à jour : ' + e.message, 'error')
       } finally {
         refreshing.value = false
       }
@@ -798,11 +886,11 @@ createApp({
         const fd = new FormData()
         fd.append('file', uploadFile.value)
         const res = await fetch('/api/upload', { method: 'POST', body: fd })
-        if (!res.ok) throw new Error(await res.text() || 'Upload failed')
+        if (!res.ok) throw new Error(await res.text() || 'Échec du téléversement')
         const book = await res.json()
         uploadSuccess.value = book.Title || uploadFile.value.name
         uploadFile.value = null
-        showToast('Book uploaded successfully!', 'success')
+        showToast('Livre téléversé avec succès !', 'success')
         page.value = 1
         await loadBooks()
       } catch (e) {
@@ -830,9 +918,9 @@ createApp({
     }
 
     function formatBytes(n) {
-      if (n < 1024) return n + ' B'
-      if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'
-      return (n / 1048576).toFixed(1) + ' MB'
+      if (n < 1024) return n + ' o'
+      if (n < 1048576) return (n / 1024).toFixed(1) + ' Ko'
+      return (n / 1048576).toFixed(1) + ' Mo'
     }
 
     onMounted(() => {
@@ -842,9 +930,10 @@ createApp({
 
     return {
       isDark, toggleDark,
-      books, total, loading, page, searchQuery, totalPages, pageNumbers,
-      loadBooks, onSearchInput, goPage, coverGradient,
+      books, total, loading, page, searchQuery, unreadOnly, sortOrder, totalPages, pageNumbers,
+      loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
+      togglingRead, toggleRead,
       editDialog, editForm, editSaving, editError, openEdit, closeEdit, saveEdits,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,

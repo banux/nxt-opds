@@ -11,6 +11,10 @@ Make a homepage that show the book with cover and title like in feedbooks site, 
 Book metadata must be editable.
 Serie and tag can be added to book metadata.
 A has been read mark can be added to book.
+Store book metadata in sqlite
+Book must have a page and not display in dialog.
+The front must be in french.
+The 'has been read' must be a button and not in edit form.
 
 **Project Type:** golang
 

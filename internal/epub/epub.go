@@ -40,8 +40,10 @@ func ParseBook(path, coversDir string) (catalog.Book, error) {
 
 	info, _ := os.Stat(path)
 	size := int64(0)
+	addedAt := time.Now()
 	if info != nil {
 		size = info.Size()
+		addedAt = info.ModTime()
 	}
 
 	id := PathToID(path)
@@ -52,6 +54,7 @@ func ParseBook(path, coversDir string) (catalog.Book, error) {
 		Language:  meta.Language,
 		Publisher: meta.Publisher,
 		UpdatedAt: time.Now(),
+		AddedAt:   addedAt,
 		Tags:      meta.Subjects,
 		Files: []catalog.File{
 			{MIMEType: "application/epub+zip", Path: path, Size: size},
@@ -80,8 +83,10 @@ func ParseBook(path, coversDir string) (catalog.Book, error) {
 func ParsePath(path string) catalog.Book {
 	info, _ := os.Stat(path)
 	size := int64(0)
+	addedAt := time.Now()
 	if info != nil {
 		size = info.Size()
+		addedAt = info.ModTime()
 	}
 
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
@@ -97,6 +102,7 @@ func ParsePath(path string) catalog.Book {
 			{MIMEType: mime, Path: path, Size: size},
 		},
 		UpdatedAt: time.Now(),
+		AddedAt:   addedAt,
 	}
 }
 

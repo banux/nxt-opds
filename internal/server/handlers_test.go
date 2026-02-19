@@ -523,6 +523,56 @@ func TestHandleAPIBooks_BookFields(t *testing.T) {
 	}
 }
 
+func TestHandleAPIBooks_Pagination(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	// Upload 3 books
+	uploadBook(t, srv, "a.epub", "Book A", "Author A")
+	uploadBook(t, srv, "b.epub", "Book B", "Author B")
+	uploadBook(t, srv, "c.epub", "Book C", "Author C")
+
+	// Page 1: limit=2, offset=0 → 2 books, total=3
+	req := httptest.NewRequest(http.MethodGet, "/api/books?limit=2&offset=0", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var resp1 struct {
+		Books []bookJSON `json:"books"`
+		Total int        `json:"total"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp1); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp1.Books) != 2 {
+		t.Errorf("expected 2 books on first page, got %d", len(resp1.Books))
+	}
+	if resp1.Total != 3 {
+		t.Errorf("expected total=3, got %d", resp1.Total)
+	}
+
+	// Page 2: limit=2, offset=2 → 1 book, total=3
+	req2 := httptest.NewRequest(http.MethodGet, "/api/books?limit=2&offset=2", nil)
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr2.Code)
+	}
+	var resp2 struct {
+		Books []bookJSON `json:"books"`
+		Total int        `json:"total"`
+	}
+	if err := json.NewDecoder(rr2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp2.Books) != 1 {
+		t.Errorf("expected 1 book on second page, got %d", len(resp2.Books))
+	}
+	if resp2.Total != 3 {
+		t.Errorf("expected total=3, got %d", resp2.Total)
+	}
+}
+
 // ---- API update book ----
 
 func TestHandleAPIUpdateBook_NotFound(t *testing.T) {

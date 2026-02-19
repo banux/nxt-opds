@@ -126,6 +126,15 @@ func (s *Server) registerRoutes() {
 	// Cover image endpoint
 	protected.HandleFunc("/covers/{id}", s.handleCover).Methods(http.MethodGet)
 
+	// OPDS 2.0 JSON feed (https://drafts.opds.io/opds-2.0)
+	protected.HandleFunc("/opds/v2", s.handleOPDS2Root).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/publications", s.handleOPDS2Publications).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/search", s.handleOPDS2Search).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/authors", s.handleOPDS2Authors).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/authors/{author}", s.handleOPDS2AuthorBooks).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/tags", s.handleOPDS2Tags).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/tags/{tag}", s.handleOPDS2TagBooks).Methods(http.MethodGet)
+
 	// Frontend static assets – serves index.html at / and any static files.
 	// When StaticFS is nil (e.g. in tests), a catch-all 404 handler is
 	// registered so that the auth middleware still runs for all paths.

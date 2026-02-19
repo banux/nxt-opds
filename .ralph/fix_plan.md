@@ -9,6 +9,10 @@
 - [x] Connect catalog backend to server handlers (wire up real data) - **Done: server.New() now takes catalog.Catalog**
 - [x] Implement EPUB metadata extraction (title, author, cover from .epub files) - **Done: OPF metadata via stdlib archive/zip + encoding/xml**
 - [x] Implement book page instead of dialog - **Done: hash-based routing in Vue SPA (#/books/{id}), dedicated book detail page with cover/metadata/download/edit; GET /api/books/{id} endpoint; detail modal removed**
+- [x] Implement frontend in french - **Done: all UI text translated to French (labels, placeholders, toasts, empty states, modal titles, metadata fields, pagination, upload/edit dialogs)**
+- [x] The 'has been read' must be a button in book page and not in the edit form - **Done: dedicated "Marquer comme lu / Marquer comme non lu" toggle button in book page action area; isRead checkbox removed from edit modal; toggleRead() calls PATCH /api/books/{id}**
+- [x] Add a filter on grid page to have only not readed book - **Done: "Non lus seulement" toggle pill in grid filter bar; ?unread=1 API param; UnreadOnly field in SearchQuery; both fs and sqlite backends filter by is_read=0**
+- [x] Sort Book by added date descending by default, add possibility to sort by name, added date - **Done: AddedAt field on Book (file mod time); SortBy/SortOrder on SearchQuery; fs backend sorts by AddedAt desc on Refresh and re-sorts matched slice; sqlite adds added_at column (migration-safe) + sortClause() helper; handleAPIBooks always uses Search with parsed ?sort= param (added_desc/added_asc/title_asc/title_desc); Vue sort selector in filter bar with localStorage persistence**
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
@@ -22,6 +26,10 @@
 - [x] Book metadata editing (title, authors, tags, series via PATCH /api/books/{id}) - **Done: metaOverride JSON store (.metadata.json), Updater interface, fs.Backend.UpdateBook, PATCH /api/books/{id} handler**
 - [x] Series support: add Series/SeriesIndex fields to Book, display in UI - **Done: Book.Series/SeriesIndex fields, shown in detail modal, editable via edit modal**
 - [x] "Has been read" mark: toggle via PATCH /api/books/{id}, show indicator in UI - **Done: Book.IsRead field, green badge on card, checkbox in edit modal**
+- [x] Pagination on front page grid - **Done: PAGE_SIZE=48 constant, page/totalPages/pageNumbers computed refs, goPage() navigator, offset+limit params on /api/books, prev/next/ellipsis pagination widget in grid view**
+- [x] Add an OPDS 2.0 feed that follow https://drafts.opds.io/opds-2.0 - **Done: internal/opds2/feed.go (types + JSON serialization); 7 handlers in handlers.go (root, publications, search, authors, author-books, tags, tag-books); routes registered in server.go at /opds/v2/**
+- [x] Add a github action that build the docker and push it to docker hub - **Done: .github/workflows/docker.yml – triggers on push to main and version tags; multi-platform (amd64+arm64); uses DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets; semantic version tags + sha tags; GHA cache**
+- [x] Add a github action that build binary and release it on github repository - **Done: .github/workflows/release.yml – triggers on version tags; matrix: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64; CGO_ENABLED=0; SHA256SUMS.txt; uses softprops/action-gh-release@v2**
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**

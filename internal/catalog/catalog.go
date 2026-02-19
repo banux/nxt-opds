@@ -53,6 +53,9 @@ type Book struct {
 
 	// IsRead indicates the user has marked this book as read.
 	IsRead bool
+
+	// AddedAt is when this book was first added to the catalog.
+	AddedAt time.Time
 }
 
 // Author represents a publication author.
@@ -86,6 +89,15 @@ type SearchQuery struct {
 
 	// Language filters by BCP 47 language tag.
 	Language string
+
+	// UnreadOnly restricts results to books not yet marked as read.
+	UnreadOnly bool
+
+	// SortBy is the sort field: "" or "added" for added date, "title" for alphabetical.
+	SortBy string
+
+	// SortOrder is the sort direction: "" or "desc" for descending, "asc" for ascending.
+	SortOrder string
 
 	// Offset is the pagination offset (0-based).
 	Offset int

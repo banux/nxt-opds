@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS books (
     publisher    TEXT NOT NULL DEFAULT '',
     published_at INTEGER,
     updated_at   INTEGER NOT NULL,
+    added_at     INTEGER NOT NULL DEFAULT 0,
     series       TEXT NOT NULL DEFAULT '',
     series_index TEXT NOT NULL DEFAULT '',
     is_read      INTEGER NOT NULL DEFAULT 0,
@@ -103,8 +104,14 @@ CREATE TABLE IF NOT EXISTS book_tags (
 
 CREATE INDEX IF NOT EXISTS idx_book_authors_name ON book_authors(author_name);
 CREATE INDEX IF NOT EXISTS idx_book_tags_tag ON book_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_books_added_at ON books(added_at DESC);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	// Migration: add added_at column to existing databases (ignore error if already exists).
+	_, _ = b.db.Exec(`ALTER TABLE books ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }
 
 // Refresh scans the root directory for EPUB/PDF files, inserts newly
@@ -197,6 +204,10 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 		pubAt = &t
 	}
 	updAt := bk.UpdatedAt.Unix()
+	addedAt := bk.AddedAt.Unix()
+	if bk.AddedAt.IsZero() {
+		addedAt = time.Now().Unix()
+	}
 
 	filePath := ""
 	fileMIME := ""
@@ -209,12 +220,12 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 
 	_, err = tx.Exec(`
 INSERT OR IGNORE INTO books
-    (id, title, summary, language, publisher, published_at, updated_at,
+    (id, title, summary, language, publisher, published_at, updated_at, added_at,
      series, series_index, is_read, cover_url, thumbnail_url,
      file_path, file_mime, file_size)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
-		pubAt, updAt,
+		pubAt, updAt, addedAt,
 		bk.Series, bk.SeriesIndex, boolToInt(bk.IsRead),
 		bk.CoverURL, bk.ThumbnailURL,
 		filePath, fileMIME, fileSize,
@@ -270,13 +281,13 @@ func (b *Backend) Root() ([]catalog.NavEntry, error) {
 	}, nil
 }
 
-// AllBooks returns all books ordered by title with pagination.
+// AllBooks returns all books ordered by added_at descending with pagination.
 func (b *Backend) AllBooks(offset, limit int) ([]catalog.Book, int, error) {
 	total, err := b.countBooks(`SELECT COUNT(*) FROM books`)
 	if err != nil {
 		return nil, 0, err
 	}
-	books, err := b.queryBooks(`ORDER BY LOWER(title) LIMIT ? OFFSET ?`, limit, offset)
+	books, err := b.queryBooks(`ORDER BY added_at DESC, LOWER(title) LIMIT ? OFFSET ?`, limit, offset)
 	return books, total, err
 }
 
@@ -292,14 +303,48 @@ func (b *Backend) BookByID(id string) (*catalog.Book, error) {
 	return &books[0], nil
 }
 
+// sortClause returns the SQL ORDER BY clause for the given SearchQuery.
+func sortClause(q catalog.SearchQuery) string {
+	switch q.SortBy {
+	case "title":
+		if q.SortOrder == "desc" {
+			return "LOWER(b.title) DESC"
+		}
+		return "LOWER(b.title) ASC"
+	default: // "added" or ""
+		if q.SortOrder == "asc" {
+			return "b.added_at ASC, LOWER(b.title)"
+		}
+		return "b.added_at DESC, LOWER(b.title)"
+	}
+}
+
 // Search performs a case-insensitive substring search over title and authors.
+// If q.Query is empty all books are candidates (filtered only by q.UnreadOnly).
 func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
+	unreadClause := ""
+	if q.UnreadOnly {
+		unreadClause = " AND b.is_read = 0"
+	}
+
+	orderBy := "ORDER BY " + sortClause(q)
+
+	if q.Query == "" {
+		// No text search: just apply optional unread filter.
+		total, err := b.countBooks(`SELECT COUNT(*) FROM books b WHERE 1=1` + unreadClause)
+		if err != nil {
+			return nil, 0, err
+		}
+		books, err := b.queryBooks(`WHERE 1=1`+unreadClause+` `+orderBy+` LIMIT ? OFFSET ?`, q.Limit, q.Offset)
+		return books, total, err
+	}
+
 	like := "%" + strings.ToLower(q.Query) + "%"
 
 	total, err := b.countBooks(`
 SELECT COUNT(DISTINCT b.id) FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
-WHERE LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ?`, like, like)
+WHERE (LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ?)`+unreadClause, like, like)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -308,9 +353,10 @@ WHERE LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ?`, like, like)
 JOIN (
     SELECT DISTINCT b2.id FROM books b2
     LEFT JOIN book_authors ba2 ON ba2.book_id = b2.id
-    WHERE LOWER(b2.title) LIKE ? OR LOWER(ba2.author_name) LIKE ?
+    WHERE (LOWER(b2.title) LIKE ? OR LOWER(ba2.author_name) LIKE ?)
 ) AS matched ON b.id = matched.id
-ORDER BY LOWER(b.title) LIMIT ? OFFSET ?`,
+WHERE 1=1`+unreadClause+`
+`+orderBy+` LIMIT ? OFFSET ?`,
 		like, like, q.Limit, q.Offset)
 	return books, total, err
 }
@@ -547,6 +593,7 @@ type bookRow struct {
 	Publisher    string
 	PublishedAt  *int64
 	UpdatedAt    int64
+	AddedAt      int64
 	Series       string
 	SeriesIndex  string
 	IsRead       int
@@ -572,6 +619,7 @@ func (r bookRow) toBook() catalog.Book {
 		CoverURL:     r.CoverURL,
 		ThumbnailURL: r.ThumbnailURL,
 		UpdatedAt:    time.Unix(r.UpdatedAt, 0),
+		AddedAt:      time.Unix(r.AddedAt, 0),
 		Files: []catalog.File{
 			{MIMEType: r.FileMIME, Path: r.FilePath, Size: r.FileSize},
 		},
@@ -602,7 +650,7 @@ func (r bookRow) toBook() catalog.Book {
 // bookSelectColumns is the SELECT list for querying full book records.
 const bookSelectColumns = `
     b.id, b.title, b.summary, b.language, b.publisher,
-    b.published_at, b.updated_at, b.series, b.series_index, b.is_read,
+    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.is_read,
     b.cover_url, b.thumbnail_url, b.file_path, b.file_mime, b.file_size,
     (SELECT json_group_array(json_object('name',ba.author_name,'uri',ba.author_uri))
        FROM book_authors ba WHERE ba.book_id = b.id) AS authors_json,
@@ -624,7 +672,7 @@ func (b *Backend) queryBooks(clause string, args ...any) ([]catalog.Book, error)
 		var r bookRow
 		if err := rows.Scan(
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
-			&r.PublishedAt, &r.UpdatedAt, &r.Series, &r.SeriesIndex, &r.IsRead,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.IsRead,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {

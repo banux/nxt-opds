@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -263,6 +264,11 @@ func (b *Backend) Refresh() error {
 		}
 	}
 
+	// Default sort: newest first (by file mod time / AddedAt).
+	sort.Slice(books, func(i, j int) bool {
+		return books[i].AddedAt.After(books[j].AddedAt)
+	})
+
 	byID := make(map[string]*catalog.Book, len(books))
 	authors := make(map[string][]string)
 	tags := make(map[string][]string)
@@ -343,6 +349,7 @@ func (b *Backend) BookByID(id string) (*catalog.Book, error) {
 }
 
 // Search performs a basic case-insensitive substring search over title and author.
+// If q.Query is empty all books are candidates (filtered only by q.UnreadOnly).
 func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -350,6 +357,13 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	qLower := strings.ToLower(q.Query)
 	var matched []catalog.Book
 	for _, bk := range b.books {
+		if q.UnreadOnly && bk.IsRead {
+			continue
+		}
+		if q.Query == "" {
+			matched = append(matched, bk)
+			continue
+		}
 		if strings.Contains(strings.ToLower(bk.Title), qLower) {
 			matched = append(matched, bk)
 			continue
@@ -361,6 +375,25 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 			}
 		}
 	}
+
+	// Apply sort (default: added date descending; b.books already sorted that way,
+	// but if a different sort is requested we re-sort the matched slice).
+	if q.SortBy == "title" {
+		if q.SortOrder == "asc" {
+			sort.Slice(matched, func(i, j int) bool {
+				return strings.ToLower(matched[i].Title) < strings.ToLower(matched[j].Title)
+			})
+		} else {
+			sort.Slice(matched, func(i, j int) bool {
+				return strings.ToLower(matched[i].Title) > strings.ToLower(matched[j].Title)
+			})
+		}
+	} else if q.SortBy == "added" && q.SortOrder == "asc" {
+		sort.Slice(matched, func(i, j int) bool {
+			return matched[i].AddedAt.Before(matched[j].AddedAt)
+		})
+	}
+	// default (added desc) is already the natural order from b.books
 
 	total := len(matched)
 	offset := q.Offset
@@ -516,8 +549,9 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	if ov, ok := b.overrides[book.ID]; ok {
 		book = mergeOverride(book, ov)
 	}
-	b.books = append(b.books, book)
-	bk := &b.books[len(b.books)-1]
+	// Prepend so the new book appears first in the default (newest-first) order.
+	b.books = append([]catalog.Book{book}, b.books...)
+	bk := &b.books[0]
 	b.byID[bk.ID] = bk
 	for _, a := range bk.Authors {
 		b.authors[a.Name] = append(b.authors[a.Name], bk.ID)
