@@ -169,6 +169,11 @@
             </svg>
             <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
           </div>
+          <!-- Read badge -->
+          <div v-if="book.isRead"
+               class="absolute top-1.5 right-1.5 bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+            ✓
+          </div>
         </div>
 
         <!-- Meta -->
@@ -240,8 +245,18 @@
           </p>
 
           <div class="space-y-1 text-xs text-gray-500 dark:text-gray-400 mb-3">
+            <div v-if="detailBook.series">
+              <span class="font-medium text-gray-700 dark:text-gray-300">Series:</span>
+              {{ detailBook.series }}<span v-if="detailBook.seriesIndex"> #{{ detailBook.seriesIndex }}</span>
+            </div>
             <div v-if="detailBook.publisher"><span class="font-medium text-gray-700 dark:text-gray-300">Publisher:</span> {{ detailBook.publisher }}</div>
             <div v-if="detailBook.language"><span class="font-medium text-gray-700 dark:text-gray-300">Language:</span> {{ detailBook.language }}</div>
+            <div v-if="detailBook.isRead" class="flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+              </svg>
+              Read
+            </div>
           </div>
 
           <div v-if="detailBook.tags && detailBook.tags.length" class="flex flex-wrap gap-1 mb-3">
@@ -255,13 +270,21 @@
             {{ detailBook.summary }}
           </p>
 
-          <a :href="detailBook.downloadUrl"
-            class="mt-auto flex items-center justify-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-            Download
-          </a>
+          <div class="mt-auto flex gap-2">
+            <a :href="detailBook.downloadUrl"
+              class="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+              Download
+            </a>
+            <button @click="openEdit(detailBook)"
+              class="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium rounded-lg transition-colors" title="Edit metadata">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -341,6 +364,94 @@
         <button @click="doUpload" :disabled="!uploadFile || uploading"
           class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
           {{ uploading ? 'Uploading…' : 'Upload' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Edit Metadata Modal ===== -->
+  <div v-if="editDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="closeEdit">
+    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="closeEdit"></div>
+    <div class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 z-10 overflow-y-auto max-h-[90vh]">
+      <button @click="closeEdit"
+        class="absolute top-3 right-3 p-1.5 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-5">Edit Metadata</h2>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+          <input v-model="editForm.title" type="text"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Authors <span class="font-normal text-gray-400">(comma-separated)</span></label>
+          <input v-model="editForm.authorsStr" type="text"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tags <span class="font-normal text-gray-400">(comma-separated)</span></label>
+          <input v-model="editForm.tagsStr" type="text"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+        </div>
+
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Series</label>
+            <input v-model="editForm.series" type="text" placeholder="Series name"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
+          <div class="w-24">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Index</label>
+            <input v-model="editForm.seriesIndex" type="text" placeholder="1"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Publisher</label>
+            <input v-model="editForm.publisher" type="text"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
+          <div class="w-28">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Language</label>
+            <input v-model="editForm.language" type="text" placeholder="en"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Summary</label>
+          <textarea v-model="editForm.summary" rows="3"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 resize-none"></textarea>
+        </div>
+
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input v-model="editForm.isRead" type="checkbox"
+            class="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-600"/>
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Mark as read</span>
+        </label>
+      </div>
+
+      <div v-if="editError" class="mt-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-lg text-sm">
+        {{ editError }}
+      </div>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button @click="closeEdit"
+          class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
+          Cancel
+        </button>
+        <button @click="saveEdits" :disabled="editSaving"
+          class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+          {{ editSaving ? 'Saving…' : 'Save' }}
         </button>
       </div>
     </div>
@@ -453,6 +564,79 @@ createApp({
     const detailBook = ref(null)
     function openDetail(book) { detailBook.value = book }
 
+    // ---- Edit dialog ----
+    const editDialog  = ref(false)
+    const editBook    = ref(null)
+    const editSaving  = ref(false)
+    const editError   = ref('')
+    const editForm    = ref({
+      title: '', authorsStr: '', tagsStr: '', summary: '',
+      publisher: '', language: '', series: '', seriesIndex: '', isRead: false,
+    })
+
+    function openEdit(book) {
+      editBook.value = book
+      editForm.value = {
+        title:       book.title || '',
+        authorsStr:  (book.authors || []).join(', '),
+        tagsStr:     (book.tags    || []).join(', '),
+        summary:     book.summary  || '',
+        publisher:   book.publisher || '',
+        language:    book.language  || '',
+        series:      book.series    || '',
+        seriesIndex: book.seriesIndex || '',
+        isRead:      !!book.isRead,
+      }
+      editError.value = ''
+      editDialog.value = true
+    }
+
+    function closeEdit() {
+      editDialog.value = false
+      editBook.value   = null
+      editError.value  = ''
+    }
+
+    async function saveEdits() {
+      if (!editBook.value) return
+      editSaving.value = true
+      editError.value  = ''
+      try {
+        const splitTrim = s => s.split(',').map(x => x.trim()).filter(Boolean)
+        const body = {
+          title:       editForm.value.title,
+          authors:     splitTrim(editForm.value.authorsStr),
+          tags:        splitTrim(editForm.value.tagsStr),
+          summary:     editForm.value.summary,
+          publisher:   editForm.value.publisher,
+          language:    editForm.value.language,
+          series:      editForm.value.series,
+          seriesIndex: editForm.value.seriesIndex,
+          isRead:      editForm.value.isRead,
+        }
+        const res = await fetch('/api/books/' + editBook.value.id, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Save failed')
+        const updated = await res.json()
+        // Update books list in place
+        const idx = books.value.findIndex(b => b.id === updated.id)
+        if (idx !== -1) books.value[idx] = updated
+        // Update detail book if open
+        if (detailBook.value && detailBook.value.id === updated.id) {
+          detailBook.value = updated
+        }
+        showToast('Metadata saved!', 'success')
+        closeEdit()
+      } catch (e) {
+        editError.value = e.message
+      } finally {
+        editSaving.value = false
+      }
+    }
+
     // ---- Upload ----
     const uploadDialog  = ref(false)
     const uploadFile    = ref(null)
@@ -525,6 +709,7 @@ createApp({
       books, total, loading, page, searchQuery, totalPages, pageNumbers,
       loadBooks, onSearchInput, goPage, coverGradient,
       detailBook, openDetail,
+      editDialog, editForm, editSaving, editError, openEdit, closeEdit, saveEdits,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
       toast, formatBytes,

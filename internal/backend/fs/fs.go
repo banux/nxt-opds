@@ -6,6 +6,7 @@ package fs
 import (
 	"archive/zip"
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -19,17 +20,34 @@ import (
 	"github.com/banux/nxt-opds/internal/catalog"
 )
 
+// metaOverride stores user-edited metadata for a single book.
+// Pointer fields: nil = not overridden; non-nil = override active (even if empty string).
+// Slice fields: nil = not overridden; non-nil (including empty) = override active.
+type metaOverride struct {
+	Title       *string  `json:"title"`
+	Authors     []string `json:"authors"`
+	Tags        []string `json:"tags"`
+	Summary     *string  `json:"summary"`
+	Publisher   *string  `json:"publisher"`
+	Language    *string  `json:"language"`
+	Series      *string  `json:"series"`
+	SeriesIndex *string  `json:"seriesIndex"`
+	IsRead      *bool    `json:"isRead"`
+}
+
 // Backend is a filesystem-based catalog backend.
 // It scans a root directory for EPUB/PDF files on creation (or on Refresh).
 type Backend struct {
-	root      string
-	coversDir string // {root}/.covers – extracted cover images
+	root         string
+	coversDir    string // {root}/.covers – extracted cover images
+	metadataPath string // {root}/.metadata.json – user metadata overrides
 
-	mu      sync.RWMutex
-	books   []catalog.Book
-	byID    map[string]*catalog.Book
-	authors map[string][]string // author name -> book IDs
-	tags    map[string][]string // tag -> book IDs
+	mu        sync.RWMutex
+	books     []catalog.Book
+	byID      map[string]*catalog.Book
+	authors   map[string][]string // author name -> book IDs
+	tags      map[string][]string // tag -> book IDs
+	overrides map[string]metaOverride // book ID -> user-edited metadata
 }
 
 // New creates a new filesystem backend rooted at dir and performs an initial scan.
@@ -39,16 +57,174 @@ func New(dir string) (*Backend, error) {
 		return nil, fmt.Errorf("create covers dir: %w", err)
 	}
 	b := &Backend{
-		root:      dir,
-		coversDir: coversDir,
-		byID:      make(map[string]*catalog.Book),
-		authors:   make(map[string][]string),
-		tags:      make(map[string][]string),
+		root:         dir,
+		coversDir:    coversDir,
+		metadataPath: filepath.Join(dir, ".metadata.json"),
+		byID:         make(map[string]*catalog.Book),
+		authors:      make(map[string][]string),
+		tags:         make(map[string][]string),
+		overrides:    make(map[string]metaOverride),
 	}
+	// Load persisted metadata overrides (ignore error if file doesn't exist yet)
+	_ = b.loadOverrides()
 	if err := b.Refresh(); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// loadOverrides reads the .metadata.json file into b.overrides.
+// Safe to call with the lock held or not – it only modifies b.overrides before the lock is set up.
+func (b *Backend) loadOverrides() error {
+	data, err := os.ReadFile(b.metadataPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read metadata: %w", err)
+	}
+	return json.Unmarshal(data, &b.overrides)
+}
+
+// saveOverrides persists b.overrides to .metadata.json.
+// Must be called with b.mu held (at least read-locked for reading overrides).
+func (b *Backend) saveOverrides() error {
+	data, err := json.MarshalIndent(b.overrides, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+	if err := os.WriteFile(b.metadataPath, data, 0644); err != nil {
+		return fmt.Errorf("write metadata: %w", err)
+	}
+	return nil
+}
+
+// applyOverride merges any stored override for bk.ID on top of bk.
+// Returns the merged book (bk is not modified).
+func (b *Backend) applyOverride(bk catalog.Book) catalog.Book {
+	ov, ok := b.overrides[bk.ID]
+	if !ok {
+		return bk
+	}
+	if ov.Title != nil {
+		bk.Title = *ov.Title
+	}
+	if ov.Authors != nil {
+		bk.Authors = make([]catalog.Author, 0, len(ov.Authors))
+		for _, name := range ov.Authors {
+			bk.Authors = append(bk.Authors, catalog.Author{Name: name})
+		}
+	}
+	if ov.Tags != nil {
+		bk.Tags = ov.Tags
+	}
+	if ov.Summary != nil {
+		bk.Summary = *ov.Summary
+	}
+	if ov.Publisher != nil {
+		bk.Publisher = *ov.Publisher
+	}
+	if ov.Language != nil {
+		bk.Language = *ov.Language
+	}
+	if ov.Series != nil {
+		bk.Series = *ov.Series
+	}
+	if ov.SeriesIndex != nil {
+		bk.SeriesIndex = *ov.SeriesIndex
+	}
+	if ov.IsRead != nil {
+		bk.IsRead = *ov.IsRead
+	}
+	return bk
+}
+
+// UpdateBook applies the given update to the book with the given ID, persists
+// the override to .metadata.json, and returns the updated Book.
+// It implements catalog.Updater.
+func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Book, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bk, ok := b.byID[id]
+	if !ok {
+		return nil, fmt.Errorf("book %q not found", id)
+	}
+
+	// Load existing override for this book (or start fresh)
+	ov := b.overrides[id]
+
+	// Merge update fields into override
+	if update.Title != nil {
+		ov.Title = update.Title
+	}
+	if update.Authors != nil {
+		ov.Authors = update.Authors
+	}
+	if update.Tags != nil {
+		ov.Tags = update.Tags
+	}
+	if update.Summary != nil {
+		ov.Summary = update.Summary
+	}
+	if update.Publisher != nil {
+		ov.Publisher = update.Publisher
+	}
+	if update.Language != nil {
+		ov.Language = update.Language
+	}
+	if update.Series != nil {
+		ov.Series = update.Series
+	}
+	if update.SeriesIndex != nil {
+		ov.SeriesIndex = update.SeriesIndex
+	}
+	if update.IsRead != nil {
+		ov.IsRead = update.IsRead
+	}
+
+	b.overrides[id] = ov
+
+	// Rebuild indexes: remove old author/tag entries for this book
+	for name, ids := range b.authors {
+		b.authors[name] = removeID(ids, id)
+	}
+	for tag, ids := range b.tags {
+		b.tags[tag] = removeID(ids, id)
+	}
+
+	// Apply override to the in-memory book
+	updated := b.applyOverride(*bk)
+	*bk = updated
+
+	// Re-add to author/tag indexes with updated values
+	for _, a := range bk.Authors {
+		b.authors[a.Name] = append(b.authors[a.Name], bk.ID)
+	}
+	for _, t := range bk.Tags {
+		b.tags[t] = append(b.tags[t], bk.ID)
+	}
+
+	bk.UpdatedAt = time.Now()
+
+	// Persist overrides
+	if err := b.saveOverrides(); err != nil {
+		// Log but don't fail – metadata is updated in-memory
+		_ = err
+	}
+
+	result := *bk
+	return &result, nil
+}
+
+// removeID removes the first occurrence of id from ids slice.
+func removeID(ids []string, id string) []string {
+	for i, v := range ids {
+		if v == id {
+			return append(ids[:i], ids[i+1:]...)
+		}
+	}
+	return ids
 }
 
 // CoverPath returns the filesystem path to the cached cover image for a book ID.
@@ -93,6 +269,14 @@ func (b *Backend) Refresh() error {
 		return fmt.Errorf("scanning directory %q: %w", b.root, err)
 	}
 
+	// Apply any persisted metadata overrides
+	b.mu.RLock()
+	overrides := b.overrides
+	b.mu.RUnlock()
+	for i := range books {
+		books[i] = applyOverrideFrom(books[i], overrides)
+	}
+
 	// Rebuild indexes
 	byID := make(map[string]*catalog.Book, len(books))
 	authors := make(map[string][]string)
@@ -116,6 +300,46 @@ func (b *Backend) Refresh() error {
 	b.tags = tags
 	b.mu.Unlock()
 	return nil
+}
+
+// applyOverrideFrom is the package-level equivalent of Backend.applyOverride, used
+// before the Backend lock is set up (e.g. during Refresh).
+func applyOverrideFrom(bk catalog.Book, overrides map[string]metaOverride) catalog.Book {
+	ov, ok := overrides[bk.ID]
+	if !ok {
+		return bk
+	}
+	if ov.Title != nil {
+		bk.Title = *ov.Title
+	}
+	if ov.Authors != nil {
+		bk.Authors = make([]catalog.Author, 0, len(ov.Authors))
+		for _, name := range ov.Authors {
+			bk.Authors = append(bk.Authors, catalog.Author{Name: name})
+		}
+	}
+	if ov.Tags != nil {
+		bk.Tags = ov.Tags
+	}
+	if ov.Summary != nil {
+		bk.Summary = *ov.Summary
+	}
+	if ov.Publisher != nil {
+		bk.Publisher = *ov.Publisher
+	}
+	if ov.Language != nil {
+		bk.Language = *ov.Language
+	}
+	if ov.Series != nil {
+		bk.Series = *ov.Series
+	}
+	if ov.SeriesIndex != nil {
+		bk.SeriesIndex = *ov.SeriesIndex
+	}
+	if ov.IsRead != nil {
+		bk.IsRead = *ov.IsRead
+	}
+	return bk
 }
 
 // Root returns top-level navigation entries.
@@ -354,6 +578,7 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 
 	// Add to indexes under write lock
 	b.mu.Lock()
+	book = applyOverrideFrom(book, b.overrides)
 	b.books = append(b.books, book)
 	bk := &b.books[len(b.books)-1]
 	b.byID[bk.ID] = bk

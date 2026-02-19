@@ -18,9 +18,9 @@
 - [x] Add password authentication with login form - **Done: session-cookie auth, POST /login form, GET /login page (Tailwind), POST /logout, Basic Auth fallback for OPDS readers, HttpOnly cookie, constant-time comparison, 30-day sessions**
 - [x] Vue+Tailwind CSS frontend - **Done: web/index.html (CDN Vue3+Tailwind CSS), embedded via Go embed.FS, served at /, GET /api/books JSON endpoint, Feedbooks-style book grid with covers, search, upload dialog, detail dialog, dark mode, color gradients for missing covers, pagination**
 - [ ] Add configuration file support (YAML/TOML)
-- [ ] Book metadata editing (title, authors, tags, series via PATCH /api/books/{id})
-- [ ] Series support: add Series/SeriesIndex fields to Book, display in UI
-- [ ] "Has been read" mark: toggle via PATCH /api/books/{id}, show indicator in UI
+- [x] Book metadata editing (title, authors, tags, series via PATCH /api/books/{id}) - **Done: metaOverride JSON store (.metadata.json), Updater interface, fs.Backend.UpdateBook, PATCH /api/books/{id} handler**
+- [x] Series support: add Series/SeriesIndex fields to Book, display in UI - **Done: Book.Series/SeriesIndex fields, shown in detail modal, editable via edit modal**
+- [x] "Has been read" mark: toggle via PATCH /api/books/{id}, show indicator in UI - **Done: Book.IsRead field, green badge on card, checkbox in edit modal**
 
 ## Low Priority
 - [ ] Performance optimization (feed caching, background indexing)

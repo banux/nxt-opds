@@ -393,15 +393,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // bookJSON is the JSON representation of a book for the frontend API.
 type bookJSON struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Authors      []string `json:"authors"`
-	CoverURL     string   `json:"coverUrl,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-	Language     string   `json:"language,omitempty"`
-	Publisher    string   `json:"publisher,omitempty"`
-	Summary      string   `json:"summary,omitempty"`
-	DownloadURL  string   `json:"downloadUrl"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Authors     []string `json:"authors"`
+	CoverURL    string   `json:"coverUrl,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Language    string   `json:"language,omitempty"`
+	Publisher   string   `json:"publisher,omitempty"`
+	Summary     string   `json:"summary,omitempty"`
+	Series      string   `json:"series,omitempty"`
+	SeriesIndex string   `json:"seriesIndex,omitempty"`
+	IsRead      bool     `json:"isRead"`
+	DownloadURL string   `json:"downloadUrl"`
 }
 
 // handleAPIBooks serves the full book list as JSON for the web frontend.
@@ -440,6 +443,9 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			Language:    bk.Language,
 			Publisher:   bk.Publisher,
 			Summary:     bk.Summary,
+			Series:      bk.Series,
+			SeriesIndex: bk.SeriesIndex,
+			IsRead:      bk.IsRead,
 			DownloadURL: "/opds/books/" + bk.ID + "/download",
 		}
 		for _, a := range bk.Authors {
@@ -453,6 +459,75 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		"books": result,
 		"total": total,
 	})
+}
+
+// bookUpdateRequest is the JSON body accepted by PATCH /api/books/{id}.
+// All fields are optional; only non-nil fields are applied.
+type bookUpdateRequest struct {
+	Title       *string  `json:"title"`
+	Authors     []string `json:"authors"`
+	Tags        []string `json:"tags"`
+	Summary     *string  `json:"summary"`
+	Publisher   *string  `json:"publisher"`
+	Language    *string  `json:"language"`
+	Series      *string  `json:"series"`
+	SeriesIndex *string  `json:"seriesIndex"`
+	IsRead      *bool    `json:"isRead"`
+}
+
+// handleAPIUpdateBook handles PATCH /api/books/{id} to update book metadata.
+func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
+	if s.updater == nil {
+		http.Error(w, "metadata editing not supported by this backend", http.StatusNotImplemented)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	var req bookUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	update := catalog.BookUpdate{
+		Title:       req.Title,
+		Authors:     req.Authors,
+		Tags:        req.Tags,
+		Summary:     req.Summary,
+		Publisher:   req.Publisher,
+		Language:    req.Language,
+		Series:      req.Series,
+		SeriesIndex: req.SeriesIndex,
+		IsRead:      req.IsRead,
+	}
+
+	bk, err := s.updater.UpdateBook(id, update)
+	if err != nil {
+		http.Error(w, "update failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	j := bookJSON{
+		ID:          bk.ID,
+		Title:       bk.Title,
+		CoverURL:    bk.CoverURL,
+		Tags:        bk.Tags,
+		Language:    bk.Language,
+		Publisher:   bk.Publisher,
+		Summary:     bk.Summary,
+		Series:      bk.Series,
+		SeriesIndex: bk.SeriesIndex,
+		IsRead:      bk.IsRead,
+		DownloadURL: "/opds/books/" + bk.ID + "/download",
+	}
+	for _, a := range bk.Authors {
+		j.Authors = append(j.Authors, a.Name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(j)
 }
 
 // handleCover serves the cached cover image for a book by its ID.

@@ -27,6 +27,7 @@ type Server struct {
 	catalog       catalog.Catalog
 	uploader      catalog.Uploader      // optional; nil if backend doesn't support upload
 	coverProvider catalog.CoverProvider // optional; nil if backend doesn't support cover serving
+	updater       catalog.Updater       // optional; nil if backend doesn't support metadata editing
 	sessions      *sessionStore
 	opts          Options
 }
@@ -48,6 +49,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if cp, ok := cat.(catalog.CoverProvider); ok {
 		s.coverProvider = cp
+	}
+	if up, ok := cat.(catalog.Updater); ok {
+		s.updater = up
 	}
 	s.registerRoutes()
 	return s
@@ -102,6 +106,9 @@ func (s *Server) registerRoutes() {
 
 	// API: JSON books list for the web frontend
 	protected.HandleFunc("/api/books", s.handleAPIBooks).Methods(http.MethodGet)
+
+	// API: update book metadata (enabled when backend supports it)
+	protected.HandleFunc("/api/books/{id}", s.handleAPIUpdateBook).Methods(http.MethodPatch)
 
 	// API: upload a new book (enabled when backend supports it)
 	protected.HandleFunc("/api/upload", s.handleUpload).Methods(http.MethodPost)

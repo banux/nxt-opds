@@ -44,6 +44,15 @@ type Book struct {
 
 	// ThumbnailURL is the URL path to the thumbnail image (if available).
 	ThumbnailURL string
+
+	// Series is the series name this book belongs to (optional).
+	Series string
+
+	// SeriesIndex is the position within the series (e.g. "1", "2.5").
+	SeriesIndex string
+
+	// IsRead indicates the user has marked this book as read.
+	IsRead bool
 }
 
 // Author represents a publication author.
@@ -137,4 +146,26 @@ type CoverProvider interface {
 	// CoverPath returns the filesystem path to the cached cover image for the
 	// given book ID. Returns an error if no cover exists for that ID.
 	CoverPath(id string) (string, error)
+}
+
+// BookUpdate carries the editable fields for a book metadata update.
+// Nil pointer fields are left unchanged; non-nil fields replace the current value.
+// Nil slice fields are left unchanged; non-nil (including empty) slices replace the current value.
+type BookUpdate struct {
+	Title       *string
+	Authors     []string // nil = unchanged, empty = clear
+	Tags        []string // nil = unchanged, empty = clear
+	Summary     *string
+	Publisher   *string
+	Language    *string
+	Series      *string
+	SeriesIndex *string
+	IsRead      *bool
+}
+
+// Updater is an optional interface for catalog backends that support book metadata editing.
+type Updater interface {
+	// UpdateBook applies the given update to the book with the given ID and returns
+	// the updated Book. Returns an error if the book is not found or the update fails.
+	UpdateBook(id string, update BookUpdate) (*Book, error)
 }
