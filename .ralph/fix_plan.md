@@ -11,8 +11,8 @@
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
-- [ ] Add test coverage for opds feed serialization
-- [ ] Add test coverage for HTTP handlers
+- [x] Add test coverage for opds feed serialization - **Done: internal/opds/feed_test.go (5 tests covering structure, XML serialization, round-trip, date formatting, multiple entries)**
+- [x] Add test coverage for HTTP handlers - **Done: internal/server/handlers_test.go (34 tests covering all OPDS routes, API endpoints, pagination helpers, update book); also fixed auth.go slice-bounds panic and missing catch-all route in server.go**
 - [x] Add pagination link headers (first/last/next/prev) to feeds - **Done: RelFirst/Last/Next/Previous consts in opds/feed.go; addPaginationLinks helper in handlers.go; applied to all 6 paginated OPDS handlers**
 - [x] Add cover image serving endpoint - **Done: EPUB cover extraction (EPUB2+EPUB3), /covers/{id} HTTP endpoint, CoverProvider interface**
 - [x] Add password authentication with login form - **Done: session-cookie auth, POST /login form, GET /login page (Tailwind), POST /logout, Basic Auth fallback for OPDS readers, HttpOnly cookie, constant-time comparison, 30-day sessions**

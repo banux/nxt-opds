@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -92,7 +93,8 @@ func authMiddleware(password string, sessions *sessionStore) func(http.Handler) 
 			// 3. Not authenticated – redirect browser requests to /login,
 			//    return 401 for API / OPDS requests.
 			accept := r.Header.Get("Accept")
-			isAPI := len(r.URL.Path) > 4 && (r.URL.Path[:5] == "/api/" || r.URL.Path[:6] == "/opds/") ||
+			isAPI := strings.HasPrefix(r.URL.Path, "/api/") ||
+				strings.HasPrefix(r.URL.Path, "/opds/") ||
 				r.URL.Path == "/opds" || r.URL.Path == "/opds/"
 			if !isAPI && (accept == "" || containsHTML(accept)) {
 				http.Redirect(w, r, "/login", http.StatusSeeOther)

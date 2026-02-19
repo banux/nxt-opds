@@ -116,9 +116,15 @@ func (s *Server) registerRoutes() {
 	// Cover image endpoint
 	protected.HandleFunc("/covers/{id}", s.handleCover).Methods(http.MethodGet)
 
-	// Frontend static assets – serves index.html at / and any static files
+	// Frontend static assets – serves index.html at / and any static files.
+	// When StaticFS is nil (e.g. in tests), a catch-all 404 handler is
+	// registered so that the auth middleware still runs for all paths.
 	if s.opts.StaticFS != nil {
 		fileServer := http.FileServer(http.FS(s.opts.StaticFS))
 		protected.PathPrefix("/").Handler(fileServer)
+	} else {
+		protected.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
 	}
 }
