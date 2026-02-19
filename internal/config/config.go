@@ -32,6 +32,11 @@ type Config struct {
 	// Password is the shared password for form-based authentication.
 	// Leave empty to disable authentication (development/trusted-network use only).
 	Password string `yaml:"auth_password"`
+
+	// Backend selects the catalog backend implementation.
+	// "fs"     – in-memory index, metadata stored in .metadata.json (default)
+	// "sqlite" – SQLite-indexed backend, metadata stored in .catalog.db
+	Backend string `yaml:"backend"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -39,6 +44,7 @@ func Default() Config {
 	return Config{
 		ListenAddr: ":8080",
 		BooksDir:   "./books",
+		Backend:    "fs",
 	}
 }
 
@@ -68,6 +74,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("AUTH_PASSWORD"); v != "" {
 		cfg.Password = v
+	}
+	if v := os.Getenv("BACKEND"); v != "" {
+		cfg.Backend = v
 	}
 
 	return cfg, nil

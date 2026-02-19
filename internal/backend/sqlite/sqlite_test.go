@@ -1,4 +1,4 @@
-package fs
+package sqlite
 
 import (
 	"archive/zip"
@@ -8,11 +8,9 @@ import (
 	"testing"
 
 	"github.com/banux/nxt-opds/internal/catalog"
-	"github.com/banux/nxt-opds/internal/epub"
 )
 
 // createMinimalEPUB writes a valid minimal EPUB file to path.
-// The EPUB contains a container.xml pointing to content.opf with basic metadata.
 func createMinimalEPUB(t *testing.T, path, title, author, subject string) {
 	t.Helper()
 
@@ -59,12 +57,13 @@ func createMinimalEPUB(t *testing.T, path, title, author, subject string) {
 	}
 }
 
-func TestBackend_EmptyDir(t *testing.T) {
+func TestSQLiteBackend_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	b, err := New(dir)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	books, total, err := b.AllBooks(0, 50)
 	if err != nil {
@@ -78,15 +77,15 @@ func TestBackend_EmptyDir(t *testing.T) {
 	}
 }
 
-func TestBackend_SingleEPUB(t *testing.T) {
+func TestSQLiteBackend_SingleEPUB(t *testing.T) {
 	dir := t.TempDir()
-	epubPath := filepath.Join(dir, "test.epub")
-	createMinimalEPUB(t, epubPath, "Test Book", "Test Author", "Fiction")
+	createMinimalEPUB(t, filepath.Join(dir, "test.epub"), "Test Book", "Test Author", "Fiction")
 
 	b, err := New(dir)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	books, total, err := b.AllBooks(0, 50)
 	if err != nil {
@@ -111,7 +110,7 @@ func TestBackend_SingleEPUB(t *testing.T) {
 	}
 }
 
-func TestBackend_BookByID(t *testing.T) {
+func TestSQLiteBackend_BookByID(t *testing.T) {
 	dir := t.TempDir()
 	createMinimalEPUB(t, filepath.Join(dir, "book.epub"), "My Book", "An Author", "")
 
@@ -119,6 +118,7 @@ func TestBackend_BookByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	books, _, _ := b.AllBooks(0, 50)
 	if len(books) == 0 {
@@ -140,7 +140,7 @@ func TestBackend_BookByID(t *testing.T) {
 	}
 }
 
-func TestBackend_Search(t *testing.T) {
+func TestSQLiteBackend_Search(t *testing.T) {
 	dir := t.TempDir()
 	createMinimalEPUB(t, filepath.Join(dir, "go.epub"), "Learning Go", "John Doe", "Programming")
 	createMinimalEPUB(t, filepath.Join(dir, "python.epub"), "Python Cookbook", "Jane Smith", "Programming")
@@ -149,6 +149,7 @@ func TestBackend_Search(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	books, total, err := b.Search(catalog.SearchQuery{Query: "go", Limit: 50})
 	if err != nil {
@@ -163,7 +164,7 @@ func TestBackend_Search(t *testing.T) {
 	}
 }
 
-func TestBackend_AuthorsAndTags(t *testing.T) {
+func TestSQLiteBackend_AuthorsAndTags(t *testing.T) {
 	dir := t.TempDir()
 	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Book A", "Author One", "SciFi")
 	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Book B", "Author Two", "Fantasy")
@@ -172,6 +173,7 @@ func TestBackend_AuthorsAndTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	authors, total, err := b.Authors(0, 50)
 	if err != nil {
@@ -192,7 +194,7 @@ func TestBackend_AuthorsAndTags(t *testing.T) {
 	_ = tags
 }
 
-func TestBackend_BooksByAuthor(t *testing.T) {
+func TestSQLiteBackend_BooksByAuthor(t *testing.T) {
 	dir := t.TempDir()
 	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Book A", "Common Author", "")
 	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Book B", "Common Author", "")
@@ -202,6 +204,7 @@ func TestBackend_BooksByAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	books, total, err := b.BooksByAuthor("Common Author", 0, 50)
 	if err != nil {
@@ -213,7 +216,7 @@ func TestBackend_BooksByAuthor(t *testing.T) {
 	_ = books
 }
 
-func TestBackend_Pagination(t *testing.T) {
+func TestSQLiteBackend_Pagination(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < 5; i++ {
 		name := "book" + string(rune('A'+i)) + ".epub"
@@ -224,6 +227,7 @@ func TestBackend_Pagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	defer b.Close()
 
 	_, total, _ := b.AllBooks(0, 100)
 	if total != 5 {
@@ -246,15 +250,96 @@ func TestBackend_Pagination(t *testing.T) {
 	}
 }
 
-func TestPathToID_Stable(t *testing.T) {
-	id1 := epub.PathToID("/some/path/book.epub")
-	id2 := epub.PathToID("/some/path/book.epub")
-	if id1 != id2 {
-		t.Errorf("PathToID is not stable: %q != %q", id1, id2)
+func TestSQLiteBackend_UpdateBook(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "book.epub"), "Original Title", "Original Author", "Sci-Fi")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	books, _, _ := b.AllBooks(0, 50)
+	if len(books) == 0 {
+		t.Fatal("no books found")
+	}
+	id := books[0].ID
+
+	newTitle := "Updated Title"
+	newAuthors := []string{"New Author"}
+	newTags := []string{"Fantasy", "Adventure"}
+	isRead := true
+
+	updated, err := b.UpdateBook(id, catalog.BookUpdate{
+		Title:   &newTitle,
+		Authors: newAuthors,
+		Tags:    newTags,
+		IsRead:  &isRead,
+	})
+	if err != nil {
+		t.Fatalf("UpdateBook() error: %v", err)
 	}
 
-	id3 := epub.PathToID("/other/path/book.epub")
-	if id1 == id3 {
-		t.Error("different paths produced same ID")
+	if updated.Title != newTitle {
+		t.Errorf("title: got %q, want %q", updated.Title, newTitle)
+	}
+	if len(updated.Authors) != 1 || updated.Authors[0].Name != "New Author" {
+		t.Errorf("authors: got %v, want [{New Author}]", updated.Authors)
+	}
+	if len(updated.Tags) != 2 {
+		t.Errorf("tags: got %v, want [Fantasy Adventure]", updated.Tags)
+	}
+	if !updated.IsRead {
+		t.Error("IsRead should be true")
+	}
+
+	// Verify persistence: reopen DB
+	b.Close()
+	b2, err := New(dir)
+	if err != nil {
+		t.Fatalf("reopen New() error: %v", err)
+	}
+	defer b2.Close()
+
+	bk, err := b2.BookByID(id)
+	if err != nil {
+		t.Fatalf("BookByID after reopen error: %v", err)
+	}
+	if bk.Title != newTitle {
+		t.Errorf("after reopen title: got %q, want %q", bk.Title, newTitle)
+	}
+	if !bk.IsRead {
+		t.Error("after reopen IsRead should be true")
+	}
+}
+
+func TestSQLiteBackend_Refresh_RemovesDeletedFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "book.epub")
+	createMinimalEPUB(t, path, "Temp Book", "Author", "")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	_, total, _ := b.AllBooks(0, 50)
+	if total != 1 {
+		t.Fatalf("expected 1 book before delete, got %d", total)
+	}
+
+	// Remove the file and refresh
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+	if err := b.Refresh(); err != nil {
+		t.Fatalf("Refresh() error: %v", err)
+	}
+
+	_, total, _ = b.AllBooks(0, 50)
+	if total != 0 {
+		t.Errorf("expected 0 books after delete + refresh, got %d", total)
 	}
 }

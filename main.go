@@ -8,6 +8,8 @@ import (
 	"github.com/banux/nxt-opds/internal/config"
 
 	fsbackend "github.com/banux/nxt-opds/internal/backend/fs"
+	sqlitebackend "github.com/banux/nxt-opds/internal/backend/sqlite"
+	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/server"
 	"github.com/banux/nxt-opds/web"
 )
@@ -27,14 +29,27 @@ func main() {
 		log.Printf("WARNING: auth_password is not set – authentication is disabled")
 	}
 
-	// Ensure the books directory exists
+	// Ensure the books directory exists.
 	if err := os.MkdirAll(cfg.BooksDir, 0755); err != nil {
 		log.Fatalf("cannot create books directory %q: %v", cfg.BooksDir, err)
 	}
 
-	cat, err := fsbackend.New(cfg.BooksDir)
-	if err != nil {
-		log.Fatalf("catalog backend error: %v", err)
+	var cat catalog.Catalog
+	switch cfg.Backend {
+	case "sqlite":
+		b, err := sqlitebackend.New(cfg.BooksDir)
+		if err != nil {
+			log.Fatalf("sqlite catalog backend error: %v", err)
+		}
+		cat = b
+		log.Printf("using SQLite catalog backend (%s/.catalog.db)", cfg.BooksDir)
+	default: // "fs" or unset
+		b, err := fsbackend.New(cfg.BooksDir)
+		if err != nil {
+			log.Fatalf("catalog backend error: %v", err)
+		}
+		cat = b
+		log.Printf("using in-memory (fs) catalog backend")
 	}
 	log.Printf("catalog loaded from %q", cfg.BooksDir)
 
