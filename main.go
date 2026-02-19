@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/config"
 
@@ -52,6 +53,23 @@ func main() {
 		log.Printf("using in-memory (fs) catalog backend")
 	}
 	log.Printf("catalog loaded from %q", cfg.BooksDir)
+
+	// Start background catalog refresh if the backend supports it and an
+	// interval is configured (> 0).
+	if r, ok := cat.(catalog.Refresher); ok && cfg.RefreshInterval > 0 {
+		log.Printf("background catalog refresh enabled (interval: %s)", cfg.RefreshInterval)
+		go func() {
+			ticker := time.NewTicker(cfg.RefreshInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				if err := r.Refresh(); err != nil {
+					log.Printf("background catalog refresh error: %v", err)
+				} else {
+					log.Printf("catalog refreshed")
+				}
+			}
+		}()
+	}
 
 	opts := server.Options{
 		Password: cfg.Password,

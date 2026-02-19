@@ -637,6 +637,22 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(book)
 }
 
+// handleAPIRefresh triggers an on-demand catalog refresh.
+// Returns 501 if the backend does not support refresh.
+// Returns 200 {"ok":true} on success, 500 on backend error.
+func (s *Server) handleAPIRefresh(w http.ResponseWriter, r *http.Request) {
+	if s.refresher == nil {
+		http.Error(w, "refresh not supported by this backend", http.StatusNotImplemented)
+		return
+	}
+	if err := s.refresher.Refresh(); err != nil {
+		http.Error(w, "refresh failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 // handleDownload serves the raw file for a book's acquisition link.
 // Query param "path" is the filesystem path stored in the catalog File entry.
 // Only files inside the catalog root are served (path traversal prevention).

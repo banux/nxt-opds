@@ -23,7 +23,7 @@
 - [x] "Has been read" mark: toggle via PATCH /api/books/{id}, show indicator in UI - **Done: Book.IsRead field, green badge on card, checkbox in edit modal**
 
 ## Low Priority
-- [ ] Performance optimization (feed caching, background indexing)
+- [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
 - [ ] Code cleanup and refactoring
 - [x] Docker / container support - **Done: Dockerfile (multi-stage, debian-slim runtime, CGO_ENABLED=0), .dockerignore, docker-compose.yml, README.md updated with full docs**
 - [x] SQLite index for large collections - **Done: internal/backend/sqlite/sqlite.go, selected via backend: "sqlite" in config or BACKEND=sqlite env var; epub metadata extraction refactored into internal/epub/epub.go shared package; 9 tests in sqlite_test.go**

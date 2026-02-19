@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,14 +38,26 @@ type Config struct {
 	// "fs"     – in-memory index, metadata stored in .metadata.json (default)
 	// "sqlite" – SQLite-indexed backend, metadata stored in .catalog.db
 	Backend string `yaml:"backend"`
+
+	// RefreshInterval is how often the catalog automatically rescans the books
+	// directory for new or removed files.  Stored as a duration string in YAML
+	// (e.g. "5m", "30s", "1h").  Set to "0" to disable background refresh.
+	// Parsed into RefreshInterval by Load().
+	RefreshIntervalStr string `yaml:"refresh_interval"`
+
+	// RefreshInterval is the parsed form of RefreshIntervalStr.
+	// Not marshalled to/from YAML directly.
+	RefreshInterval time.Duration `yaml:"-"`
 }
 
 // Default returns a Config populated with sensible defaults.
 func Default() Config {
 	return Config{
-		ListenAddr: ":8080",
-		BooksDir:   "./books",
-		Backend:    "fs",
+		ListenAddr:         ":8080",
+		BooksDir:           "./books",
+		Backend:            "fs",
+		RefreshIntervalStr: "5m",
+		RefreshInterval:    5 * time.Minute,
 	}
 }
 
@@ -77,6 +90,21 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("BACKEND"); v != "" {
 		cfg.Backend = v
+	}
+	if v := os.Getenv("REFRESH_INTERVAL"); v != "" {
+		cfg.RefreshIntervalStr = v
+	}
+
+	// Parse the refresh interval string into a Duration.
+	// An empty string or "0" disables background refresh.
+	if cfg.RefreshIntervalStr != "" && cfg.RefreshIntervalStr != "0" {
+		if d, err := time.ParseDuration(cfg.RefreshIntervalStr); err == nil {
+			cfg.RefreshInterval = d
+		}
+		// Invalid strings are silently ignored; the default (5m) is preserved
+		// unless the YAML or env explicitly set a valid value.
+	} else {
+		cfg.RefreshInterval = 0
 	}
 
 	return cfg, nil

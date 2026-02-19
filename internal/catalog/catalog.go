@@ -169,3 +169,11 @@ type Updater interface {
 	// the updated Book. Returns an error if the book is not found or the update fails.
 	UpdateBook(id string, update BookUpdate) (*Book, error)
 }
+
+// Refresher is an optional interface for catalog backends that support
+// rescanning the books directory to pick up files added or removed externally.
+type Refresher interface {
+	// Refresh rescans the underlying store and updates the in-memory or
+	// database index to reflect the current state of the books directory.
+	Refresh() error
+}
