@@ -1,0 +1,140 @@
+// Package catalog provides the book catalog abstraction for nxt-opds.
+// It defines the core data types and the Catalog interface that backends implement.
+package catalog
+
+import (
+	"io"
+	"time"
+)
+
+// Book represents a publication in the catalog.
+type Book struct {
+	// ID is a unique identifier for this book (e.g. UUID or file path hash).
+	ID string
+
+	// Title is the display title of the publication.
+	Title string
+
+	// Authors is the list of authors.
+	Authors []Author
+
+	// Summary is a short description of the publication.
+	Summary string
+
+	// Language is the BCP 47 language tag (e.g. "en", "fr").
+	Language string
+
+	// Publisher is the publisher name.
+	Publisher string
+
+	// PublishedAt is the original publication date.
+	PublishedAt time.Time
+
+	// UpdatedAt is when this catalog entry was last updated.
+	UpdatedAt time.Time
+
+	// Tags are genre/subject tags.
+	Tags []string
+
+	// Files lists the available acquisition files for this book.
+	Files []File
+
+	// CoverURL is the URL path to the cover image (if available).
+	CoverURL string
+
+	// ThumbnailURL is the URL path to the thumbnail image (if available).
+	ThumbnailURL string
+}
+
+// Author represents a publication author.
+type Author struct {
+	Name string
+	URI  string
+}
+
+// File represents a downloadable file associated with a book.
+type File struct {
+	// MIMEType is the media type (e.g. "application/epub+zip").
+	MIMEType string
+
+	// Path is the file system path to the file.
+	Path string
+
+	// Size is the file size in bytes (0 if unknown).
+	Size int64
+}
+
+// SearchQuery carries parameters for catalog search.
+type SearchQuery struct {
+	// Query is the full-text search term.
+	Query string
+
+	// Author filters by author name substring.
+	Author string
+
+	// Tag filters by a specific tag/genre.
+	Tag string
+
+	// Language filters by BCP 47 language tag.
+	Language string
+
+	// Offset is the pagination offset (0-based).
+	Offset int
+
+	// Limit is the maximum number of results to return (0 = server default).
+	Limit int
+}
+
+// Catalog is the interface that backend implementations must satisfy.
+// A Catalog provides read-only access to the book collection.
+type Catalog interface {
+	// Root returns the top-level navigation entries (e.g. "By Author", "By Title").
+	Root() ([]NavEntry, error)
+
+	// AllBooks returns all books, optionally paginated.
+	AllBooks(offset, limit int) ([]Book, int, error)
+
+	// BookByID returns a single book by its unique ID.
+	BookByID(id string) (*Book, error)
+
+	// Search performs a full-text/filtered search and returns matching books.
+	Search(q SearchQuery) ([]Book, int, error)
+
+	// BooksByAuthor returns books filtered by author name.
+	BooksByAuthor(author string, offset, limit int) ([]Book, int, error)
+
+	// BooksByTag returns books filtered by tag/genre.
+	BooksByTag(tag string, offset, limit int) ([]Book, int, error)
+
+	// Authors returns all distinct authors.
+	Authors(offset, limit int) ([]string, int, error)
+
+	// Tags returns all distinct tags/genres.
+	Tags(offset, limit int) ([]string, int, error)
+}
+
+// NavEntry is a navigation item pointing to a sub-feed.
+type NavEntry struct {
+	ID      string
+	Title   string
+	Content string
+	Href    string
+	Rel     string
+}
+
+// Uploader is an optional interface that catalog backends may implement
+// to support adding books via file upload.
+type Uploader interface {
+	// StoreBook saves src as filename inside the catalog's root directory,
+	// indexes it immediately, and returns the resulting Book entry.
+	// src is consumed and closed by the implementation.
+	StoreBook(filename string, src io.ReadCloser) (*Book, error)
+}
+
+// CoverProvider is an optional interface that catalog backends may implement
+// to serve cached cover images by book ID.
+type CoverProvider interface {
+	// CoverPath returns the filesystem path to the cached cover image for the
+	// given book ID. Returns an error if no cover exists for that ID.
+	CoverPath(id string) (string, error)
+}
