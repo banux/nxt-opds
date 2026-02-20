@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS books (
     added_at     INTEGER NOT NULL DEFAULT 0,
     series       TEXT NOT NULL DEFAULT '',
     series_index TEXT NOT NULL DEFAULT '',
+    series_total TEXT NOT NULL DEFAULT '',
     is_read      INTEGER NOT NULL DEFAULT 0,
     cover_url    TEXT NOT NULL DEFAULT '',
     thumbnail_url TEXT NOT NULL DEFAULT '',
@@ -111,6 +112,8 @@ CREATE INDEX IF NOT EXISTS idx_books_added_at ON books(added_at DESC);
 	}
 	// Migration: add added_at column to existing databases (ignore error if already exists).
 	_, _ = b.db.Exec(`ALTER TABLE books ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0`)
+	// Migration: add series_total column to existing databases (ignore error if already exists).
+	_, _ = b.db.Exec(`ALTER TABLE books ADD COLUMN series_total TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -221,12 +224,12 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 	_, err = tx.Exec(`
 INSERT OR IGNORE INTO books
     (id, title, summary, language, publisher, published_at, updated_at, added_at,
-     series, series_index, is_read, cover_url, thumbnail_url,
+     series, series_index, series_total, is_read, cover_url, thumbnail_url,
      file_path, file_mime, file_size)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
 		pubAt, updAt, addedAt,
-		bk.Series, bk.SeriesIndex, boolToInt(bk.IsRead),
+		bk.Series, bk.SeriesIndex, bk.SeriesTotal, boolToInt(bk.IsRead),
 		bk.CoverURL, bk.ThumbnailURL,
 		filePath, fileMIME, fileSize,
 	)
@@ -503,6 +506,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	if update.SeriesIndex != nil {
 		bk.SeriesIndex = *update.SeriesIndex
 	}
+	if update.SeriesTotal != nil {
+		bk.SeriesTotal = *update.SeriesTotal
+	}
 	if update.IsRead != nil {
 		bk.IsRead = *update.IsRead
 	}
@@ -518,10 +524,10 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	_, err = tx.Exec(`
 UPDATE books SET
     title=?, summary=?, language=?, publisher=?,
-    updated_at=?, series=?, series_index=?, is_read=?
+    updated_at=?, series=?, series_index=?, series_total=?, is_read=?
 WHERE id=?`,
 		bk.Title, bk.Summary, bk.Language, bk.Publisher,
-		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, boolToInt(bk.IsRead),
+		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, boolToInt(bk.IsRead),
 		id,
 	)
 	if err != nil {
@@ -622,6 +628,7 @@ type bookRow struct {
 	AddedAt      int64
 	Series       string
 	SeriesIndex  string
+	SeriesTotal  string
 	IsRead       int
 	CoverURL     string
 	ThumbnailURL string
@@ -641,6 +648,7 @@ func (r bookRow) toBook() catalog.Book {
 		Publisher:    r.Publisher,
 		Series:       r.Series,
 		SeriesIndex:  r.SeriesIndex,
+		SeriesTotal:  r.SeriesTotal,
 		IsRead:       r.IsRead != 0,
 		CoverURL:     r.CoverURL,
 		ThumbnailURL: r.ThumbnailURL,
@@ -676,7 +684,7 @@ func (r bookRow) toBook() catalog.Book {
 // bookSelectColumns is the SELECT list for querying full book records.
 const bookSelectColumns = `
     b.id, b.title, b.summary, b.language, b.publisher,
-    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.is_read,
+    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.is_read,
     b.cover_url, b.thumbnail_url, b.file_path, b.file_mime, b.file_size,
     (SELECT json_group_array(json_object('name',ba.author_name,'uri',ba.author_uri))
        FROM book_authors ba WHERE ba.book_id = b.id) AS authors_json,
@@ -698,7 +706,7 @@ func (b *Backend) queryBooks(clause string, args ...any) ([]catalog.Book, error)
 		var r bookRow
 		if err := rows.Scan(
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
-			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.IsRead,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.IsRead,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {

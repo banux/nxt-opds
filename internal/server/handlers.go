@@ -440,6 +440,7 @@ type bookJSON struct {
 	Summary     string   `json:"summary,omitempty"`
 	Series      string   `json:"series,omitempty"`
 	SeriesIndex string   `json:"seriesIndex,omitempty"`
+	SeriesTotal string   `json:"seriesTotal,omitempty"`
 	IsRead      bool     `json:"isRead"`
 	DownloadURL string   `json:"downloadUrl"`
 }
@@ -493,6 +494,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			Summary:     bk.Summary,
 			Series:      bk.Series,
 			SeriesIndex: bk.SeriesIndex,
+			SeriesTotal: bk.SeriesTotal,
 			IsRead:      bk.IsRead,
 			DownloadURL: "/opds/books/" + bk.ID + "/download",
 		}
@@ -520,6 +522,7 @@ type bookUpdateRequest struct {
 	Language    *string  `json:"language"`
 	Series      *string  `json:"series"`
 	SeriesIndex *string  `json:"seriesIndex"`
+	SeriesTotal *string  `json:"seriesTotal"`
 	IsRead      *bool    `json:"isRead"`
 }
 
@@ -544,6 +547,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		Summary:     bk.Summary,
 		Series:      bk.Series,
 		SeriesIndex: bk.SeriesIndex,
+		SeriesTotal: bk.SeriesTotal,
 		IsRead:      bk.IsRead,
 		DownloadURL: "/opds/books/" + bk.ID + "/download",
 	}
@@ -580,6 +584,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		Language:    req.Language,
 		Series:      req.Series,
 		SeriesIndex: req.SeriesIndex,
+		SeriesTotal: req.SeriesTotal,
 		IsRead:      req.IsRead,
 	}
 
@@ -599,6 +604,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		Summary:     bk.Summary,
 		Series:      bk.Series,
 		SeriesIndex: bk.SeriesIndex,
+		SeriesTotal: bk.SeriesTotal,
 		IsRead:      bk.IsRead,
 		DownloadURL: "/opds/books/" + bk.ID + "/download",
 	}

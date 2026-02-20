@@ -22,7 +22,28 @@
     [v-cloak] { display: none; }
     .book-cover {
       aspect-ratio: 2/3;
+      width: 100%;
+      display: block;
+      position: relative;
+      overflow: hidden;
+    }
+    .book-cover img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
+    }
+    .book-cover .cover-placeholder {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
     }
     .line-clamp-2 {
       display: -webkit-box;
@@ -220,17 +241,17 @@
           class="group cursor-pointer"
         >
           <!-- Cover -->
-          <div class="relative overflow-hidden shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
+          <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
                :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
             <img
               v-if="book.coverUrl"
               :src="book.coverUrl"
               :alt="book.title"
-              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+              class="group-hover:scale-105 transition-transform duration-200"
               loading="lazy"
               @error="book.coverUrl = ''"
             />
-            <div v-else class="w-full h-full flex flex-col items-center justify-center p-3"
+            <div v-else class="cover-placeholder"
                  :style="{ background: coverGradient(book.id) }">
               <svg class="w-10 h-10 text-white/60 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -252,6 +273,9 @@
           <div class="px-0.5">
             <p class="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug" :title="book.title">
               {{ book.title }}
+            </p>
+            <p v-if="book.series" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5 truncate font-medium">
+              {{ book.series }}<span v-if="book.seriesIndex"> #{{ book.seriesIndex }}<span v-if="book.seriesTotal">/{{ book.seriesTotal }}</span></span>
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate" :title="(book.authors || []).join(', ')">
               {{ (book.authors || []).join(', ') || 'Auteur inconnu' }}
@@ -336,9 +360,15 @@
         <div class="flex-1 min-w-0">
 
           <!-- Title -->
-          <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-2">
+          <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-1">
             {{ currentBook.title }}
           </h1>
+
+          <!-- Series (between title and authors) -->
+          <p v-if="currentBook.series"
+             class="text-base font-medium text-amber-600 dark:text-amber-400 mb-1">
+            {{ currentBook.series }}<span v-if="currentBook.seriesIndex"> — #{{ currentBook.seriesIndex }}<span v-if="currentBook.seriesTotal">/{{ currentBook.seriesTotal }}</span></span>
+          </p>
 
           <!-- Authors -->
           <p v-if="currentBook.authors && currentBook.authors.length"
@@ -346,18 +376,9 @@
             {{ currentBook.authors.join(', ') }}
           </p>
 
-          <!-- Series badge -->
-          <div v-if="currentBook.series"
-               class="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full text-sm font-medium mb-4">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
-            </svg>
-            {{ currentBook.series }}<span v-if="currentBook.seriesIndex"> #{{ currentBook.seriesIndex }}</span>
-          </div>
-
           <!-- Read badge -->
           <div v-if="currentBook.isRead"
-               class="inline-flex items-center gap-1.5 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium mb-4 ml-2">
+               class="inline-flex items-center gap-1.5 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium mb-4">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
@@ -551,9 +572,14 @@
             <input v-model="editForm.series" type="text" placeholder="Nom de la série"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
-          <div class="w-24">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Numéro</label>
+          <div class="w-20">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">N°</label>
             <input v-model="editForm.seriesIndex" type="text" placeholder="1"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
+          <div class="w-20">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Total</label>
+            <input v-model="editForm.seriesTotal" type="text" placeholder="5"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
         </div>
@@ -790,7 +816,7 @@ createApp({
     const editError   = ref('')
     const editForm    = ref({
       title: '', authorsStr: '', tagsStr: '', summary: '',
-      publisher: '', language: '', series: '', seriesIndex: '',
+      publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '',
     })
 
     function openEdit(book) {
@@ -804,6 +830,7 @@ createApp({
         language:    book.language  || '',
         series:      book.series    || '',
         seriesIndex: book.seriesIndex || '',
+        seriesTotal: book.seriesTotal || '',
       }
       editError.value = ''
       editDialog.value = true
@@ -830,6 +857,7 @@ createApp({
           language:    editForm.value.language,
           series:      editForm.value.series,
           seriesIndex: editForm.value.seriesIndex,
+          seriesTotal: editForm.value.seriesTotal,
         }
         const res = await fetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',

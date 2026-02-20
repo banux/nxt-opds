@@ -51,6 +51,9 @@ type Book struct {
 	// SeriesIndex is the position within the series (e.g. "1", "2.5").
 	SeriesIndex string
 
+	// SeriesTotal is the total number of books in the series (e.g. "5").
+	SeriesTotal string
+
 	// IsRead indicates the user has marked this book as read.
 	IsRead bool
 
@@ -172,6 +175,7 @@ type BookUpdate struct {
 	Language    *string
 	Series      *string
 	SeriesIndex *string
+	SeriesTotal *string
 	IsRead      *bool
 }
 
