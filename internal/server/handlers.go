@@ -556,6 +556,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		SeriesIndex: bk.SeriesIndex,
 		SeriesTotal: bk.SeriesTotal,
 		IsRead:      bk.IsRead,
+		Rating:      bk.Rating,
 		DownloadURL: "/opds/books/" + bk.ID + "/download",
 	}
 	for _, a := range bk.Authors {
@@ -614,6 +615,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		SeriesIndex: bk.SeriesIndex,
 		SeriesTotal: bk.SeriesTotal,
 		IsRead:      bk.IsRead,
+		Rating:      bk.Rating,
 		DownloadURL: "/opds/books/" + bk.ID + "/download",
 	}
 	for _, a := range bk.Authors {
