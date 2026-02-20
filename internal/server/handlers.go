@@ -442,6 +442,7 @@ type bookJSON struct {
 	SeriesIndex string   `json:"seriesIndex,omitempty"`
 	SeriesTotal string   `json:"seriesTotal,omitempty"`
 	IsRead      bool     `json:"isRead"`
+	Rating      int      `json:"rating"`
 	DownloadURL string   `json:"downloadUrl"`
 }
 
@@ -496,6 +497,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			SeriesIndex: bk.SeriesIndex,
 			SeriesTotal: bk.SeriesTotal,
 			IsRead:      bk.IsRead,
+			Rating:      bk.Rating,
 			DownloadURL: "/opds/books/" + bk.ID + "/download",
 		}
 		for _, a := range bk.Authors {
@@ -524,6 +526,7 @@ type bookUpdateRequest struct {
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
 	IsRead      *bool    `json:"isRead"`
+	Rating      *int     `json:"rating"`
 }
 
 // handleAPIBook handles GET /api/books/{id} to fetch a single book as JSON.
@@ -586,6 +589,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		SeriesIndex: req.SeriesIndex,
 		SeriesTotal: req.SeriesTotal,
 		IsRead:      req.IsRead,
+		Rating:      req.Rating,
 	}
 
 	bk, err := s.updater.UpdateBook(id, update)

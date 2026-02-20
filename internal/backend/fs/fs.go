@@ -33,6 +33,7 @@ type metaOverride struct {
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
 	IsRead      *bool    `json:"isRead"`
+	Rating      *int     `json:"rating"`
 }
 
 // Backend is a filesystem-based catalog backend.
@@ -141,6 +142,9 @@ func mergeOverride(bk catalog.Book, ov metaOverride) catalog.Book {
 	if ov.IsRead != nil {
 		bk.IsRead = *ov.IsRead
 	}
+	if ov.Rating != nil {
+		bk.Rating = *ov.Rating
+	}
 	return bk
 }
 
@@ -187,6 +191,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	if update.IsRead != nil {
 		ov.IsRead = update.IsRead
+	}
+	if update.Rating != nil {
+		ov.Rating = update.Rating
 	}
 
 	b.overrides[id] = ov

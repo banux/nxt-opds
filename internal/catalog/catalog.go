@@ -57,6 +57,9 @@ type Book struct {
 	// IsRead indicates the user has marked this book as read.
 	IsRead bool
 
+	// Rating is the user's star rating (0 = not rated, 1–5 stars).
+	Rating int
+
 	// AddedAt is when this book was first added to the catalog.
 	AddedAt time.Time
 }
@@ -177,6 +180,7 @@ type BookUpdate struct {
 	SeriesIndex *string
 	SeriesTotal *string
 	IsRead      *bool
+	Rating      *int
 }
 
 // Updater is an optional interface for catalog backends that support book metadata editing.
