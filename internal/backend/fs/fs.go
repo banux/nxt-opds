@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -374,6 +375,9 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		if q.UnreadOnly && bk.IsRead {
 			continue
 		}
+		if q.Series != "" && bk.Series != q.Series {
+			continue
+		}
 		if q.Query == "" {
 			matched = append(matched, bk)
 			continue
@@ -390,9 +394,26 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		}
 	}
 
-	// Apply sort (default: added date descending; b.books already sorted that way,
-	// but if a different sort is requested we re-sort the matched slice).
-	if q.SortBy == "title" {
+	// Apply sort.
+	seriesIndexFloat := func(idx string) float64 {
+		f, err := strconv.ParseFloat(strings.TrimSpace(idx), 64)
+		if err != nil {
+			return 0
+		}
+		return f
+	}
+
+	switch q.SortBy {
+	case "series_index":
+		sort.Slice(matched, func(i, j int) bool {
+			fi := seriesIndexFloat(matched[i].SeriesIndex)
+			fj := seriesIndexFloat(matched[j].SeriesIndex)
+			if fi != fj {
+				return fi < fj
+			}
+			return strings.ToLower(matched[i].Title) < strings.ToLower(matched[j].Title)
+		})
+	case "title":
 		if q.SortOrder == "asc" {
 			sort.Slice(matched, func(i, j int) bool {
 				return strings.ToLower(matched[i].Title) < strings.ToLower(matched[j].Title)
@@ -402,10 +423,13 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 				return strings.ToLower(matched[i].Title) > strings.ToLower(matched[j].Title)
 			})
 		}
-	} else if q.SortBy == "added" && q.SortOrder == "asc" {
-		sort.Slice(matched, func(i, j int) bool {
-			return matched[i].AddedAt.Before(matched[j].AddedAt)
-		})
+	case "added":
+		if q.SortOrder == "asc" {
+			sort.Slice(matched, func(i, j int) bool {
+				return matched[i].AddedAt.Before(matched[j].AddedAt)
+			})
+		}
+		// desc is already natural order from b.books
 	}
 	// default (added desc) is already the natural order from b.books
 
@@ -509,6 +533,28 @@ func (b *Backend) Tags(offset, limit int) ([]string, int, error) {
 		end = total
 	}
 	return tagList[offset:end], total, nil
+}
+
+// Series returns all distinct non-empty series names sorted alphabetically
+// with the number of books in each. It implements catalog.SeriesLister.
+func (b *Backend) Series() ([]catalog.SeriesEntry, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	counts := make(map[string]int)
+	for _, bk := range b.books {
+		if bk.Series != "" {
+			counts[bk.Series]++
+		}
+	}
+	entries := make([]catalog.SeriesEntry, 0, len(counts))
+	for name, count := range counts {
+		entries = append(entries, catalog.SeriesEntry{Name: name, Count: count})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+	})
+	return entries, nil
 }
 
 // DeleteBook removes the book with the given ID from the catalog and deletes

@@ -447,7 +447,7 @@ type bookJSON struct {
 }
 
 // parseSortParam maps the ?sort= query parameter to SortBy and SortOrder values.
-// Valid values: "added_desc" (default), "added_asc", "title_asc", "title_desc".
+// Valid values: "added_desc" (default), "added_asc", "title_asc", "title_desc", "series_index".
 func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 	switch r.URL.Query().Get("sort") {
 	case "title_asc":
@@ -456,22 +456,26 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 		return "title", "desc"
 	case "added_asc":
 		return "added", "asc"
+	case "series_index":
+		return "series_index", "asc"
 	default: // "added_desc" or empty → newest first
 		return "added", "desc"
 	}
 }
 
 // handleAPIBooks serves the full book list as JSON for the web frontend.
-// Supports optional ?q= search query, ?unread=1 filter, ?sort= sort order,
-// and standard ?offset=&limit= pagination.
+// Supports optional ?q= search query, ?series= series filter, ?unread=1 filter,
+// ?sort= sort order, and standard ?offset=&limit= pagination.
 func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
+	seriesFilter := r.URL.Query().Get("series")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	offset, limit := parsePagination(r)
 	sortBy, sortOrder := parseSortParam(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
 		Query:      q,
+		Series:     seriesFilter,
 		Offset:     offset,
 		Limit:      limit,
 		UnreadOnly: unreadOnly,
@@ -637,6 +641,31 @@ func (s *Server) handleAPIDeleteBook(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// handleAPISeries returns all distinct series as a JSON array of {name, count} objects.
+// Returns 501 if the backend does not support series listing.
+func (s *Server) handleAPISeries(w http.ResponseWriter, r *http.Request) {
+	if s.seriesLister == nil {
+		http.Error(w, "series listing not supported by this backend", http.StatusNotImplemented)
+		return
+	}
+	entries, err := s.seriesLister.Series()
+	if err != nil {
+		http.Error(w, "series query error", http.StatusInternalServerError)
+		return
+	}
+
+	type seriesJSON struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	result := make([]seriesJSON, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, seriesJSON{Name: e.Name, Count: e.Count})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 // handleCover serves the cached cover image for a book by its ID.

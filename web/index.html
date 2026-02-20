@@ -75,6 +75,21 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Series page: back button + series name -->
+      <template v-else-if="currentView === 'series'">
+        <button @click="navigateTo('/')"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
+        </button>
+        <span class="font-semibold text-base truncate flex-1 min-w-0 text-amber-600 dark:text-amber-400">
+          {{ currentSeries }}
+        </span>
+        <div class="flex-1 sm:hidden"></div>
+      </template>
+
       <!-- Grid page: logo + search -->
       <template v-else>
         <a href="#/" class="flex items-center gap-2 shrink-0">
@@ -105,7 +120,7 @@
 
       <!-- Actions (grid-only: OPDS, refresh, upload; always: dark mode, logout) -->
       <div class="flex items-center gap-2 shrink-0">
-        <template v-if="currentView !== 'book'">
+        <template v-if="currentView === 'grid'">
           <a href="/opds" target="_blank" title="Flux OPDS"
              class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -275,7 +290,8 @@
               {{ book.title }}
             </p>
             <p v-if="book.series" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5 truncate font-medium">
-              {{ book.series }}<span v-if="book.seriesIndex"> #{{ book.seriesIndex }}<span v-if="book.seriesTotal">/{{ book.seriesTotal }}</span></span>
+              <a @click.stop="navigateTo('/series/' + encodeURIComponent(book.series))"
+                 class="hover:underline cursor-pointer">{{ book.series }}</a><span v-if="book.seriesIndex"> #{{ book.seriesIndex }}<span v-if="book.seriesTotal">/{{ book.seriesTotal }}</span></span>
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate" :title="(book.authors || []).join(', ')">
               {{ (book.authors || []).join(', ') || 'Auteur inconnu' }}
@@ -373,7 +389,8 @@
           <!-- Series (between title and authors) -->
           <p v-if="currentBook.series"
              class="text-base font-medium text-amber-600 dark:text-amber-400 mb-1">
-            {{ currentBook.series }}<span v-if="currentBook.seriesIndex"> — #{{ currentBook.seriesIndex }}<span v-if="currentBook.seriesTotal">/{{ currentBook.seriesTotal }}</span></span>
+            <a @click="navigateTo('/series/' + encodeURIComponent(currentBook.series))"
+               class="hover:underline cursor-pointer">{{ currentBook.series }}</a><span v-if="currentBook.seriesIndex"> — #{{ currentBook.seriesIndex }}<span v-if="currentBook.seriesTotal">/{{ currentBook.seriesTotal }}</span></span>
           </p>
 
           <!-- Authors -->
@@ -475,6 +492,82 @@
       </div><!-- end book detail -->
 
     </template><!-- end book view -->
+
+    <!-- ===== SERIES PAGE ===== -->
+    <template v-else-if="currentView === 'series'">
+
+      <!-- Loading -->
+      <div v-if="seriesLoading" class="flex justify-center items-center py-24">
+        <svg class="w-10 h-10 text-brand-600 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+        </svg>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else-if="seriesBooks.length === 0" class="flex flex-col items-center justify-center py-24 text-center">
+        <p class="text-lg font-medium text-gray-500 dark:text-gray-400">Aucun livre dans cette série</p>
+        <button @click="navigateTo('/')" class="mt-4 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+          Retour à la bibliothèque
+        </button>
+      </div>
+
+      <!-- Books grid sorted by series index -->
+      <div v-else>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          {{ seriesBooks.length }} tome{{ seriesBooks.length !== 1 ? 's' : '' }}
+        </p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
+          <div
+            v-for="book in seriesBooks"
+            :key="book.id"
+            @click="navigateTo('/books/' + book.id)"
+            class="group cursor-pointer"
+          >
+            <!-- Cover -->
+            <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
+                 :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
+              <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
+                   class="group-hover:scale-105 transition-transform duration-200"
+                   loading="lazy" @error="book.coverUrl = ''" />
+              <div v-else class="cover-placeholder" :style="{ background: coverGradient(book.id) }">
+                <svg class="w-10 h-10 text-white/60 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+                <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
+              </div>
+            </div>
+            <!-- Read banner -->
+            <div v-if="book.isRead"
+                 class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+              <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+              </svg>
+              <span class="text-white text-xs font-bold leading-none">Lu</span>
+            </div>
+            <!-- Meta -->
+            <div class="px-0.5">
+              <!-- Series index badge -->
+              <p v-if="book.seriesIndex" class="text-xs font-bold text-amber-600 dark:text-amber-400 mb-0.5">
+                Tome {{ book.seriesIndex }}<span v-if="book.seriesTotal"> / {{ book.seriesTotal }}</span>
+              </p>
+              <p class="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">{{ book.title }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                {{ (book.authors || []).join(', ') || 'Auteur inconnu' }}
+              </p>
+              <div v-if="book.rating > 0" class="flex gap-0.5 mt-1">
+                <svg v-for="s in 5" :key="s" class="w-3 h-3" :class="s <= book.rating ? 'text-amber-400' : 'text-gray-200 dark:text-gray-700'"
+                     fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </template><!-- end series view -->
 
   </main>
 
@@ -764,9 +857,12 @@ createApp({
     }
 
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series'
     const currentBook = ref(null)
     const bookLoading = ref(false)
+    const currentSeries = ref('')
+    const seriesBooks = ref([])
+    const seriesLoading = ref(false)
 
     function navigateTo(path) {
       window.location.hash = '#' + path
@@ -787,13 +883,35 @@ createApp({
       }
     }
 
+    async function loadSeries(name) {
+      seriesLoading.value = true
+      seriesBooks.value = []
+      try {
+        const params = new URLSearchParams({ series: name, sort: 'series_index', limit: 500 })
+        const res = await fetch('/api/books?' + params)
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        const data = await res.json()
+        seriesBooks.value = data.books || []
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        seriesLoading.value = false
+      }
+    }
+
     async function onHashChange() {
       const hash = window.location.hash
       const bookMatch = hash.match(/^#\/books\/(.+)$/)
+      const seriesMatch = hash.match(/^#\/series\/(.+)$/)
       if (bookMatch) {
         currentView.value = 'book'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadBook(decodeURIComponent(bookMatch[1]))
+      } else if (seriesMatch) {
+        currentView.value = 'series'
+        currentSeries.value = decodeURIComponent(seriesMatch[1])
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadSeries(currentSeries.value)
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -1039,6 +1157,7 @@ createApp({
       books, total, loading, page, searchQuery, unreadOnly, sortOrder, totalPages, pageNumbers,
       loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
+      currentSeries, seriesBooks, seriesLoading,
       togglingRead, toggleRead,
       setRating,
       deleting, deleteBook,

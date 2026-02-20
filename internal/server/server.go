@@ -30,6 +30,7 @@ type Server struct {
 	updater       catalog.Updater       // optional; nil if backend doesn't support metadata editing
 	refresher     catalog.Refresher     // optional; nil if backend doesn't support manual refresh
 	deleter       catalog.Deleter       // optional; nil if backend doesn't support deletion
+	seriesLister  catalog.SeriesLister  // optional; nil if backend doesn't support series listing
 	sessions      *sessionStore
 	opts          Options
 }
@@ -60,6 +61,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if dl, ok := cat.(catalog.Deleter); ok {
 		s.deleter = dl
+	}
+	if sl, ok := cat.(catalog.SeriesLister); ok {
+		s.seriesLister = sl
 	}
 	s.registerRoutes()
 	return s
@@ -126,6 +130,9 @@ func (s *Server) registerRoutes() {
 
 	// API: upload a new book (enabled when backend supports it)
 	protected.HandleFunc("/api/upload", s.handleUpload).Methods(http.MethodPost)
+
+	// API: list all distinct series
+	protected.HandleFunc("/api/series", s.handleAPISeries).Methods(http.MethodGet)
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)

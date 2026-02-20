@@ -99,7 +99,11 @@ type SearchQuery struct {
 	// UnreadOnly restricts results to books not yet marked as read.
 	UnreadOnly bool
 
-	// SortBy is the sort field: "" or "added" for added date, "title" for alphabetical.
+	// Series filters by exact series name (empty = no filter).
+	Series string
+
+	// SortBy is the sort field: "" or "added" for added date, "title" for alphabetical,
+	// "series_index" for numeric series position.
 	SortBy string
 
 	// SortOrder is the sort direction: "" or "desc" for descending, "asc" for ascending.
@@ -196,6 +200,20 @@ type Refresher interface {
 	// Refresh rescans the underlying store and updates the in-memory or
 	// database index to reflect the current state of the books directory.
 	Refresh() error
+}
+
+// SeriesEntry holds a series name and the number of books in it.
+type SeriesEntry struct {
+	Name  string
+	Count int
+}
+
+// SeriesLister is an optional interface for catalog backends that support
+// listing all distinct series with book counts.
+type SeriesLister interface {
+	// Series returns all distinct non-empty series names sorted alphabetically,
+	// each paired with the number of books belonging to that series.
+	Series() ([]SeriesEntry, error)
 }
 
 // Deleter is an optional interface for catalog backends that support deleting

@@ -338,6 +338,9 @@ func (b *Backend) BookByID(id string) (*catalog.Book, error) {
 // sortClause returns the SQL ORDER BY clause for the given SearchQuery.
 func sortClause(q catalog.SearchQuery) string {
 	switch q.SortBy {
+	case "series_index":
+		// Numeric sort by series_index (stored as text), fallback to title.
+		return "CAST(b.series_index AS REAL), b.series_index, LOWER(b.title)"
 	case "title":
 		if q.SortOrder == "desc" {
 			return "LOWER(b.title) DESC"
@@ -352,44 +355,57 @@ func sortClause(q catalog.SearchQuery) string {
 }
 
 // Search performs a case-insensitive substring search over title and authors.
-// If q.Query is empty all books are candidates (filtered only by q.UnreadOnly).
+// If q.Query is empty all books are candidates (filtered only by q.UnreadOnly / q.Series).
 func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
-	unreadClause := ""
+	var extraClauses []string
+	var extraArgs []any
+
 	if q.UnreadOnly {
-		unreadClause = " AND b.is_read = 0"
+		extraClauses = append(extraClauses, "b.is_read = 0")
+	}
+	if q.Series != "" {
+		extraClauses = append(extraClauses, "b.series = ?")
+		extraArgs = append(extraArgs, q.Series)
+	}
+
+	extraWhere := ""
+	for _, c := range extraClauses {
+		extraWhere += " AND " + c
 	}
 
 	orderBy := "ORDER BY " + sortClause(q)
 
 	if q.Query == "" {
-		// No text search: just apply optional unread filter.
-		total, err := b.countBooks(`SELECT COUNT(*) FROM books b WHERE 1=1` + unreadClause)
+		total, err := b.countBooks(`SELECT COUNT(*) FROM books b WHERE 1=1`+extraWhere, extraArgs...)
 		if err != nil {
 			return nil, 0, err
 		}
-		books, err := b.queryBooks(`WHERE 1=1`+unreadClause+` `+orderBy+` LIMIT ? OFFSET ?`, q.Limit, q.Offset)
+		args := append(extraArgs, q.Limit, q.Offset)
+		books, err := b.queryBooks(`WHERE 1=1`+extraWhere+` `+orderBy+` LIMIT ? OFFSET ?`, args...)
 		return books, total, err
 	}
 
 	like := "%" + strings.ToLower(q.Query) + "%"
 
+	countArgs := append([]any{like, like}, extraArgs...)
 	total, err := b.countBooks(`
 SELECT COUNT(DISTINCT b.id) FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
-WHERE (LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ?)`+unreadClause, like, like)
+WHERE (LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ?)`+extraWhere, countArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
 
+	queryArgs := append([]any{like, like}, extraArgs...)
+	queryArgs = append(queryArgs, q.Limit, q.Offset)
 	books, err := b.queryBooks(`
 JOIN (
     SELECT DISTINCT b2.id FROM books b2
     LEFT JOIN book_authors ba2 ON ba2.book_id = b2.id
     WHERE (LOWER(b2.title) LIKE ? OR LOWER(ba2.author_name) LIKE ?)
 ) AS matched ON b.id = matched.id
-WHERE 1=1`+unreadClause+`
-`+orderBy+` LIMIT ? OFFSET ?`,
-		like, like, q.Limit, q.Offset)
+WHERE 1=1`+extraWhere+`
+`+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
 	return books, total, err
 }
 
@@ -471,6 +487,29 @@ ORDER BY LOWER(tag) LIMIT ? OFFSET ?`, limit, offset)
 		tags = append(tags, tag)
 	}
 	return tags, total, rows.Err()
+}
+
+// Series returns all distinct non-empty series names sorted alphabetically
+// with the number of books in each. It implements catalog.SeriesLister.
+func (b *Backend) Series() ([]catalog.SeriesEntry, error) {
+	rows, err := b.db.Query(`
+SELECT series, COUNT(*) FROM books
+WHERE series != ''
+GROUP BY series
+ORDER BY LOWER(series)`)
+	if err != nil {
+		return nil, fmt.Errorf("query series: %w", err)
+	}
+	defer rows.Close()
+	var entries []catalog.SeriesEntry
+	for rows.Next() {
+		var e catalog.SeriesEntry
+		if err := rows.Scan(&e.Name, &e.Count); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
 }
 
 // UpdateBook applies the given update to the book and persists it to the DB.
