@@ -129,6 +129,15 @@ func CoverPath(coversDir, id string) (string, error) {
 type opfPackage struct {
 	Metadata opfMetadata `xml:"metadata"`
 	Manifest opfManifest `xml:"manifest"`
+	Spine    opfSpine    `xml:"spine"`
+}
+
+type opfSpine struct {
+	ItemRefs []opfItemRef `xml:"itemref"`
+}
+
+type opfItemRef struct {
+	IDRef string `xml:"idref,attr"`
 }
 
 type opfMetadata struct {
@@ -243,7 +252,8 @@ func extractCoverFromPkg(zr *zip.Reader, opfPath string, pkg opfPackage, bookID,
 	}
 
 	if coverHref == "" {
-		return ""
+		// Fallback: scan the first HTML spine item for the first <img> tag.
+		return findCoverInSpine(zr, opfDir, pkg, bookID, coversDir)
 	}
 
 	var fullHref string
@@ -294,6 +304,172 @@ func extractCoverFromPkg(zr *zip.Reader, opfPath string, pkg opfPackage, bookID,
 		return ""
 	}
 	return destPath
+}
+
+// findCoverInSpine walks the OPF spine in order, opens the first HTML/XHTML
+// item, and saves the first <img src="…"> it finds as the book cover.
+// Returns the saved cover path or "" if nothing is found.
+func findCoverInSpine(zr *zip.Reader, opfDir string, pkg opfPackage, bookID, coversDir string) string {
+	// Build manifest map: id → item.
+	byID := make(map[string]opfItem, len(pkg.Manifest.Items))
+	for _, item := range pkg.Manifest.Items {
+		byID[item.ID] = item
+	}
+
+	for _, ref := range pkg.Spine.ItemRefs {
+		item, ok := byID[ref.IDRef]
+		if !ok {
+			continue
+		}
+		if !strings.Contains(item.MediaType, "html") {
+			continue
+		}
+
+		// Resolve full path inside the ZIP.
+		var fullPath string
+		if opfDir != "" {
+			fullPath = opfDir + "/" + item.Href
+		} else {
+			fullPath = item.Href
+		}
+
+		// Open the HTML file.
+		var htmlFile *zip.File
+		for _, f := range zr.File {
+			if f.Name == fullPath {
+				htmlFile = f
+				break
+			}
+		}
+		if htmlFile == nil {
+			continue
+		}
+
+		rc, err := htmlFile.Open()
+		if err != nil {
+			continue
+		}
+		// Read only the first 64 KB to find the image quickly.
+		content, err := io.ReadAll(io.LimitReader(rc, 64*1024))
+		rc.Close()
+		if err != nil {
+			continue
+		}
+
+		imgSrc := findFirstImgSrc(string(content))
+		if imgSrc == "" {
+			continue
+		}
+
+		// Resolve the image path relative to the HTML file's directory.
+		htmlDir := filepath.ToSlash(filepath.Dir(fullPath))
+		if htmlDir == "." {
+			htmlDir = ""
+		}
+		var imgPath string
+		if strings.HasPrefix(imgSrc, "/") {
+			imgPath = strings.TrimPrefix(imgSrc, "/")
+		} else if htmlDir != "" {
+			imgPath = htmlDir + "/" + imgSrc
+		} else {
+			imgPath = imgSrc
+		}
+		// Clean up any ../ in the path.
+		imgPath = filepath.ToSlash(filepath.Clean(imgPath))
+
+		// Find the image file in the ZIP.
+		var imgFile *zip.File
+		for _, f := range zr.File {
+			if f.Name == imgPath {
+				imgFile = f
+				break
+			}
+		}
+		if imgFile == nil {
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(imgSrc))
+		if ext == "" {
+			ext = ".jpg"
+		}
+
+		destPath := filepath.Join(coversDir, bookID+ext)
+		if _, statErr := os.Stat(destPath); statErr == nil {
+			return destPath // already extracted
+		}
+
+		imgRC, err := imgFile.Open()
+		if err != nil {
+			continue
+		}
+		out, err := os.Create(destPath)
+		if err != nil {
+			imgRC.Close()
+			continue
+		}
+		_, copyErr := io.Copy(out, imgRC)
+		imgRC.Close()
+		out.Close()
+		if copyErr != nil {
+			_ = os.Remove(destPath)
+			continue
+		}
+		return destPath
+	}
+	return ""
+}
+
+// findFirstImgSrc does a simple scan for the first <img … src="…"> in an
+// HTML string. Returns the raw src value (not URL-decoded) or "".
+func findFirstImgSrc(html string) string {
+	lower := strings.ToLower(html)
+	idx := strings.Index(lower, "<img")
+	if idx == -1 {
+		return ""
+	}
+	tag := html[idx:]
+	endIdx := strings.Index(strings.ToLower(tag), ">")
+	if endIdx == -1 {
+		endIdx = len(tag)
+	}
+	tag = tag[:endIdx]
+
+	lowerTag := strings.ToLower(tag)
+	srcIdx := strings.Index(lowerTag, "src=")
+	if srcIdx == -1 {
+		return ""
+	}
+	rest := tag[srcIdx+4:]
+	if len(rest) == 0 {
+		return ""
+	}
+
+	var quote byte
+	if rest[0] == '"' || rest[0] == '\'' {
+		quote = rest[0]
+		rest = rest[1:]
+	}
+
+	var endSrc int
+	if quote != 0 {
+		endSrc = strings.IndexByte(rest, quote)
+	} else {
+		endSrc = strings.IndexAny(rest, " \t\n\r>")
+	}
+	if endSrc == -1 {
+		endSrc = len(rest)
+	}
+
+	src := rest[:endSrc]
+	// Strip query string and fragment.
+	if i := strings.IndexByte(src, '?'); i != -1 {
+		src = src[:i]
+	}
+	if i := strings.IndexByte(src, '#'); i != -1 {
+		src = src[:i]
+	}
+	return strings.TrimSpace(src)
 }
 
 func mimeToExt(mimeType string) string {

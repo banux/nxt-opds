@@ -48,6 +48,9 @@
 - [x] Make the "has been read" mark on cover more visible - **Done: replaced tiny top-right ✓ pill with a prominent bottom-of-cover green gradient overlay strip showing a bold checkmark + "Lu" text**
 - [x] Passer la marque "lu" avec un bandeau en dessous de dégradé de vert - **Done: replaced in-cover overlay strip with a separate green gradient banner (from-green-600 to-emerald-500) rendered below the cover, with rounded bottom corners; cover uses rounded-t-lg when book is read so the pair forms one visual unit**
 - [x] Sur la page du livre les étoiles de score ne marche pas le choix précédent n'est pas affiché mais est bien sauvegardé. - **Done: handleAPIBook and handleAPIUpdateBook were missing Rating: bk.Rating in their bookJSON responses; added to both handlers**
+- [ ] refresh button use basic auth instead of session cookie
+- [x] Some cover are not extract from epub because of bad metadata, search the image on first html page - **Done: findCoverInSpine() walks OPF spine in order, opens first HTML/XHTML item, uses findFirstImgSrc() to locate first <img src="…">, saves image as book cover; 9 unit tests in epub_test.go**
+- [ ] allow update cover
 
 ## Completed
 - [x] Project enabled for Ralph
