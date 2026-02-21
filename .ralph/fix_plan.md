@@ -50,7 +50,7 @@
 - [x] Sur la page du livre les étoiles de score ne marche pas le choix précédent n'est pas affiché mais est bien sauvegardé. - **Done: handleAPIBook and handleAPIUpdateBook were missing Rating: bk.Rating in their bookJSON responses; added to both handlers**
 - [ ] refresh button use basic auth instead of session cookie
 - [x] Some cover are not extract from epub because of bad metadata, search the image on first html page - **Done: findCoverInSpine() walks OPF spine in order, opens first HTML/XHTML item, uses findFirstImgSrc() to locate first <img src="…">, saves image as book cover; 9 unit tests in epub_test.go**
-- [ ] allow update cover
+- [x] allow update cover - **Done: catalog.CoverUpdater interface; UpdateCover() on fs+sqlite backends (removes old cover files, writes new image, updates DB/in-memory records); POST /api/books/{id}/cover handler (20 MB limit, auto-detects ext from MIME/filename); "Changer la couverture" button in book detail left column (file input ref, cache-busts URL with ?t=timestamp after upload); handleCover now uses actual file mod-time for proper browser cache invalidation**
 
 ## Completed
 - [x] Project enabled for Ralph

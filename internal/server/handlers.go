@@ -6,12 +6,14 @@ import (
 	"encoding/xml"
 	"fmt"
 	"html/template"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -702,7 +704,14 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 
-	http.ServeContent(w, r, filepath.Base(coverPath), time.Time{}, f)
+	// Use the file's actual mod-time so browsers honour If-Modified-Since
+	// after the cover has been replaced by the user.
+	stat, _ := f.Stat()
+	var modTime time.Time
+	if stat != nil {
+		modTime = stat.ModTime()
+	}
+	http.ServeContent(w, r, filepath.Base(coverPath), modTime, f)
 }
 
 // maxUploadSize is the maximum file size accepted for upload (100 MiB).
@@ -755,6 +764,65 @@ func (s *Server) handleAPIRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// handleAPIUpdateCover replaces the cover image for a book with the uploaded file.
+// Accepts a multipart/form-data POST with a field named "cover".
+// Returns 501 if the backend does not support cover updates.
+// Returns 200 {"ok":true} on success.
+func (s *Server) handleAPIUpdateCover(w http.ResponseWriter, r *http.Request) {
+	if s.coverUpdater == nil {
+		http.Error(w, "cover update not supported by this backend", http.StatusNotImplemented)
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+
+	// Limit to 20 MB for cover images.
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		http.Error(w, "invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("cover")
+	if err != nil {
+		http.Error(w, "missing cover field", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Determine extension from Content-Type header, then fall back to filename.
+	ext := imageExtFromMIME(header.Header.Get("Content-Type"))
+	if ext == "" {
+		ext = strings.ToLower(filepath.Ext(header.Filename))
+	}
+	if ext == "" {
+		ext = ".jpg"
+	}
+
+	if err := s.coverUpdater.UpdateCover(id, io.NopCloser(file), ext); err != nil {
+		http.Error(w, "update cover: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// imageExtFromMIME returns the file extension for common image MIME types.
+func imageExtFromMIME(mimeType string) string {
+	switch strings.ToLower(strings.SplitN(mimeType, ";", 2)[0]) {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ""
+	}
 }
 
 // handleDownload serves the raw file for a book's acquisition link.

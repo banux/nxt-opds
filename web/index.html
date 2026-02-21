@@ -376,6 +376,18 @@
             </svg>
             Télécharger
           </a>
+
+          <!-- Change cover button + hidden file input -->
+          <input type="file" accept="image/*" class="hidden" ref="coverFileInput"
+                 @change="onCoverFileChange(currentBook, $event)" />
+          <button @click="$refs.coverFileInput.click()" :disabled="coverUploading"
+            class="mt-2 w-48 sm:w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium rounded-xl transition-colors disabled:opacity-50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            {{ coverUploading ? 'Envoi…' : 'Changer la couverture' }}
+          </button>
         </div>
 
         <!-- Right column: metadata -->
@@ -1065,6 +1077,30 @@ createApp({
       }
     }
 
+    // ---- Update cover image ----
+    const coverUploading = ref(false)
+
+    async function onCoverFileChange(book, event) {
+      const file = event.target.files[0]
+      if (!file || !book) return
+      coverUploading.value = true
+      try {
+        const form = new FormData()
+        form.append('cover', file)
+        const res = await fetch('/api/books/' + book.id + '/cover', { method: 'POST', body: form })
+        if (!res.ok) throw new Error(await res.text() || 'Échec de l\'envoi')
+        // Force browser to re-fetch the updated cover (cache-bust with timestamp).
+        book.coverUrl = '/covers/' + book.id + '?t=' + Date.now()
+        showToast('Couverture mise à jour', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        coverUploading.value = false
+        // Reset the input so the same file can be re-selected if needed.
+        event.target.value = ''
+      }
+    }
+
     // ---- Refresh catalog ----
     const refreshing = ref(false)
 
@@ -1161,6 +1197,7 @@ createApp({
       togglingRead, toggleRead,
       setRating,
       deleting, deleteBook,
+      coverUploading, onCoverFileChange,
       editDialog, editForm, editSaving, editError, openEdit, closeEdit, saveEdits,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,

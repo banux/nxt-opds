@@ -224,6 +224,15 @@ type Deleter interface {
 	DeleteBook(id string) error
 }
 
+// CoverUpdater is an optional interface for catalog backends that support
+// replacing a book's cover image with a user-supplied image.
+type CoverUpdater interface {
+	// UpdateCover replaces the cover image for the book with the given ID.
+	// src is the image data (consumed and closed by the implementation).
+	// ext is the file extension including the dot (e.g. ".jpg", ".png").
+	UpdateCover(id string, src io.ReadCloser, ext string) error
+}
+
 // Backupper is an optional interface for catalog backends that support
 // creating a consistent point-in-time backup of their persistent store.
 type Backupper interface {

@@ -242,6 +242,53 @@ func (b *Backend) CoverPath(id string) (string, error) {
 	return epub.CoverPath(b.coversDir, id)
 }
 
+// UpdateCover replaces the cover image for the given book ID with the data
+// from src. It removes any previously cached cover image files for that ID
+// and updates the in-memory book record's CoverURL/ThumbnailURL fields.
+// It implements catalog.CoverUpdater.
+func (b *Backend) UpdateCover(id string, src io.ReadCloser, ext string) error {
+	defer src.Close()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, ok := b.byID[id]; !ok {
+		return fmt.Errorf("book %q not found", id)
+	}
+
+	// Remove existing cover files for this book (any extension).
+	for _, oldExt := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp"} {
+		_ = os.Remove(filepath.Join(b.coversDir, id+oldExt))
+	}
+
+	destPath := filepath.Join(b.coversDir, id+ext)
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create cover file: %w", err)
+	}
+
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		_ = os.Remove(destPath)
+		return fmt.Errorf("write cover: %w", err)
+	}
+	out.Close()
+
+	// Update in-memory record so subsequent API responses reflect the new cover.
+	bk := b.byID[id]
+	bk.CoverURL = "/covers/" + id
+	bk.ThumbnailURL = "/covers/" + id
+	// Mirror into the main slice (byID points into books slice, but update to be safe).
+	for i := range b.books {
+		if b.books[i].ID == id {
+			b.books[i].CoverURL = bk.CoverURL
+			b.books[i].ThumbnailURL = bk.ThumbnailURL
+			break
+		}
+	}
+	return nil
+}
+
 // Refresh re-scans the root directory and rebuilds the in-memory catalog.
 func (b *Backend) Refresh() error {
 	var books []catalog.Book

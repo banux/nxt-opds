@@ -313,6 +313,42 @@ func (b *Backend) CoverPath(id string) (string, error) {
 	return epub.CoverPath(b.coversDir, id)
 }
 
+// UpdateCover replaces the cover image for the given book ID with the data
+// from src, updates the cover_url and thumbnail_url columns in the database,
+// and removes any previously cached cover files for that ID.
+// It implements catalog.CoverUpdater.
+func (b *Backend) UpdateCover(id string, src io.ReadCloser, ext string) error {
+	defer src.Close()
+
+	// Remove existing cover files for this book (any extension).
+	for _, oldExt := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp"} {
+		_ = os.Remove(filepath.Join(b.coversDir, id+oldExt))
+	}
+
+	destPath := filepath.Join(b.coversDir, id+ext)
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create cover file: %w", err)
+	}
+
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		_ = os.Remove(destPath)
+		return fmt.Errorf("write cover: %w", err)
+	}
+	out.Close()
+
+	coverURL := "/covers/" + id
+	_, err = b.db.Exec(
+		`UPDATE books SET cover_url=?, thumbnail_url=? WHERE id=?`,
+		coverURL, coverURL, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update cover_url: %w", err)
+	}
+	return nil
+}
+
 // DeleteBook removes the book with the given ID from the DB and deletes its
 // file and cover image from disk. It implements catalog.Deleter.
 func (b *Backend) DeleteBook(id string) error {
