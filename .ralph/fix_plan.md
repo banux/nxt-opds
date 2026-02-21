@@ -57,6 +57,7 @@
 - [x] Avoir une page des livres d'un tag, doit aussi être dans les flux OPDS - **Done: Vue SPA #/tags/<name> page; ?tag= filter added to /api/books + Search in fs+sqlite backends; GET /api/tags endpoint; tags clickable in book detail page; OPDS v1/v2 feeds were already implemented**
 - [x] Avoir une catégorie non lu dans les flux OPDS - **Done: handleUnreadBooks (GET /opds/unread) for OPDS v1; handleOPDS2Unread (GET /opds/v2/unread) for OPDS v2; nav entries added to both root feeds; uses Search(UnreadOnly:true) with added-desc sort**
 - [x] Ajoute la collection avec un numéro dans les métadatas - **Done: epub.go parses series/collection from both Calibre-style EPUB2 (<meta name="calibre:series"/>) and EPUB3 OPF3 (<meta property="belongs-to-collection"/>) OPF metadata; populated into Book.Series/SeriesIndex at index time; OPDS v1 Entry gains CalSeries/CalSeriesIndex fields using Calibre namespace (http://calibre.kovidgoyal.net/2009/metadata) included in all acquisition feeds; bookToEntry() populates series in OPDS v1 entries; 9 new tests in epub_test.go**
+- [x] La collection doit être modifiable dans le formulaire - **Done: already implemented — edit form has Série/N°/Total fields (editForm.series/seriesIndex/seriesTotal) populated by openEdit(), sent via PATCH /api/books/{id}, and handled in UpdateBook; the collection extraction added in the previous task populates Book.Series/SeriesIndex which flows into and out of the edit form transparently**
 
 ## Completed
 - [x] Project enabled for Ralph
