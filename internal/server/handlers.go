@@ -85,7 +85,8 @@ func addPaginationLinks(feed *opds.Feed, r *http.Request, offset, limit, total i
 }
 
 // bookToEntry converts a catalog.Book to an opds.Entry for an acquisition feed.
-func bookToEntry(b catalog.Book) opds.Entry {
+// tok is the OPDS authentication token to append to all URLs (may be empty).
+func bookToEntry(b catalog.Book, tok string) opds.Entry {
 	entry := opds.Entry{
 		ID:      "urn:nxt-opds:book:" + b.ID,
 		Title:   opds.Text{Value: b.Title},
@@ -113,7 +114,7 @@ func bookToEntry(b catalog.Book) opds.Entry {
 	for _, f := range b.Files {
 		entry.Links = append(entry.Links, opds.Link{
 			Rel:  opds.RelAcquisition,
-			Href: "/opds/books/" + b.ID + "/download?path=" + url.QueryEscape(f.Path),
+			Href: withToken("/opds/books/"+b.ID+"/download?path="+url.QueryEscape(f.Path), tok),
 			Type: f.MIMEType,
 		})
 	}
@@ -121,14 +122,14 @@ func bookToEntry(b catalog.Book) opds.Entry {
 	if b.CoverURL != "" {
 		entry.Links = append(entry.Links, opds.Link{
 			Rel:  opds.RelCover,
-			Href: b.CoverURL,
+			Href: withToken(b.CoverURL, tok),
 			Type: "image/jpeg",
 		})
 	}
 	if b.ThumbnailURL != "" {
 		entry.Links = append(entry.Links, opds.Link{
 			Rel:  opds.RelThumbnail,
-			Href: b.ThumbnailURL,
+			Href: withToken(b.ThumbnailURL, tok),
 			Type: "image/jpeg",
 		})
 	}
@@ -138,6 +139,8 @@ func bookToEntry(b catalog.Book) opds.Entry {
 
 // handleRoot serves the root OPDS navigation feed.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
+
 	feed := opds.NewNavigationFeed(
 		"urn:nxt-opds:root",
 		"nxt-opds Catalog",
@@ -145,11 +148,11 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	feed.Author = &opds.Author{Name: "nxt-opds"}
 
 	// Self link
-	feed.AddLink(opds.RelSelf, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelSelf, withToken("/opds", tok), opds.MIMENavigationFeed)
 	// Start link (root)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	// Search link
-	feed.AddLink(opds.RelSearch, "/opds/opensearch.xml", opds.MIMEOpenSearchDesc)
+	feed.AddLink(opds.RelSearch, withToken("/opds/opensearch.xml", tok), opds.MIMEOpenSearchDesc)
 
 	now := time.Now()
 
@@ -160,7 +163,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		Updated: opds.AtomDate{Time: now},
 		Content: &opds.Content{Type: "text", Value: "Browse all books in the catalog"},
 		Links: []opds.Link{
-			{Rel: opds.RelCatalogNavigation, Href: "/opds/books", Type: opds.MIMEAcquisitionFeed},
+			{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/books", tok), Type: opds.MIMEAcquisitionFeed},
 		},
 	})
 
@@ -170,7 +173,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		Updated: opds.AtomDate{Time: now},
 		Content: &opds.Content{Type: "text", Value: "Browse books by author"},
 		Links: []opds.Link{
-			{Rel: opds.RelCatalogNavigation, Href: "/opds/authors", Type: opds.MIMENavigationFeed},
+			{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/authors", tok), Type: opds.MIMENavigationFeed},
 		},
 	})
 
@@ -180,7 +183,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		Updated: opds.AtomDate{Time: now},
 		Content: &opds.Content{Type: "text", Value: "Browse books by genre/tag"},
 		Links: []opds.Link{
-			{Rel: opds.RelCatalogNavigation, Href: "/opds/tags", Type: opds.MIMENavigationFeed},
+			{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/tags", tok), Type: opds.MIMENavigationFeed},
 		},
 	})
 
@@ -190,7 +193,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		Updated: opds.AtomDate{Time: now},
 		Content: &opds.Content{Type: "text", Value: "Browse books not yet read"},
 		Links: []opds.Link{
-			{Rel: opds.RelCatalogNavigation, Href: "/opds/unread", Type: opds.MIMEAcquisitionFeed},
+			{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/unread", tok), Type: opds.MIMEAcquisitionFeed},
 		},
 	})
 
@@ -200,7 +203,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		Updated: opds.AtomDate{Time: now},
 		Content: &opds.Content{Type: "text", Value: "Browse books by publisher"},
 		Links: []opds.Link{
-			{Rel: opds.RelCatalogNavigation, Href: "/opds/publishers", Type: opds.MIMENavigationFeed},
+			{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/publishers", tok), Type: opds.MIMENavigationFeed},
 		},
 	})
 
@@ -209,6 +212,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 // handleUnreadBooks serves the OPDS 1.x acquisition feed filtered to unread books.
 func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
@@ -227,12 +231,12 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 		"urn:nxt-opds:unread",
 		fmt.Sprintf("Unread Books (%d)", total),
 	)
-	feed.AddLink(opds.RelSelf, "/opds/unread", opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelSelf, withToken("/opds/unread", tok), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
-		feed.AddEntry(bookToEntry(bk))
+		feed.AddEntry(bookToEntry(bk, tok))
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
@@ -240,6 +244,7 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 
 // handleAllBooks serves the acquisition feed with all books.
 func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	books, total, err := s.catalog.AllBooks(offset, limit)
@@ -252,12 +257,12 @@ func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 		"urn:nxt-opds:all-books",
 		fmt.Sprintf("All Books (%d)", total),
 	)
-	feed.AddLink(opds.RelSelf, "/opds/books", opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelSelf, withToken("/opds/books", tok), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
-		feed.AddEntry(bookToEntry(bk))
+		feed.AddEntry(bookToEntry(bk, tok))
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
@@ -265,6 +270,7 @@ func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 
 // handleBook serves a single book entry.
 func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	id := vars["id"]
 
@@ -278,15 +284,16 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		"urn:nxt-opds:book:"+id,
 		bk.Title,
 	)
-	feed.AddLink(opds.RelSelf, "/opds/books/"+id, opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
-	feed.AddEntry(bookToEntry(*bk))
+	feed.AddLink(opds.RelSelf, withToken("/opds/books/"+id, tok), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
+	feed.AddEntry(bookToEntry(*bk, tok))
 
 	writeOPDS(w, http.StatusOK, feed)
 }
 
 // handleSearch performs a catalog search.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		http.Error(w, "missing search query parameter 'q'", http.StatusBadRequest)
@@ -310,11 +317,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Search: %s (%d results)", q, total),
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
-		feed.AddEntry(bookToEntry(bk))
+		feed.AddEntry(bookToEntry(bk, tok))
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
@@ -322,6 +329,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // handleAuthors serves the author navigation feed.
 func (s *Server) handleAuthors(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	authors, total, err := s.catalog.Authors(offset, limit)
@@ -334,8 +342,8 @@ func (s *Server) handleAuthors(w http.ResponseWriter, r *http.Request) {
 		"urn:nxt-opds:authors",
 		fmt.Sprintf("Authors (%d)", total),
 	)
-	feed.AddLink(opds.RelSelf, "/opds/authors", opds.MIMENavigationFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelSelf, withToken("/opds/authors", tok), opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMENavigationFeed)
 
 	now := time.Now()
@@ -347,7 +355,7 @@ func (s *Server) handleAuthors(w http.ResponseWriter, r *http.Request) {
 			Links: []opds.Link{
 				{
 					Rel:  opds.RelCatalogNavigation,
-					Href: "/opds/authors/" + url.PathEscape(name),
+					Href: withToken("/opds/authors/"+url.PathEscape(name), tok),
 					Type: opds.MIMEAcquisitionFeed,
 				},
 			},
@@ -359,6 +367,7 @@ func (s *Server) handleAuthors(w http.ResponseWriter, r *http.Request) {
 
 // handleAuthorBooks serves books filtered by a specific author.
 func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	author, _ := url.PathUnescape(vars["author"])
 	offset, limit := parsePagination(r)
@@ -374,11 +383,11 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Books by %s (%d)", author, total),
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
-		feed.AddEntry(bookToEntry(bk))
+		feed.AddEntry(bookToEntry(bk, tok))
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
@@ -386,6 +395,7 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 
 // handleTags serves the tag/genre navigation feed.
 func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	tags, total, err := s.catalog.Tags(offset, limit)
@@ -398,8 +408,8 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 		"urn:nxt-opds:tags",
 		fmt.Sprintf("Genres (%d)", total),
 	)
-	feed.AddLink(opds.RelSelf, "/opds/tags", opds.MIMENavigationFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelSelf, withToken("/opds/tags", tok), opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMENavigationFeed)
 
 	now := time.Now()
@@ -411,7 +421,7 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 			Links: []opds.Link{
 				{
 					Rel:  opds.RelCatalogNavigation,
-					Href: "/opds/tags/" + url.PathEscape(tag),
+					Href: withToken("/opds/tags/"+url.PathEscape(tag), tok),
 					Type: opds.MIMEAcquisitionFeed,
 				},
 			},
@@ -423,6 +433,7 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 
 // handleTagBooks serves books filtered by a specific tag/genre.
 func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	tag, _ := url.PathUnescape(vars["tag"])
 	offset, limit := parsePagination(r)
@@ -438,11 +449,11 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Genre: %s (%d)", tag, total),
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
-		feed.AddEntry(bookToEntry(bk))
+		feed.AddEntry(bookToEntry(bk, tok))
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
@@ -450,6 +461,7 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 
 // handlePublishers serves the publisher navigation feed (OPDS 1.x).
 func (s *Server) handlePublishers(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	publishers, total, err := s.catalog.Publishers(offset, limit)
@@ -462,8 +474,8 @@ func (s *Server) handlePublishers(w http.ResponseWriter, r *http.Request) {
 		"urn:nxt-opds:publishers",
 		fmt.Sprintf("Publishers (%d)", total),
 	)
-	feed.AddLink(opds.RelSelf, "/opds/publishers", opds.MIMENavigationFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelSelf, withToken("/opds/publishers", tok), opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMENavigationFeed)
 
 	now := time.Now()
@@ -475,7 +487,7 @@ func (s *Server) handlePublishers(w http.ResponseWriter, r *http.Request) {
 			Links: []opds.Link{
 				{
 					Rel:  opds.RelCatalogNavigation,
-					Href: "/opds/publishers/" + url.PathEscape(pub),
+					Href: withToken("/opds/publishers/"+url.PathEscape(pub), tok),
 					Type: opds.MIMEAcquisitionFeed,
 				},
 			},
@@ -487,6 +499,7 @@ func (s *Server) handlePublishers(w http.ResponseWriter, r *http.Request) {
 
 // handlePublisherBooks serves books filtered by a specific publisher (OPDS 1.x).
 func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	publisher, _ := url.PathUnescape(vars["publisher"])
 	offset, limit := parsePagination(r)
@@ -502,11 +515,11 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Publisher: %s (%d)", publisher, total),
 	)
 	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
-	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
 
 	for _, bk := range books {
-		feed.AddEntry(bookToEntry(bk))
+		feed.AddEntry(bookToEntry(bk, tok))
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
@@ -993,6 +1006,19 @@ func (s *Server) handleAPIUpdateCover(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
+// withToken appends the OPDS authentication token to a feed URL so that
+// OPDS reader clients can follow sub-feed links without getting 401 errors.
+// If tok is empty, href is returned unchanged.
+func withToken(href, tok string) string {
+	if tok == "" {
+		return href
+	}
+	if strings.Contains(href, "?") {
+		return href + "&token=" + url.QueryEscape(tok)
+	}
+	return href + "?token=" + url.QueryEscape(tok)
+}
+
 // imageExtFromMIME returns the file extension for common image MIME types.
 func imageExtFromMIME(mimeType string) string {
 	switch strings.ToLower(strings.SplitN(mimeType, ";", 2)[0]) {
@@ -1075,7 +1101,8 @@ func writeOPDS2(w http.ResponseWriter, status int, feed *opds2.Feed) {
 }
 
 // bookToPublication converts a catalog.Book to an opds2.Publication.
-func bookToPublication(b catalog.Book) opds2.Publication {
+// tok is the OPDS authentication token to append to all URLs (may be empty).
+func bookToPublication(b catalog.Book, tok string) opds2.Publication {
 	pub := opds2.Publication{
 		Metadata: opds2.PubMetadata{
 			Type:        "http://schema.org/Book",
@@ -1133,7 +1160,7 @@ func bookToPublication(b catalog.Book) opds2.Publication {
 	for _, f := range b.Files {
 		pub.Links = append(pub.Links, opds2.Link{
 			Rel:  "http://opds-spec.org/acquisition",
-			Href: "/opds/books/" + b.ID + "/download?path=" + url.QueryEscape(f.Path),
+			Href: withToken("/opds/books/"+b.ID+"/download?path="+url.QueryEscape(f.Path), tok),
 			Type: f.MIMEType,
 		})
 	}
@@ -1142,14 +1169,14 @@ func bookToPublication(b catalog.Book) opds2.Publication {
 	if b.CoverURL != "" {
 		pub.Images = append(pub.Images, opds2.Link{
 			Rel:  "http://opds-spec.org/image",
-			Href: b.CoverURL,
+			Href: withToken(b.CoverURL, tok),
 			Type: "image/jpeg",
 		})
 	}
 	if b.ThumbnailURL != "" {
 		pub.Images = append(pub.Images, opds2.Link{
 			Rel:  "http://opds-spec.org/image/thumbnail",
-			Href: b.ThumbnailURL,
+			Href: withToken(b.ThumbnailURL, tok),
 			Type: "image/jpeg",
 		})
 	}
@@ -1179,19 +1206,20 @@ func addPaginationLinks2(feed *opds2.Feed, r *http.Request, offset, limit, total
 
 // handleOPDS2Root serves the OPDS 2.0 root navigation feed.
 func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	feed := &opds2.Feed{
 		Metadata: opds2.FeedMetadata{Title: "nxt-opds Catalog"},
 		Links: []opds2.Link{
-			{Rel: "self", Href: "/opds/v2", Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 			{Rel: "search", Href: "/opds/v2/search{?q}", Type: opds2.MIMEFeed, Templated: true},
 		},
 		Navigation: []opds2.NavItem{
-			{Title: "Tous les livres", Href: "/opds/v2/publications", Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Par auteur", Href: "/opds/v2/authors", Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Par genre", Href: "/opds/v2/tags", Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Par éditeur", Href: "/opds/v2/publishers", Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Non lus", Href: "/opds/v2/unread", Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Tous les livres", Href: withToken("/opds/v2/publications", tok), Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Par auteur", Href: withToken("/opds/v2/authors", tok), Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Par genre", Href: withToken("/opds/v2/tags", tok), Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Par éditeur", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Non lus", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed, Rel: "current"},
 		},
 	}
 	writeOPDS2(w, http.StatusOK, feed)
@@ -1199,6 +1227,7 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2Unread serves the OPDS 2.0 acquisition feed filtered to unread books.
 func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
@@ -1219,14 +1248,14 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 			NumberOfItems: total,
 		},
 		Links: []opds2.Link{
-			{Rel: "self", Href: "/opds/v2/unread", Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -1234,6 +1263,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2Publications serves the OPDS 2.0 acquisition feed with all books.
 func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	books, total, err := s.catalog.AllBooks(offset, limit)
@@ -1248,14 +1278,14 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 			NumberOfItems: total,
 		},
 		Links: []opds2.Link{
-			{Rel: "self", Href: "/opds/v2/publications", Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken("/opds/v2/publications", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -1263,6 +1293,7 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 
 // handleOPDS2Search performs a catalog search and returns an OPDS 2.0 feed.
 func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		http.Error(w, "missing search query parameter 'q'", http.StatusBadRequest)
@@ -1288,13 +1319,13 @@ func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 		},
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -1302,6 +1333,7 @@ func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2Authors serves the OPDS 2.0 author navigation feed.
 func (s *Server) handleOPDS2Authors(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	authors, total, err := s.catalog.Authors(offset, limit)
@@ -1316,8 +1348,8 @@ func (s *Server) handleOPDS2Authors(w http.ResponseWriter, r *http.Request) {
 			NumberOfItems: total,
 		},
 		Links: []opds2.Link{
-			{Rel: "self", Href: "/opds/v2/authors", Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken("/opds/v2/authors", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -1325,7 +1357,7 @@ func (s *Server) handleOPDS2Authors(w http.ResponseWriter, r *http.Request) {
 	for _, name := range authors {
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: name,
-			Href:  "/opds/v2/authors/" + url.PathEscape(name),
+			Href:  withToken("/opds/v2/authors/"+url.PathEscape(name), tok),
 			Type:  opds2.MIMEFeed,
 			Rel:   "subsection",
 		})
@@ -1336,6 +1368,7 @@ func (s *Server) handleOPDS2Authors(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2AuthorBooks serves an OPDS 2.0 acquisition feed for a specific author.
 func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	author, _ := url.PathUnescape(vars["author"])
 	offset, limit := parsePagination(r)
@@ -1353,13 +1386,13 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 		},
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -1367,6 +1400,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 
 // handleOPDS2Tags serves the OPDS 2.0 tag/genre navigation feed.
 func (s *Server) handleOPDS2Tags(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	tags, total, err := s.catalog.Tags(offset, limit)
@@ -1381,8 +1415,8 @@ func (s *Server) handleOPDS2Tags(w http.ResponseWriter, r *http.Request) {
 			NumberOfItems: total,
 		},
 		Links: []opds2.Link{
-			{Rel: "self", Href: "/opds/v2/tags", Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken("/opds/v2/tags", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -1390,7 +1424,7 @@ func (s *Server) handleOPDS2Tags(w http.ResponseWriter, r *http.Request) {
 	for _, tag := range tags {
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: tag,
-			Href:  "/opds/v2/tags/" + url.PathEscape(tag),
+			Href:  withToken("/opds/v2/tags/"+url.PathEscape(tag), tok),
 			Type:  opds2.MIMEFeed,
 			Rel:   "subsection",
 		})
@@ -1401,6 +1435,7 @@ func (s *Server) handleOPDS2Tags(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2TagBooks serves an OPDS 2.0 acquisition feed for a specific tag/genre.
 func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	tag, _ := url.PathUnescape(vars["tag"])
 	offset, limit := parsePagination(r)
@@ -1418,13 +1453,13 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 		},
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -1432,6 +1467,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2Publishers serves the OPDS 2.0 publisher navigation feed.
 func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
 
 	publishers, total, err := s.catalog.Publishers(offset, limit)
@@ -1446,8 +1482,8 @@ func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
 			NumberOfItems: total,
 		},
 		Links: []opds2.Link{
-			{Rel: "self", Href: "/opds/v2/publishers", Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -1455,7 +1491,7 @@ func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
 	for _, pub := range publishers {
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: pub,
-			Href:  "/opds/v2/publishers/" + url.PathEscape(pub),
+			Href:  withToken("/opds/v2/publishers/"+url.PathEscape(pub), tok),
 			Type:  opds2.MIMEFeed,
 			Rel:   "subsection",
 		})
@@ -1466,6 +1502,7 @@ func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
 
 // handleOPDS2PublisherBooks serves an OPDS 2.0 acquisition feed for a specific publisher.
 func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
 	vars := mux.Vars(r)
 	publisher, _ := url.PathUnescape(vars["publisher"])
 	offset, limit := parsePagination(r)
@@ -1483,13 +1520,13 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 		},
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
-			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)

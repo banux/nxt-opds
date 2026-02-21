@@ -942,3 +942,122 @@ func TestAPIConfig_ReturnsToken(t *testing.T) {
 		t.Errorf("opdsToken: got %q, want mytoken", resp["opdsToken"])
 	}
 }
+
+// ---- OPDS token propagation through feed links ----
+
+// TestWithToken verifies the withToken helper appends the token correctly.
+func TestWithToken_NoToken(t *testing.T) {
+	if got := withToken("/opds/books", ""); got != "/opds/books" {
+		t.Errorf("withToken with empty tok: got %q, want /opds/books", got)
+	}
+}
+
+func TestWithToken_NoExistingQuery(t *testing.T) {
+	got := withToken("/opds/books", "secret")
+	want := "/opds/books?token=secret"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestWithToken_WithExistingQuery(t *testing.T) {
+	got := withToken("/opds/books?offset=0&limit=10", "secret")
+	want := "/opds/books?offset=0&limit=10&token=secret"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestOPDSRootFeed_TokenPropagation verifies that when the root feed is requested
+// with a token, all navigation entry links in the feed include the token.
+func TestOPDSRootFeed_TokenPropagation(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds?token=mytoken", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var feed opds.Feed
+	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+
+	// Every navigation entry link href must contain the token
+	for _, entry := range feed.Entries {
+		for _, link := range entry.Links {
+			if !strings.Contains(link.Href, "token=mytoken") {
+				t.Errorf("navigation entry %q link %q does not contain token", entry.Title.Value, link.Href)
+			}
+		}
+	}
+
+	// Self and start links must also contain the token
+	for _, link := range feed.Links {
+		if link.Rel == opds.RelSelf || link.Rel == opds.RelStart {
+			if !strings.Contains(link.Href, "token=mytoken") {
+				t.Errorf("feed link (rel=%s) %q does not contain token", link.Rel, link.Href)
+			}
+		}
+	}
+}
+
+// TestOPDSAllBooks_TokenPropagationInEntries verifies that when the books feed
+// is requested with a token, acquisition and cover link hrefs include the token.
+func TestOPDSAllBooks_TokenPropagationInEntries(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	uploadBook(t, srv, "test.epub", "Token Test", "Author")
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/books?token=mytoken", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var feed opds.Feed
+	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+
+	if len(feed.Entries) == 0 {
+		t.Fatal("expected at least 1 entry")
+	}
+
+	for _, entry := range feed.Entries {
+		for _, link := range entry.Links {
+			if link.Rel == opds.RelAcquisition && !strings.Contains(link.Href, "token=mytoken") {
+				t.Errorf("acquisition link %q does not contain token", link.Href)
+			}
+		}
+	}
+}
+
+// TestOPDSRootFeed_NoTokenWhenAbsent verifies that when no token is in the request,
+// feed links do not gain a spurious token parameter.
+func TestOPDSRootFeed_NoTokenWhenAbsent(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var feed opds.Feed
+	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+
+	for _, entry := range feed.Entries {
+		for _, link := range entry.Links {
+			if strings.Contains(link.Href, "token=") {
+				t.Errorf("navigation link %q unexpectedly contains token= when none was requested", link.Href)
+			}
+		}
+	}
+}
