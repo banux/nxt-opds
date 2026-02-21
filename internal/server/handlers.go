@@ -189,6 +189,16 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	feed.AddEntry(opds.Entry{
+		ID:      "urn:nxt-opds:by-publisher",
+		Title:   opds.Text{Value: "By Publisher"},
+		Updated: opds.AtomDate{Time: now},
+		Content: &opds.Content{Type: "text", Value: "Browse books by publisher"},
+		Links: []opds.Link{
+			{Rel: opds.RelCatalogNavigation, Href: "/opds/publishers", Type: opds.MIMENavigationFeed},
+		},
+	})
+
 	writeOPDS(w, http.StatusOK, feed)
 }
 
@@ -433,6 +443,70 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 	writeOPDS(w, http.StatusOK, feed)
 }
 
+// handlePublishers serves the publisher navigation feed (OPDS 1.x).
+func (s *Server) handlePublishers(w http.ResponseWriter, r *http.Request) {
+	offset, limit := parsePagination(r)
+
+	publishers, total, err := s.catalog.Publishers(offset, limit)
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := opds.NewNavigationFeed(
+		"urn:nxt-opds:publishers",
+		fmt.Sprintf("Publishers (%d)", total),
+	)
+	feed.AddLink(opds.RelSelf, "/opds/publishers", opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMENavigationFeed)
+
+	now := time.Now()
+	for _, pub := range publishers {
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:publisher:" + pub,
+			Title:   opds.Text{Value: pub},
+			Updated: opds.AtomDate{Time: now},
+			Links: []opds.Link{
+				{
+					Rel:  opds.RelCatalogNavigation,
+					Href: "/opds/publishers/" + url.PathEscape(pub),
+					Type: opds.MIMEAcquisitionFeed,
+				},
+			},
+		})
+	}
+
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// handlePublisherBooks serves books filtered by a specific publisher (OPDS 1.x).
+func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	publisher, _ := url.PathUnescape(vars["publisher"])
+	offset, limit := parsePagination(r)
+
+	books, total, err := s.catalog.BooksByPublisher(publisher, offset, limit)
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := opds.NewAcquisitionFeed(
+		"urn:nxt-opds:publisher:"+publisher,
+		fmt.Sprintf("Publisher: %s (%d)", publisher, total),
+	)
+	feed.AddLink(opds.RelSelf, r.URL.RequestURI(), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
+
+	for _, bk := range books {
+		feed.AddEntry(bookToEntry(bk))
+	}
+
+	writeOPDS(w, http.StatusOK, feed)
+}
+
 // handleOpenSearch serves the OpenSearch description document.
 func (s *Server) handleOpenSearch(w http.ResponseWriter, r *http.Request) {
 	type OpenSearchDescription struct {
@@ -508,12 +582,14 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 
 // handleAPIBooks serves the full book list as JSON for the web frontend.
 // Supports optional ?q= search query, ?series= series filter, ?author= author filter,
-// ?tag= tag filter, ?unread=1 filter, ?sort= sort order, and standard ?offset=&limit= pagination.
+// ?tag= tag filter, ?publisher= publisher filter, ?unread=1 filter, ?sort= sort order,
+// and standard ?offset=&limit= pagination.
 func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	seriesFilter := r.URL.Query().Get("series")
 	authorFilter := r.URL.Query().Get("author")
 	tagFilter := r.URL.Query().Get("tag")
+	publisherFilter := r.URL.Query().Get("publisher")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	offset, limit := parsePagination(r)
 	sortBy, sortOrder := parseSortParam(r)
@@ -523,6 +599,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		Series:     seriesFilter,
 		Author:     authorFilter,
 		Tag:        tagFilter,
+		Publisher:  publisherFilter,
 		Offset:     offset,
 		Limit:      limit,
 		UnreadOnly: unreadOnly,
@@ -718,6 +795,20 @@ func (s *Server) handleAPITags(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(tags)
+}
+
+// handleAPIPublishers returns all distinct publisher names as a JSON array of strings.
+func (s *Server) handleAPIPublishers(w http.ResponseWriter, r *http.Request) {
+	publishers, _, err := s.catalog.Publishers(0, 10000)
+	if err != nil {
+		http.Error(w, "publishers query error", http.StatusInternalServerError)
+		return
+	}
+	if publishers == nil {
+		publishers = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(publishers)
 }
 
 // handleAPISeries returns all distinct series as a JSON array of {name, count} objects.
@@ -1079,6 +1170,7 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 			{Title: "Tous les livres", Href: "/opds/v2/publications", Type: opds2.MIMEFeed, Rel: "current"},
 			{Title: "Par auteur", Href: "/opds/v2/authors", Type: opds2.MIMEFeed, Rel: "current"},
 			{Title: "Par genre", Href: "/opds/v2/tags", Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Par éditeur", Href: "/opds/v2/publishers", Type: opds2.MIMEFeed, Rel: "current"},
 			{Title: "Non lus", Href: "/opds/v2/unread", Type: opds2.MIMEFeed, Rel: "current"},
 		},
 	}
@@ -1302,6 +1394,71 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 	feed := &opds2.Feed{
 		Metadata: opds2.FeedMetadata{
 			Title:         fmt.Sprintf("Genre : %s (%d)", tag, total),
+			NumberOfItems: total,
+		},
+		Links: []opds2.Link{
+			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+		},
+	}
+	addPaginationLinks2(feed, r, offset, limit, total)
+
+	for _, bk := range books {
+		feed.Publications = append(feed.Publications, bookToPublication(bk))
+	}
+
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
+// handleOPDS2Publishers serves the OPDS 2.0 publisher navigation feed.
+func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
+	offset, limit := parsePagination(r)
+
+	publishers, total, err := s.catalog.Publishers(offset, limit)
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{
+			Title:         fmt.Sprintf("Éditeurs (%d)", total),
+			NumberOfItems: total,
+		},
+		Links: []opds2.Link{
+			{Rel: "self", Href: "/opds/v2/publishers", Type: opds2.MIMEFeed},
+			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+		},
+	}
+	addPaginationLinks2(feed, r, offset, limit, total)
+
+	for _, pub := range publishers {
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: pub,
+			Href:  "/opds/v2/publishers/" + url.PathEscape(pub),
+			Type:  opds2.MIMEFeed,
+			Rel:   "subsection",
+		})
+	}
+
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
+// handleOPDS2PublisherBooks serves an OPDS 2.0 acquisition feed for a specific publisher.
+func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	publisher, _ := url.PathUnescape(vars["publisher"])
+	offset, limit := parsePagination(r)
+
+	books, total, err := s.catalog.BooksByPublisher(publisher, offset, limit)
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{
+			Title:         fmt.Sprintf("Éditeur : %s (%d)", publisher, total),
 			NumberOfItems: total,
 		},
 		Links: []opds2.Link{

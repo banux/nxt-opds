@@ -93,6 +93,9 @@ type SearchQuery struct {
 	// Tag filters by a specific tag/genre.
 	Tag string
 
+	// Publisher filters by exact publisher name.
+	Publisher string
+
 	// Language filters by BCP 47 language tag.
 	Language string
 
@@ -142,6 +145,12 @@ type Catalog interface {
 
 	// Tags returns all distinct tags/genres.
 	Tags(offset, limit int) ([]string, int, error)
+
+	// Publishers returns all distinct publisher names (non-empty), sorted alphabetically.
+	Publishers(offset, limit int) ([]string, int, error)
+
+	// BooksByPublisher returns books filtered by exact publisher name.
+	BooksByPublisher(publisher string, offset, limit int) ([]Book, int, error)
 }
 
 // NavEntry is a navigation item pointing to a sub-feed.

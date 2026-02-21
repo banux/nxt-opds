@@ -44,12 +44,13 @@ type Backend struct {
 	coversDir    string // {root}/.covers – extracted cover images
 	metadataPath string // {root}/.metadata.json – user metadata overrides
 
-	mu        sync.RWMutex
-	books     []catalog.Book
-	byID      map[string]*catalog.Book
-	authors   map[string][]string // author name -> book IDs
-	tags      map[string][]string // tag -> book IDs
-	overrides map[string]metaOverride // book ID -> user-edited metadata
+	mu         sync.RWMutex
+	books      []catalog.Book
+	byID       map[string]*catalog.Book
+	authors    map[string][]string // author name -> book IDs
+	tags       map[string][]string // tag -> book IDs
+	publishers map[string][]string // publisher name -> book IDs
+	overrides  map[string]metaOverride // book ID -> user-edited metadata
 }
 
 // New creates a new filesystem backend rooted at dir and performs an initial scan.
@@ -65,6 +66,7 @@ func New(dir string) (*Backend, error) {
 		byID:         make(map[string]*catalog.Book),
 		authors:      make(map[string][]string),
 		tags:         make(map[string][]string),
+		publishers:   make(map[string][]string),
 		overrides:    make(map[string]metaOverride),
 	}
 	// Load persisted metadata overrides (ignore error if file doesn't exist yet)
@@ -199,12 +201,15 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 
 	b.overrides[id] = ov
 
-	// Rebuild indexes: remove old author/tag entries for this book
+	// Rebuild indexes: remove old author/tag/publisher entries for this book
 	for name, ids := range b.authors {
 		b.authors[name] = removeID(ids, id)
 	}
 	for tag, ids := range b.tags {
 		b.tags[tag] = removeID(ids, id)
+	}
+	for pub, ids := range b.publishers {
+		b.publishers[pub] = removeID(ids, id)
 	}
 
 	updated := b.applyOverride(*bk)
@@ -215,6 +220,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	for _, t := range bk.Tags {
 		b.tags[t] = append(b.tags[t], bk.ID)
+	}
+	if bk.Publisher != "" {
+		b.publishers[bk.Publisher] = append(b.publishers[bk.Publisher], bk.ID)
 	}
 
 	bk.UpdatedAt = time.Now()
@@ -334,6 +342,7 @@ func (b *Backend) Refresh() error {
 	byID := make(map[string]*catalog.Book, len(books))
 	authors := make(map[string][]string)
 	tags := make(map[string][]string)
+	publishers := make(map[string][]string)
 
 	for i := range books {
 		bk := &books[i]
@@ -344,6 +353,9 @@ func (b *Backend) Refresh() error {
 		for _, t := range bk.Tags {
 			tags[t] = append(tags[t], bk.ID)
 		}
+		if bk.Publisher != "" {
+			publishers[bk.Publisher] = append(publishers[bk.Publisher], bk.ID)
+		}
 	}
 
 	b.mu.Lock()
@@ -351,6 +363,7 @@ func (b *Backend) Refresh() error {
 	b.byID = byID
 	b.authors = authors
 	b.tags = tags
+	b.publishers = publishers
 	b.mu.Unlock()
 	return nil
 }
@@ -448,6 +461,9 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 			if !tagMatch {
 				continue
 			}
+		}
+		if q.Publisher != "" && !strings.EqualFold(bk.Publisher, q.Publisher) {
+			continue
 		}
 		if q.Query == "" {
 			matched = append(matched, bk)
@@ -606,6 +622,52 @@ func (b *Backend) Tags(offset, limit int) ([]string, int, error) {
 	return tagList[offset:end], total, nil
 }
 
+// Publishers returns all distinct non-empty publisher names sorted alphabetically with pagination.
+func (b *Backend) Publishers(offset, limit int) ([]string, int, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	pubList := make([]string, 0, len(b.publishers))
+	for p := range b.publishers {
+		pubList = append(pubList, p)
+	}
+	sort.Strings(pubList)
+
+	total := len(pubList)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > total || limit == 0 {
+		end = total
+	}
+	return pubList[offset:end], total, nil
+}
+
+// BooksByPublisher returns books by a specific publisher with pagination.
+func (b *Backend) BooksByPublisher(publisher string, offset, limit int) ([]catalog.Book, int, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	ids := b.publishers[publisher]
+	total := len(ids)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	books := make([]catalog.Book, 0, end-offset)
+	for _, id := range ids[offset:end] {
+		if bk, ok := b.byID[id]; ok {
+			books = append(books, *bk)
+		}
+	}
+	return books, total, nil
+}
+
 // Series returns all distinct non-empty series names sorted alphabetically
 // with the number of books in each. It implements catalog.SeriesLister.
 func (b *Backend) Series() ([]catalog.SeriesEntry, error) {
@@ -654,6 +716,9 @@ func (b *Backend) DeleteBook(id string) error {
 	}
 	for tag, ids := range b.tags {
 		b.tags[tag] = removeID(ids, id)
+	}
+	for pub, ids := range b.publishers {
+		b.publishers[pub] = removeID(ids, id)
 	}
 	delete(b.byID, id)
 	for i, bk := range b.books {
@@ -731,6 +796,9 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	}
 	for _, t := range bk.Tags {
 		b.tags[t] = append(b.tags[t], bk.ID)
+	}
+	if bk.Publisher != "" {
+		b.publishers[bk.Publisher] = append(b.publishers[bk.Publisher], bk.ID)
 	}
 	b.mu.Unlock()
 

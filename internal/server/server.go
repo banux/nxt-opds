@@ -117,6 +117,10 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/tags", s.handleTags).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/tags/{tag}", s.handleTagBooks).Methods(http.MethodGet)
 
+	// Browse by publisher
+	protected.HandleFunc("/opds/publishers", s.handlePublishers).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/publishers/{publisher}", s.handlePublisherBooks).Methods(http.MethodGet)
+
 	// Unread books feed
 	protected.HandleFunc("/opds/unread", s.handleUnreadBooks).Methods(http.MethodGet)
 
@@ -147,6 +151,9 @@ func (s *Server) registerRoutes() {
 	// API: list all distinct tags
 	protected.HandleFunc("/api/tags", s.handleAPITags).Methods(http.MethodGet)
 
+	// API: list all distinct publishers
+	protected.HandleFunc("/api/publishers", s.handleAPIPublishers).Methods(http.MethodGet)
+
 	// API: list all distinct series
 	protected.HandleFunc("/api/series", s.handleAPISeries).Methods(http.MethodGet)
 
@@ -164,6 +171,8 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/v2/authors/{author}", s.handleOPDS2AuthorBooks).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/tags", s.handleOPDS2Tags).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/tags/{tag}", s.handleOPDS2TagBooks).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/publishers", s.handleOPDS2Publishers).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/publishers/{publisher}", s.handleOPDS2PublisherBooks).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/unread", s.handleOPDS2Unread).Methods(http.MethodGet)
 
 	// Frontend static assets – serves index.html at / and any static files.

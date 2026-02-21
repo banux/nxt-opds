@@ -39,6 +39,7 @@
 - [x] Add total series to the book metadata editing - **Done: SeriesTotal field in catalog.Book/BookUpdate, fs/sqlite backends, handlers.go, edit modal**
 - [x] Add series page sort by number - **Done: catalog.SeriesLister interface; Series() on fs+sqlite backends; GET /api/series endpoint; ?series= + ?sort=series_index params on /api/books; series page view (#/series/<name>) in Vue SPA; clickable series links on grid card and book detail; "Tome N/Total" badge in series page; books sorted numerically by series_index**
 - [x] Add star rating - **Done: Rating int field (0=unrated, 1-5) throughout stack (catalog, fs, sqlite, handlers); interactive 5-star widget on book detail page (click same star to clear); small read-only stars on grid cards**
+- [ ] Ajout d'un token d'authentification pour les flux OPDS à la place du basic auth
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
@@ -52,7 +53,7 @@
 - [x] Some cover are not extract from epub because of bad metadata, search the image on first html page - **Done: findCoverInSpine() walks OPF spine in order, opens first HTML/XHTML item, uses findFirstImgSrc() to locate first <img src="…">, saves image as book cover; 9 unit tests in epub_test.go**
 - [x] allow update cover - **Done: catalog.CoverUpdater interface; UpdateCover() on fs+sqlite backends (removes old cover files, writes new image, updates DB/in-memory records); POST /api/books/{id}/cover handler (20 MB limit, auto-detects ext from MIME/filename); "Changer la couverture" button in book detail left column (file input ref, cache-busts URL with ?t=timestamp after upload); handleCover now uses actual file mod-time for proper browser cache invalidation**
 - [x] Avoir une page des livres d'un auteur, doit aussi être dans les flux OPDS - **Done: Vue SPA #/authors/<name> page; ?author= filter added to /api/books + Search in fs+sqlite backends; GET /api/authors endpoint; author names clickable in grid cards and book detail; OPDS v1/v2 feeds were already implemented**
-- [ ] Avoir une page des livres d'un editeur, doit aussi être dans les flux OPDS
+- [x] Avoir une page des livres d'un editeur, doit aussi être dans les flux OPDS - **Done: Vue SPA #/publishers/<name> page; ?publisher= filter added to /api/books + Search in fs+sqlite backends; GET /api/publishers endpoint; publisher name clickable in book detail page; OPDS v1 (GET /opds/publishers, /opds/publishers/{publisher}) and v2 (GET /opds/v2/publishers, /opds/v2/publishers/{publisher}) feeds; nav entries added to both root feeds**
 - [x] Avoir une page des livres d'un tag, doit aussi être dans les flux OPDS - **Done: Vue SPA #/tags/<name> page; ?tag= filter added to /api/books + Search in fs+sqlite backends; GET /api/tags endpoint; tags clickable in book detail page; OPDS v1/v2 feeds were already implemented**
 - [x] Avoir une catégorie non lu dans les flux OPDS - **Done: handleUnreadBooks (GET /opds/unread) for OPDS v1; handleOPDS2Unread (GET /opds/v2/unread) for OPDS v2; nav entries added to both root feeds; uses Search(UnreadOnly:true) with added-desc sort**
 - [ ] Ajoute la collection avec un numéro dans les métadatas

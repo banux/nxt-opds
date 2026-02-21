@@ -21,14 +21,16 @@ import (
 // Used to verify that POST /api/refresh returns 501 when backend lacks support.
 type noRefreshCatalog struct{}
 
-func (noRefreshCatalog) Root() ([]catalog.NavEntry, error)                             { return nil, nil }
-func (noRefreshCatalog) AllBooks(_, _ int) ([]catalog.Book, int, error)                { return nil, 0, nil }
-func (noRefreshCatalog) BookByID(_ string) (*catalog.Book, error)                      { return nil, fmt.Errorf("not found") }
-func (noRefreshCatalog) Search(_ catalog.SearchQuery) ([]catalog.Book, int, error)     { return nil, 0, nil }
-func (noRefreshCatalog) BooksByAuthor(_ string, _, _ int) ([]catalog.Book, int, error) { return nil, 0, nil }
-func (noRefreshCatalog) BooksByTag(_ string, _, _ int) ([]catalog.Book, int, error)    { return nil, 0, nil }
-func (noRefreshCatalog) Authors(_, _ int) ([]string, int, error)                       { return nil, 0, nil }
-func (noRefreshCatalog) Tags(_, _ int) ([]string, int, error)                          { return nil, 0, nil }
+func (noRefreshCatalog) Root() ([]catalog.NavEntry, error)                                  { return nil, nil }
+func (noRefreshCatalog) AllBooks(_, _ int) ([]catalog.Book, int, error)                     { return nil, 0, nil }
+func (noRefreshCatalog) BookByID(_ string) (*catalog.Book, error)                           { return nil, fmt.Errorf("not found") }
+func (noRefreshCatalog) Search(_ catalog.SearchQuery) ([]catalog.Book, int, error)          { return nil, 0, nil }
+func (noRefreshCatalog) BooksByAuthor(_ string, _, _ int) ([]catalog.Book, int, error)      { return nil, 0, nil }
+func (noRefreshCatalog) BooksByTag(_ string, _, _ int) ([]catalog.Book, int, error)         { return nil, 0, nil }
+func (noRefreshCatalog) BooksByPublisher(_ string, _, _ int) ([]catalog.Book, int, error)   { return nil, 0, nil }
+func (noRefreshCatalog) Authors(_, _ int) ([]string, int, error)                            { return nil, 0, nil }
+func (noRefreshCatalog) Tags(_, _ int) ([]string, int, error)                               { return nil, 0, nil }
+func (noRefreshCatalog) Publishers(_, _ int) ([]string, int, error)                         { return nil, 0, nil }
 
 // failRefreshBackend wraps an fs.Backend and overrides Refresh() to return an error.
 // Used to verify that POST /api/refresh propagates backend errors as 500.

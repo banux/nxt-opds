@@ -464,6 +464,10 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		extraClauses = append(extraClauses, "EXISTS (SELECT 1 FROM book_tags _bt WHERE _bt.book_id = b.id AND LOWER(_bt.tag) = LOWER(?))")
 		extraArgs = append(extraArgs, q.Tag)
 	}
+	if q.Publisher != "" {
+		extraClauses = append(extraClauses, "LOWER(b.publisher) = LOWER(?)")
+		extraArgs = append(extraArgs, q.Publisher)
+	}
 
 	extraWhere := ""
 	for _, c := range extraClauses {
@@ -584,6 +588,45 @@ ORDER BY LOWER(tag) LIMIT ? OFFSET ?`, limit, offset)
 		tags = append(tags, tag)
 	}
 	return tags, total, rows.Err()
+}
+
+// Publishers returns all distinct non-empty publisher names sorted alphabetically with pagination.
+func (b *Backend) Publishers(offset, limit int) ([]string, int, error) {
+	var total int
+	if err := b.db.QueryRow(`SELECT COUNT(DISTINCT publisher) FROM books WHERE publisher != ''`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := b.db.Query(`
+SELECT DISTINCT publisher FROM books
+WHERE publisher != ''
+ORDER BY LOWER(publisher) LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var pubs []string
+	for rows.Next() {
+		var pub string
+		if err := rows.Scan(&pub); err != nil {
+			return nil, 0, err
+		}
+		pubs = append(pubs, pub)
+	}
+	return pubs, total, rows.Err()
+}
+
+// BooksByPublisher returns books by a specific publisher with pagination.
+func (b *Backend) BooksByPublisher(publisher string, offset, limit int) ([]catalog.Book, int, error) {
+	total, err := b.countBooks(`
+SELECT COUNT(*) FROM books b
+WHERE b.publisher = ?`, publisher)
+	if err != nil {
+		return nil, 0, err
+	}
+	books, err := b.queryBooks(`
+WHERE b.publisher = ?
+ORDER BY LOWER(b.title) LIMIT ? OFFSET ?`, publisher, limit, offset)
+	return books, total, err
 }
 
 // Series returns all distinct non-empty series names sorted alphabetically
