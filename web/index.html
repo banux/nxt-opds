@@ -805,6 +805,19 @@ createApp({
       return result
     })
 
+    // apiFetch wraps fetch() and redirects to /login when the session has
+    // expired (401). This prevents cryptic error toasts and avoids the browser
+    // showing a Basic-Auth dialog for protected API endpoints.
+    async function apiFetch(url, options) {
+      const res = await fetch(url, options)
+      if (res.status === 401) {
+        window.location.href = '/login'
+        // Throw so calling code stops executing cleanly.
+        throw new Error('Session expirée – redirection vers la connexion')
+      }
+      return res
+    }
+
     async function loadBooks() {
       loading.value = true
       try {
@@ -815,7 +828,7 @@ createApp({
         if (searchQuery.value.trim()) params.set('q', searchQuery.value.trim())
         if (unreadOnly.value) params.set('unread', '1')
         if (sortOrder.value) params.set('sort', sortOrder.value)
-        const res = await fetch('/api/books?' + params)
+        const res = await apiFetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
         const data = await res.json()
         books.value = data.books || []
@@ -884,7 +897,7 @@ createApp({
       bookLoading.value = true
       currentBook.value = null
       try {
-        const res = await fetch('/api/books/' + encodeURIComponent(id))
+        const res = await apiFetch('/api/books/' + encodeURIComponent(id))
         if (!res.ok) throw new Error('HTTP ' + res.status)
         currentBook.value = await res.json()
       } catch (e) {
@@ -900,7 +913,7 @@ createApp({
       seriesBooks.value = []
       try {
         const params = new URLSearchParams({ series: name, sort: 'series_index', limit: 500 })
-        const res = await fetch('/api/books?' + params)
+        const res = await apiFetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
         const data = await res.json()
         seriesBooks.value = data.books || []
@@ -940,7 +953,7 @@ createApp({
       togglingRead.value = true
       try {
         const newIsRead = !book.isRead
-        const res = await fetch('/api/books/' + book.id, {
+        const res = await apiFetch('/api/books/' + book.id, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ isRead: newIsRead }),
@@ -968,7 +981,7 @@ createApp({
       // Clicking the same star as current rating clears it (toggle to 0)
       const newRating = book.rating === stars ? 0 : stars
       try {
-        const res = await fetch('/api/books/' + book.id, {
+        const res = await apiFetch('/api/books/' + book.id, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ rating: newRating }),
@@ -1035,7 +1048,7 @@ createApp({
           seriesIndex: editForm.value.seriesIndex,
           seriesTotal: editForm.value.seriesTotal,
         }
-        const res = await fetch('/api/books/' + editBook.value.id, {
+        const res = await apiFetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(body),
@@ -1066,7 +1079,7 @@ createApp({
       if (!window.confirm(`Supprimer « ${book.title} » ? Cette action est irréversible.`)) return
       deleting.value = true
       try {
-        const res = await fetch('/api/books/' + book.id, { method: 'DELETE' })
+        const res = await apiFetch('/api/books/' + book.id, { method: 'DELETE' })
         if (!res.ok) throw new Error(await res.text() || 'Échec de la suppression')
         showToast('Livre supprimé', 'success')
         navigateTo('/')
@@ -1087,7 +1100,7 @@ createApp({
       try {
         const form = new FormData()
         form.append('cover', file)
-        const res = await fetch('/api/books/' + book.id + '/cover', { method: 'POST', body: form })
+        const res = await apiFetch('/api/books/' + book.id + '/cover', { method: 'POST', body: form })
         if (!res.ok) throw new Error(await res.text() || 'Échec de l\'envoi')
         // Force browser to re-fetch the updated cover (cache-bust with timestamp).
         book.coverUrl = '/covers/' + book.id + '?t=' + Date.now()
@@ -1107,7 +1120,7 @@ createApp({
     async function doRefresh() {
       refreshing.value = true
       try {
-        const res = await fetch('/api/refresh', { method: 'POST' })
+        const res = await apiFetch('/api/refresh', { method: 'POST' })
         if (!res.ok) throw new Error('HTTP ' + res.status)
         await loadBooks()
         showToast('Catalogue mis à jour', 'success')
@@ -1145,7 +1158,7 @@ createApp({
       try {
         const fd = new FormData()
         fd.append('file', uploadFile.value)
-        const res = await fetch('/api/upload', { method: 'POST', body: fd })
+        const res = await apiFetch('/api/upload', { method: 'POST', body: fd })
         if (!res.ok) throw new Error(await res.text() || 'Échec du téléversement')
         const book = await res.json()
         uploadSuccess.value = book.Title || uploadFile.value.name
