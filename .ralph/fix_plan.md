@@ -13,6 +13,8 @@
 - [x] The 'has been read' must be a button in book page and not in the edit form - **Done: dedicated "Marquer comme lu / Marquer comme non lu" toggle button in book page action area; isRead checkbox removed from edit modal; toggleRead() calls PATCH /api/books/{id}**
 - [x] Add a filter on grid page to have only not readed book - **Done: "Non lus seulement" toggle pill in grid filter bar; ?unread=1 API param; UnreadOnly field in SearchQuery; both fs and sqlite backends filter by is_read=0**
 - [x] Sort Book by added date descending by default, add possibility to sort by name, added date - **Done: AddedAt field on Book (file mod time); SortBy/SortOrder on SearchQuery; fs backend sorts by AddedAt desc on Refresh and re-sorts matched slice; sqlite adds added_at column (migration-safe) + sortClause() helper; handleAPIBooks always uses Search with parsed ?sort= param (added_desc/added_asc/title_asc/title_desc); Vue sort selector in filter bar with localStorage persistence**
+- [x] Gérer les versions de schema de la base de données et quand une mise a jour de schéma est effectué faire une migration pour ne pas devoir remettre la base à zéro - **Done: PRAGMA user_version–based migration system in sqlite.go (schemaMigrations slice, migrateSchema(), currentSchemaVersion const); migration1 handles both fresh and pre-migration DBs; 3 tests (fresh, idempotent, legacy DB upgrade)**
+- [ ] Backup database every night 
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
@@ -31,12 +33,12 @@
 - [x] Add a github action that build the docker and push it to docker hub - **Done: .github/workflows/docker.yml – triggers on push to main and version tags; multi-platform (amd64+arm64); uses DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets; semantic version tags + sha tags; GHA cache**
 - [x] Add a github action that build binary and release it on github repository - **Done: .github/workflows/release.yml – triggers on version tags; matrix: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64; CGO_ENABLED=0; SHA256SUMS.txt; uses softprops/action-gh-release@v2**
 - [x] Add a button delete on book page - **Done: catalog.Deleter interface; DeleteBook on fs+sqlite backends (removes file + cover); DELETE /api/books/{id} handler; red "Supprimer" button with trash icon + confirmation dialog in book detail page; navigates back to library on success**
-- [ ] ajust size cover to the frame
-- [ ] Add "series title - #number/#totalnumber" to the frontpage between the title and the author 
-- [ ] Add "series title (link) - #number/#totalnumber" to the book page between the title and the author instead of tag
-- [ ] Add total series to the book metadata editing
-- [ ] Add series page sort by number
-- [ ] Add star rating
+- [x] ajust size cover to the frame - **Done: CSS book-cover uses absolute-positioned img with object-fit:cover for correct frame fill**
+- [x] Add "series title - #number/#totalnumber" to the frontpage between the title and the author - **Done: amber series line shown in grid card meta between title and author**
+- [x] Add "series title - #number/#totalnumber" to the book page between the title and the author instead of badge - **Done: inline amber text below title, SeriesTotal field added throughout stack**
+- [x] Add total series to the book metadata editing - **Done: SeriesTotal field in catalog.Book/BookUpdate, fs/sqlite backends, handlers.go, edit modal**
+- [x] Add series page sort by number - **Done: catalog.SeriesLister interface; Series() on fs+sqlite backends; GET /api/series endpoint; ?series= + ?sort=series_index params on /api/books; series page view (#/series/<name>) in Vue SPA; clickable series links on grid card and book detail; "Tome N/Total" badge in series page; books sorted numerically by series_index**
+- [x] Add star rating - **Done: Rating int field (0=unrated, 1-5) throughout stack (catalog, fs, sqlite, handlers); interactive 5-star widget on book detail page (click same star to clear); small read-only stars on grid cards**
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
@@ -45,6 +47,7 @@
 - [x] SQLite index for large collections - **Done: internal/backend/sqlite/sqlite.go, selected via backend: "sqlite" in config or BACKEND=sqlite env var; epub metadata extraction refactored into internal/epub/epub.go shared package; 9 tests in sqlite_test.go**
 - [x] Make the "has been read" mark on cover more visible - **Done: replaced tiny top-right ✓ pill with a prominent bottom-of-cover green gradient overlay strip showing a bold checkmark + "Lu" text**
 - [x] Passer la marque "lu" avec un bandeau en dessous de dégradé de vert - **Done: replaced in-cover overlay strip with a separate green gradient banner (from-green-600 to-emerald-500) rendered below the cover, with rounded bottom corners; cover uses rounded-t-lg when book is read so the pair forms one visual unit**
+- [x] Sur la page du livre les étoiles de score ne marche pas le choix précédent n'est pas affiché mais est bien sauvegardé. - **Done: handleAPIBook and handleAPIUpdateBook were missing Rating: bk.Rating in their bookJSON responses; added to both handlers**
 
 ## Completed
 - [x] Project enabled for Ralph
@@ -84,3 +87,4 @@
 - Focus on MVP functionality first
 - Ensure each feature is properly tested
 - Update this file after each major milestone
+- Create or increment a release version and tag it on git commit with format v[number].[number]

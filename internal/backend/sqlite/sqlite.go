@@ -29,8 +29,8 @@ type Backend struct {
 	db        *sql.DB
 }
 
-// New opens (or creates) the SQLite catalog at {dir}/.catalog.db, applies the
-// schema, syncs the filesystem, and returns the Backend.
+// New opens (or creates) the SQLite catalog at {dir}/.catalog.db, applies
+// schema migrations, syncs the filesystem, and returns the Backend.
 func New(dir string) (*Backend, error) {
 	coversDir := filepath.Join(dir, ".covers")
 	if err := os.MkdirAll(coversDir, 0755); err != nil {
@@ -50,9 +50,9 @@ func New(dir string) (*Backend, error) {
 	}
 
 	b := &Backend{root: dir, coversDir: coversDir, db: db}
-	if err := b.createSchema(); err != nil {
+	if err := b.migrateSchema(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("create schema: %w", err)
+		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 	if err := b.Refresh(); err != nil {
 		db.Close()
@@ -66,28 +66,50 @@ func (b *Backend) Close() error {
 	return b.db.Close()
 }
 
-// createSchema creates the tables if they don't exist yet.
-func (b *Backend) createSchema() error {
-	_, err := b.db.Exec(`
+// currentSchemaVersion is the latest schema version this binary expects.
+// Increment this constant and add a new entry to schemaMigrations whenever
+// the database schema changes.
+const currentSchemaVersion = 1
+
+// schemaMigration describes a single, idempotent database migration.
+type schemaMigration struct {
+	version int
+	apply   func(db *sql.DB) error
+}
+
+// schemaMigrations is the ordered list of all schema migrations.
+// Each migration is applied exactly once (when PRAGMA user_version < version).
+var schemaMigrations = []schemaMigration{
+	{version: 1, apply: migration1},
+}
+
+// migration1 sets up the initial schema (version 0 → 1).
+// It uses CREATE TABLE IF NOT EXISTS so it is safe to run on an existing
+// pre-migration database (user_version was never set, so it is 0).
+// For pre-migration databases that may be missing columns added incrementally
+// (added_at, series_total, rating), it also attempts safe ALTER TABLE
+// statements; "duplicate column" errors are intentionally ignored.
+func migration1(db *sql.DB) error {
+	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS books (
-    id           TEXT PRIMARY KEY,
-    title        TEXT NOT NULL DEFAULT '',
-    summary      TEXT NOT NULL DEFAULT '',
-    language     TEXT NOT NULL DEFAULT '',
-    publisher    TEXT NOT NULL DEFAULT '',
-    published_at INTEGER,
-    updated_at   INTEGER NOT NULL,
-    added_at     INTEGER NOT NULL DEFAULT 0,
-    series       TEXT NOT NULL DEFAULT '',
-    series_index TEXT NOT NULL DEFAULT '',
-    series_total TEXT NOT NULL DEFAULT '',
-    is_read      INTEGER NOT NULL DEFAULT 0,
-    rating       INTEGER NOT NULL DEFAULT 0,
-    cover_url    TEXT NOT NULL DEFAULT '',
+    id            TEXT PRIMARY KEY,
+    title         TEXT NOT NULL DEFAULT '',
+    summary       TEXT NOT NULL DEFAULT '',
+    language      TEXT NOT NULL DEFAULT '',
+    publisher     TEXT NOT NULL DEFAULT '',
+    published_at  INTEGER,
+    updated_at    INTEGER NOT NULL,
+    added_at      INTEGER NOT NULL DEFAULT 0,
+    series        TEXT NOT NULL DEFAULT '',
+    series_index  TEXT NOT NULL DEFAULT '',
+    series_total  TEXT NOT NULL DEFAULT '',
+    is_read       INTEGER NOT NULL DEFAULT 0,
+    rating        INTEGER NOT NULL DEFAULT 0,
+    cover_url     TEXT NOT NULL DEFAULT '',
     thumbnail_url TEXT NOT NULL DEFAULT '',
-    file_path    TEXT NOT NULL,
-    file_mime    TEXT NOT NULL DEFAULT '',
-    file_size    INTEGER NOT NULL DEFAULT 0
+    file_path     TEXT NOT NULL,
+    file_mime     TEXT NOT NULL DEFAULT '',
+    file_size     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS book_authors (
@@ -105,18 +127,49 @@ CREATE TABLE IF NOT EXISTS book_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_book_authors_name ON book_authors(author_name);
-CREATE INDEX IF NOT EXISTS idx_book_tags_tag ON book_tags(tag);
-CREATE INDEX IF NOT EXISTS idx_books_added_at ON books(added_at DESC);
+CREATE INDEX IF NOT EXISTS idx_book_tags_tag     ON book_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_books_added_at    ON books(added_at DESC);
 `)
 	if err != nil {
 		return err
 	}
-	// Migration: add added_at column to existing databases (ignore error if already exists).
-	_, _ = b.db.Exec(`ALTER TABLE books ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0`)
-	// Migration: add series_total column to existing databases (ignore error if already exists).
-	_, _ = b.db.Exec(`ALTER TABLE books ADD COLUMN series_total TEXT NOT NULL DEFAULT ''`)
-	// Migration: add rating column to existing databases (ignore error if already exists).
-	_, _ = b.db.Exec(`ALTER TABLE books ADD COLUMN rating INTEGER NOT NULL DEFAULT 0`)
+
+	// Safe column additions for databases that existed before these columns
+	// were introduced. On a fresh database created above, the columns already
+	// exist and these statements will return "duplicate column name" errors
+	// which are intentionally swallowed.
+	for _, alterSQL := range []string{
+		`ALTER TABLE books ADD COLUMN added_at     INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE books ADD COLUMN series_total TEXT    NOT NULL DEFAULT ''`,
+		`ALTER TABLE books ADD COLUMN rating       INTEGER NOT NULL DEFAULT 0`,
+	} {
+		_, _ = db.Exec(alterSQL)
+	}
+	return nil
+}
+
+// migrateSchema reads PRAGMA user_version, applies every outstanding migration
+// in order, and updates user_version after each successful migration.
+// This ensures the database schema is always brought up to currentSchemaVersion
+// without data loss.
+func (b *Backend) migrateSchema() error {
+	var version int
+	if err := b.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+
+	for _, m := range schemaMigrations {
+		if m.version <= version {
+			continue // already applied
+		}
+		if err := m.apply(b.db); err != nil {
+			return fmt.Errorf("apply migration v%d: %w", m.version, err)
+		}
+		// PRAGMA user_version does not support ? placeholders.
+		if _, err := b.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, m.version)); err != nil {
+			return fmt.Errorf("set schema version to %d: %w", m.version, err)
+		}
+	}
 	return nil
 }
 

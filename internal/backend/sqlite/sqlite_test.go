@@ -3,12 +3,19 @@ package sqlite
 import (
 	"archive/zip"
 	"bytes"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/banux/nxt-opds/internal/catalog"
+	_ "modernc.org/sqlite"
 )
+
+// openSQLite opens a raw SQLite database for test setup purposes.
+func openSQLite(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", path)
+}
 
 // createMinimalEPUB writes a valid minimal EPUB file to path.
 func createMinimalEPUB(t *testing.T, path, title, author, subject string) {
@@ -341,5 +348,111 @@ func TestSQLiteBackend_Refresh_RemovesDeletedFiles(t *testing.T) {
 	_, total, _ = b.AllBooks(0, 50)
 	if total != 0 {
 		t.Errorf("expected 0 books after delete + refresh, got %d", total)
+	}
+}
+
+// TestMigrateSchema_FreshDB verifies that migrateSchema sets PRAGMA user_version
+// to currentSchemaVersion on a brand-new database.
+func TestMigrateSchema_FreshDB(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	var version int
+	if err := b.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Errorf("expected user_version=%d, got %d", currentSchemaVersion, version)
+	}
+}
+
+// TestMigrateSchema_Idempotent verifies that calling New() on an already-migrated
+// database is safe (no duplicate-column errors, version unchanged).
+func TestMigrateSchema_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	// First open migrates to currentSchemaVersion.
+	b1, err := New(dir)
+	if err != nil {
+		t.Fatalf("first New() error: %v", err)
+	}
+	b1.Close()
+
+	// Second open should be a no-op (all migrations already applied).
+	b2, err := New(dir)
+	if err != nil {
+		t.Fatalf("second New() error: %v", err)
+	}
+	defer b2.Close()
+
+	var version int
+	if err := b2.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Errorf("expected user_version=%d after re-open, got %d", currentSchemaVersion, version)
+	}
+}
+
+// TestMigrateSchema_PreMigrationDB simulates a legacy database (user_version=0,
+// tables already created without all columns) and verifies that migrateSchema
+// upgrades it safely.
+func TestMigrateSchema_PreMigrationDB(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, dbFilename)
+
+	// Create a legacy database: tables exist but rating / series_total columns
+	// are missing (as they were in early versions of nxt-opds).
+	db, err := openSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE books (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL DEFAULT '',
+    updated_at   INTEGER NOT NULL DEFAULT 0,
+    added_at     INTEGER NOT NULL DEFAULT 0,
+    series       TEXT NOT NULL DEFAULT '',
+    series_index TEXT NOT NULL DEFAULT '',
+    is_read      INTEGER NOT NULL DEFAULT 0,
+    cover_url    TEXT NOT NULL DEFAULT '',
+    file_path    TEXT NOT NULL DEFAULT '',
+    file_mime    TEXT NOT NULL DEFAULT '',
+    file_size    INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE book_authors (book_id TEXT, author_name TEXT, author_uri TEXT DEFAULT '', position INTEGER DEFAULT 0, PRIMARY KEY(book_id,author_name));
+CREATE TABLE book_tags   (book_id TEXT, tag TEXT, PRIMARY KEY(book_id,tag));
+`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	// Leave user_version = 0 to mimic a pre-migration database.
+	db.Close()
+
+	// New() must migrate without errors.
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() on legacy db error: %v", err)
+	}
+	defer b.Close()
+
+	// user_version must now be currentSchemaVersion.
+	var version int
+	if err := b.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Errorf("expected user_version=%d after migration, got %d", currentSchemaVersion, version)
+	}
+
+	// The rating column must now exist (it was missing in the legacy schema).
+	if _, err := b.db.Exec(`UPDATE books SET rating = 0`); err != nil {
+		t.Errorf("rating column not present after migration: %v", err)
 	}
 }
