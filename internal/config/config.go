@@ -16,6 +16,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +62,12 @@ type Config struct {
 	// Older backups are pruned automatically.  0 or negative means unlimited.
 	// Default: 7.
 	BackupKeep int `yaml:"backup_keep"`
+
+	// OPDSToken is the bearer token used to authenticate OPDS feed requests.
+	// OPDS readers can authenticate by appending ?token=<value> to the feed URL.
+	// If empty and Password is set, a stable token is derived from the password.
+	// Set explicitly via OPDS_TOKEN env var or opds_token config key.
+	OPDSToken string `yaml:"opds_token"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -116,6 +123,15 @@ func Load(path string) (Config, error) {
 			cfg.BackupKeep = n
 		}
 	}
+	if v := os.Getenv("OPDS_TOKEN"); v != "" {
+		cfg.OPDSToken = v
+	}
+
+	// If no explicit OPDS token but a password is set, derive a stable token
+	// from the password so OPDS reader URLs remain valid across restarts.
+	if cfg.OPDSToken == "" && cfg.Password != "" {
+		cfg.OPDSToken = deriveOPDSToken(cfg.Password)
+	}
 
 	// Parse the refresh interval string into a Duration.
 	// An empty string or "0" disables background refresh.
@@ -130,6 +146,15 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// deriveOPDSToken returns a stable 32-character hex token derived from the
+// given password. It is deterministic: the same password always produces the
+// same token. This allows OPDS reader URLs to remain valid across restarts
+// without requiring explicit token configuration.
+func deriveOPDSToken(password string) string {
+	h := sha256.Sum256([]byte("nxt-opds-token:" + password))
+	return fmt.Sprintf("%x", h[:16]) // 16 bytes = 32 hex chars
 }
 
 // FindConfigFile returns the path to the first config file found in the

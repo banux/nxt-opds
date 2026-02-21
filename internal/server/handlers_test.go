@@ -893,3 +893,52 @@ func TestHandleHealth_ReturnsJSON(t *testing.T) {
 		t.Errorf("status: got %q, want ok", resp["status"])
 	}
 }
+
+// ---- OPDS token authentication ----
+
+func TestOPDSTokenAuth_ValidToken(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{Password: "pw", OPDSToken: "secret-token"})
+	req := httptest.NewRequest(http.MethodGet, "/opds?token=secret-token", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 with valid token, got %d", rr.Code)
+	}
+}
+
+func TestOPDSTokenAuth_InvalidToken(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{Password: "pw", OPDSToken: "secret-token"})
+	req := httptest.NewRequest(http.MethodGet, "/opds?token=wrong", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 with wrong token, got %d", rr.Code)
+	}
+}
+
+func TestOPDSTokenAuth_NoToken_Returns401(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{Password: "pw", OPDSToken: "secret-token"})
+	req := httptest.NewRequest(http.MethodGet, "/opds", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when no token provided, got %d", rr.Code)
+	}
+}
+
+func TestAPIConfig_ReturnsToken(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{OPDSToken: "mytoken"})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["opdsToken"] != "mytoken" {
+		t.Errorf("opdsToken: got %q, want mytoken", resp["opdsToken"])
+	}
+}

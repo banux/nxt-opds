@@ -919,6 +919,21 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(book)
 }
 
+// handleAPIConfig returns public server configuration for the web frontend.
+// The response includes the OPDS token (if configured) so that the UI can
+// display the OPDS reader URL with the token for easy copy-paste.
+// Returns 200 with a JSON object.
+func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
+	type configJSON struct {
+		OPDSToken string `json:"opdsToken"`
+	}
+	cfg := configJSON{
+		OPDSToken: s.opdsToken,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(cfg)
+}
+
 // handleAPIRefresh triggers an on-demand catalog refresh.
 // Returns 501 if the backend does not support refresh.
 // Returns 200 {"ok":true} on success, 500 on backend error.

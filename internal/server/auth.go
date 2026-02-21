@@ -66,9 +66,15 @@ func (s *sessionStore) delete(token string) {
 }
 
 // authMiddleware returns a middleware that enforces session-cookie authentication.
-// For OPDS clients that send HTTP Basic Auth, Basic Auth is also accepted as a fallback.
+//
+// Authentication methods (in order of precedence):
+//  1. Session cookie (browser users after login).
+//  2. OPDS token via ?token= query parameter (for OPDS reader clients on OPDS routes).
+//  3. HTTP Basic Auth fallback (kept for API clients; only when no opdsToken is set).
+//
 // If password is empty, auth is disabled (development mode).
-func authMiddleware(password string, sessions *sessionStore) func(http.Handler) http.Handler {
+// opdsToken is the shared token for OPDS feed access; empty means token auth disabled.
+func authMiddleware(password, opdsToken string, sessions *sessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if password == "" {
 			return next
@@ -82,26 +88,39 @@ func authMiddleware(password string, sessions *sessionStore) func(http.Handler) 
 				}
 			}
 
-			// 2. Fallback: HTTP Basic Auth (for OPDS readers / API clients)
-			if _, pass, ok := r.BasicAuth(); ok {
-				if subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1 {
-					next.ServeHTTP(w, r)
-					return
+			// 2. Token auth: accepted on OPDS routes via ?token= query param.
+			isOPDS := strings.HasPrefix(r.URL.Path, "/opds/") ||
+				r.URL.Path == "/opds" || r.URL.Path == "/opds/"
+			if isOPDS && opdsToken != "" {
+				if tok := r.URL.Query().Get("token"); tok != "" {
+					if subtle.ConstantTimeCompare([]byte(tok), []byte(opdsToken)) == 1 {
+						next.ServeHTTP(w, r)
+						return
+					}
 				}
 			}
 
-			// 3. Not authenticated – redirect browser requests to /login,
+			// 3. Fallback: HTTP Basic Auth (for API clients and legacy OPDS readers
+			//    when no opdsToken is configured).
+			if opdsToken == "" {
+				if _, pass, ok := r.BasicAuth(); ok {
+					if subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1 {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+
+			// 4. Not authenticated – redirect browser requests to /login,
 			//    return 401 for API / OPDS requests.
 			accept := r.Header.Get("Accept")
-			isAPI := strings.HasPrefix(r.URL.Path, "/api/") ||
-				strings.HasPrefix(r.URL.Path, "/opds/") ||
-				r.URL.Path == "/opds" || r.URL.Path == "/opds/"
+			isAPI := strings.HasPrefix(r.URL.Path, "/api/") || isOPDS
 			if !isAPI && (accept == "" || containsHTML(accept)) {
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return
 			}
 
-			w.Header().Set("WWW-Authenticate", `Basic realm="nxt-opds"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="nxt-opds"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		})
 	}

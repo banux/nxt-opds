@@ -16,6 +16,11 @@ type Options struct {
 	// If empty, authentication is disabled (useful for development).
 	Password string
 
+	// OPDSToken is the token accepted in the ?token= query parameter on OPDS
+	// routes, allowing OPDS reader clients to authenticate without Basic Auth.
+	// If empty, token authentication is disabled for OPDS routes.
+	OPDSToken string
+
 	// StaticFS is the filesystem containing the frontend static assets.
 	// If nil, the frontend is not served.
 	StaticFS fs.FS
@@ -34,6 +39,7 @@ type Server struct {
 	seriesLister  catalog.SeriesLister  // optional; nil if backend doesn't support series listing
 	sessions      *sessionStore
 	opts          Options
+	opdsToken     string // token for OPDS route authentication
 }
 
 // New creates and configures a new Server with the given catalog backend and options.
@@ -43,10 +49,11 @@ type Server struct {
 // If opts.StaticFS is non-nil, the frontend is served at /.
 func New(cat catalog.Catalog, opts Options) *Server {
 	s := &Server{
-		router:   mux.NewRouter(),
-		catalog:  cat,
-		sessions: newSessionStore(),
-		opts:     opts,
+		router:    mux.NewRouter(),
+		catalog:   cat,
+		sessions:  newSessionStore(),
+		opts:      opts,
+		opdsToken: opts.OPDSToken,
 	}
 	if u, ok := cat.(catalog.Uploader); ok {
 		s.uploader = u
@@ -81,7 +88,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registerRoutes sets up all endpoint routes.
 func (s *Server) registerRoutes() {
 	r := s.router
-	auth := authMiddleware(s.opts.Password, s.sessions)
+	auth := authMiddleware(s.opts.Password, s.opdsToken, s.sessions)
 
 	// Always-public endpoints (no auth required)
 	r.HandleFunc("/health", s.handleHealth).Methods(http.MethodGet)
@@ -156,6 +163,9 @@ func (s *Server) registerRoutes() {
 
 	// API: list all distinct series
 	protected.HandleFunc("/api/series", s.handleAPISeries).Methods(http.MethodGet)
+
+	// API: public server config (opdsToken, etc.) for the web frontend
+	protected.HandleFunc("/api/config", s.handleAPIConfig).Methods(http.MethodGet)
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)

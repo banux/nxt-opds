@@ -39,7 +39,7 @@
 - [x] Add total series to the book metadata editing - **Done: SeriesTotal field in catalog.Book/BookUpdate, fs/sqlite backends, handlers.go, edit modal**
 - [x] Add series page sort by number - **Done: catalog.SeriesLister interface; Series() on fs+sqlite backends; GET /api/series endpoint; ?series= + ?sort=series_index params on /api/books; series page view (#/series/<name>) in Vue SPA; clickable series links on grid card and book detail; "Tome N/Total" badge in series page; books sorted numerically by series_index**
 - [x] Add star rating - **Done: Rating int field (0=unrated, 1-5) throughout stack (catalog, fs, sqlite, handlers); interactive 5-star widget on book detail page (click same star to clear); small read-only stars on grid cards**
-- [ ] Ajout d'un token d'authentification pour les flux OPDS à la place du basic auth
+- [x] Ajout d'un token d'authentification pour les flux OPDS à la place du basic auth - **Done: OPDSToken added to Config (yaml: opds_token / env: OPDS_TOKEN); if not set but password is configured, a stable 32-char hex token is auto-derived via SHA-256(password); authMiddleware now accepts ?token=<opds_token> on OPDS routes instead of Basic Auth (Basic Auth kept as fallback only when no token configured); GET /api/config returns opdsToken for the Vue UI; Vue SPA shows a "copy OPDS URL" clipboard button in the grid header that copies window.origin + /opds?token=xxx; startup logs the OPDS reader URL; 6 new tests**
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**

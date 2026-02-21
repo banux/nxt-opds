@@ -269,3 +269,45 @@ func writeTemp(t *testing.T, name, content string) string {
 	}
 	return path
 }
+
+func TestLoad_OPDSToken_DerivedFromPassword(t *testing.T) {
+	t.Setenv("OPDS_TOKEN", "")
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// No password set → no token derived
+	if cfg.OPDSToken != "" {
+		t.Errorf("expected empty token when no password, got %q", cfg.OPDSToken)
+	}
+
+	t.Setenv("AUTH_PASSWORD", "supersecret")
+	cfg, err = config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OPDSToken == "" {
+		t.Error("expected token to be derived when password is set")
+	}
+	// Token must be 32 hex chars (16 bytes SHA-256 truncated)
+	if len(cfg.OPDSToken) != 32 {
+		t.Errorf("expected 32-char token, got %d chars: %q", len(cfg.OPDSToken), cfg.OPDSToken)
+	}
+	// Token is deterministic for the same password
+	cfg2, _ := config.Load("")
+	if cfg.OPDSToken != cfg2.OPDSToken {
+		t.Errorf("token must be deterministic: %q != %q", cfg.OPDSToken, cfg2.OPDSToken)
+	}
+}
+
+func TestLoad_OPDSToken_ExplicitEnvOverrides(t *testing.T) {
+	t.Setenv("AUTH_PASSWORD", "somepassword")
+	t.Setenv("OPDS_TOKEN", "my-custom-token")
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OPDSToken != "my-custom-token" {
+		t.Errorf("expected explicit token, got %q", cfg.OPDSToken)
+	}
+}

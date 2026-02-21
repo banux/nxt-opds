@@ -84,13 +84,17 @@ func main() {
 	}
 
 	opts := server.Options{
-		Password: cfg.Password,
-		StaticFS: web.FS,
+		Password:  cfg.Password,
+		OPDSToken: cfg.OPDSToken,
+		StaticFS:  web.FS,
 	}
 	srv := server.New(cat, opts)
 
 	log.Printf("nxt-opds starting on %s", cfg.ListenAddr)
 	log.Printf("Web UI available at http://localhost%s/", cfg.ListenAddr)
+	if cfg.OPDSToken != "" {
+		log.Printf("OPDS feed URL (for reader apps): http://localhost%s/opds?token=%s", cfg.ListenAddr, cfg.OPDSToken)
+	}
 	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

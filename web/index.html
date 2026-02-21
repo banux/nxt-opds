@@ -166,13 +166,30 @@
       <!-- Actions (grid-only: OPDS, refresh, upload; always: dark mode, logout) -->
       <div class="flex items-center gap-2 shrink-0">
         <template v-if="currentView === 'grid'">
-          <a href="/opds" target="_blank" title="Flux OPDS"
+          <!-- OPDS feed link (browser) -->
+          <a href="/opds" target="_blank" title="Flux OPDS (navigateur)"
              class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M5 3a1 1 0 000 2c5.523 0 10 4.477 10 10a1 1 0 102 0C17 8.373 11.627 3 5 3z"/>
               <path d="M4 9a1 1 0 012 0c0 3.314 2.686 6 6 6a1 1 0 110 2A8 8 0 014 9zM3 15a2 2 0 114 0 2 2 0 01-4 0z"/>
             </svg>
           </a>
+
+          <!-- Copy OPDS reader URL (with token if configured) -->
+          <button @click="copyOPDSUrl"
+            :title="opdsUrlCopied ? 'URL copiée !' : 'Copier l\'URL OPDS pour lecteur'"
+            class="p-2 rounded-lg transition-colors"
+            :class="opdsUrlCopied
+              ? 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20'
+              : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'">
+            <svg v-if="!opdsUrlCopied" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+            </svg>
+            <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+          </button>
 
           <button @click="doRefresh" :disabled="refreshing" title="Rafraîchir le catalogue"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">
@@ -1539,9 +1556,36 @@ createApp({
       return (n / 1048576).toFixed(1) + ' Mo'
     }
 
-    onMounted(() => {
+    // ---- OPDS token / reader URL ----
+    const opdsToken = ref('')
+    const opdsUrlCopied = ref(false)
+
+    function opdsReaderUrl() {
+      if (!opdsToken.value) return window.location.origin + '/opds'
+      return window.location.origin + '/opds?token=' + opdsToken.value
+    }
+
+    async function copyOPDSUrl() {
+      try {
+        await navigator.clipboard.writeText(opdsReaderUrl())
+        opdsUrlCopied.value = true
+        setTimeout(() => { opdsUrlCopied.value = false }, 2000)
+      } catch {
+        showToast('Impossible de copier dans le presse-papiers', 'error')
+      }
+    }
+
+    onMounted(async () => {
       window.addEventListener('hashchange', onHashChange)
       onHashChange()
+      // Load server config (OPDS token, etc.)
+      try {
+        const res = await apiFetch('/api/config')
+        if (res.ok) {
+          const cfg = await res.json()
+          opdsToken.value = cfg.opdsToken || ''
+        }
+      } catch { /* non-critical */ }
     })
 
     return {
@@ -1561,6 +1605,7 @@ createApp({
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
       refreshing, doRefresh,
+      opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       toast, formatBytes,
     }
   }
