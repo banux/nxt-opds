@@ -135,6 +135,21 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Collection page: back button + collection name -->
+      <template v-else-if="currentView === 'collection'">
+        <button @click="navigateTo('/')"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
+        </button>
+        <span class="font-semibold text-base truncate flex-1 min-w-0 text-purple-600 dark:text-purple-400">
+          Collection : {{ currentCollection }}
+        </span>
+        <div class="flex-1 sm:hidden"></div>
+      </template>
+
       <!-- Grid page: logo + search -->
       <template v-else>
         <a href="#/" class="flex items-center gap-2 shrink-0">
@@ -492,13 +507,22 @@
           </div>
 
           <!-- Metadata table -->
-          <dl v-if="currentBook.publisher || currentBook.language" class="flex flex-wrap gap-x-8 gap-y-1 text-sm mb-4">
+          <dl v-if="currentBook.publisher || currentBook.language || currentBook.collection" class="flex flex-wrap gap-x-8 gap-y-1 text-sm mb-4">
             <template v-if="currentBook.publisher">
               <div class="flex gap-2">
                 <dt class="text-gray-500 dark:text-gray-400">Éditeur</dt>
                 <dd class="text-gray-900 dark:text-gray-100 font-medium">
                   <a @click="navigateTo('/publishers/' + encodeURIComponent(currentBook.publisher))"
                      class="hover:underline hover:text-orange-600 dark:hover:text-orange-400 cursor-pointer transition-colors">{{ currentBook.publisher }}</a>
+                </dd>
+              </div>
+            </template>
+            <template v-if="currentBook.collection">
+              <div class="flex gap-2">
+                <dt class="text-gray-500 dark:text-gray-400">Collection</dt>
+                <dd class="text-gray-900 dark:text-gray-100 font-medium">
+                  <a @click="navigateTo('/collections/' + encodeURIComponent(currentBook.collection))"
+                     class="hover:underline hover:text-purple-600 dark:hover:text-purple-400 cursor-pointer transition-colors">{{ currentBook.collection }}</a>
                 </dd>
               </div>
             </template>
@@ -866,6 +890,54 @@
 
     </template><!-- end publisher view -->
 
+    <!-- ===== Collection view ===== -->
+    <template v-else-if="currentView === 'collection'">
+      <div v-if="collectionLoading" class="flex justify-center items-center py-24">
+        <div class="w-10 h-10 border-4 border-brand-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+      <div v-else-if="collectionBooks.length === 0" class="flex flex-col items-center justify-center py-24 text-center">
+        <p class="text-gray-400 dark:text-gray-500 text-lg">Aucun livre dans cette collection.</p>
+        <button @click="navigateTo('/')" class="mt-4 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">Retour à la bibliothèque</button>
+      </div>
+      <div v-else>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          {{ collectionBooks.length }} livre{{ collectionBooks.length !== 1 ? 's' : '' }}
+        </p>
+        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
+          <div v-for="book in collectionBooks" :key="book.id"
+            @click="navigateTo('/books/' + book.id)"
+            class="cursor-pointer group flex flex-col rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-white dark:bg-gray-800">
+            <div class="relative aspect-[2/3] overflow-hidden bg-gray-100 dark:bg-gray-700">
+              <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
+                   class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
+              <div v-else class="absolute inset-0 flex items-end p-2" :style="coverGradient(book)">
+                <span class="text-white text-xs font-bold line-clamp-3 leading-tight drop-shadow">{{ book.title }}</span>
+              </div>
+            </div>
+            <!-- "Lu" banner -->
+            <div v-if="book.isRead" class="flex items-center justify-center gap-1 py-0.5 bg-gradient-to-r from-green-600 to-emerald-500 rounded-b-xl">
+              <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+              </svg>
+              <span class="text-white text-xs font-bold leading-none">Lu</span>
+            </div>
+            <div class="px-0.5 py-1">
+              <p class="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug">{{ book.title }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                {{ (book.authors || []).join(', ') || 'Auteur inconnu' }}
+              </p>
+              <div v-if="book.rating > 0" class="flex gap-0.5 mt-1">
+                <svg v-for="s in 5" :key="s" class="w-3 h-3" :class="s <= book.rating ? 'text-amber-400' : 'text-gray-200 dark:text-gray-700'"
+                     fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template><!-- end collection view -->
+
   </main>
 
   <!-- ===== Upload Modal ===== -->
@@ -995,6 +1067,12 @@
             <input v-model="editForm.seriesTotal" type="text" placeholder="5"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Collection éditoriale <span class="font-normal text-gray-400">(ex : Folio SF, J'ai Lu)</span></label>
+          <input v-model="editForm.collection" type="text" placeholder="Nom de la collection"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
         </div>
 
         <div class="flex gap-3">
@@ -1167,7 +1245,7 @@ createApp({
     }
 
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'collection'
     const currentBook = ref(null)
     const bookLoading = ref(false)
     const currentSeries = ref('')
@@ -1182,6 +1260,9 @@ createApp({
     const currentPublisher = ref('')
     const publisherBooks = ref([])
     const publisherLoading = ref(false)
+    const currentCollection = ref('')
+    const collectionBooks = ref([])
+    const collectionLoading = ref(false)
 
     function navigateTo(path) {
       window.location.hash = '#' + path
@@ -1266,6 +1347,22 @@ createApp({
       }
     }
 
+    async function loadCollectionBooks(name) {
+      collectionLoading.value = true
+      collectionBooks.value = []
+      try {
+        const params = new URLSearchParams({ collection: name, sort: 'title_asc', limit: 500 })
+        const res = await apiFetch('/api/books?' + params)
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        const data = await res.json()
+        collectionBooks.value = data.books || []
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        collectionLoading.value = false
+      }
+    }
+
     async function onHashChange() {
       const hash = window.location.hash
       const bookMatch = hash.match(/^#\/books\/(.+)$/)
@@ -1273,6 +1370,7 @@ createApp({
       const authorMatch = hash.match(/^#\/authors\/(.+)$/)
       const tagMatch = hash.match(/^#\/tags\/(.+)$/)
       const publisherMatch = hash.match(/^#\/publishers\/(.+)$/)
+      const collectionMatch = hash.match(/^#\/collections\/(.+)$/)
       if (bookMatch) {
         currentView.value = 'book'
         window.scrollTo({ top: 0, behavior: 'instant' })
@@ -1297,6 +1395,11 @@ createApp({
         currentPublisher.value = decodeURIComponent(publisherMatch[1])
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadPublisherBooks(currentPublisher.value)
+      } else if (collectionMatch) {
+        currentView.value = 'collection'
+        currentCollection.value = decodeURIComponent(collectionMatch[1])
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadCollectionBooks(currentCollection.value)
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -1365,7 +1468,7 @@ createApp({
     const editError   = ref('')
     const editForm    = ref({
       title: '', authorsStr: '', tagsStr: '', summary: '',
-      publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '',
+      publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '', collection: '',
     })
 
     function openEdit(book) {
@@ -1380,6 +1483,7 @@ createApp({
         series:      book.series    || '',
         seriesIndex: book.seriesIndex || '',
         seriesTotal: book.seriesTotal || '',
+        collection:  book.collection  || '',
       }
       editError.value = ''
       editDialog.value = true
@@ -1407,6 +1511,7 @@ createApp({
           series:      editForm.value.series,
           seriesIndex: editForm.value.seriesIndex,
           seriesTotal: editForm.value.seriesTotal,
+          collection:  editForm.value.collection,
         }
         const res = await apiFetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',
@@ -1597,6 +1702,7 @@ createApp({
       currentAuthor, authorBooks, authorLoading,
       currentTag, tagBooks, tagLoading,
       currentPublisher, publisherBooks, publisherLoading,
+      currentCollection, collectionBooks, collectionLoading,
       togglingRead, toggleRead,
       setRating,
       deleting, deleteBook,

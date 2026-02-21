@@ -33,6 +33,7 @@ type metaOverride struct {
 	Series      *string  `json:"series"`
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
+	Collection  *string  `json:"collection"`
 	IsRead      *bool    `json:"isRead"`
 	Rating      *int     `json:"rating"`
 }
@@ -142,6 +143,9 @@ func mergeOverride(bk catalog.Book, ov metaOverride) catalog.Book {
 	if ov.SeriesTotal != nil {
 		bk.SeriesTotal = *ov.SeriesTotal
 	}
+	if ov.Collection != nil {
+		bk.Collection = *ov.Collection
+	}
 	if ov.IsRead != nil {
 		bk.IsRead = *ov.IsRead
 	}
@@ -191,6 +195,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	if update.SeriesTotal != nil {
 		ov.SeriesTotal = update.SeriesTotal
+	}
+	if update.Collection != nil {
+		ov.Collection = update.Collection
 	}
 	if update.IsRead != nil {
 		ov.IsRead = update.IsRead
@@ -463,6 +470,9 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 			}
 		}
 		if q.Publisher != "" && !strings.EqualFold(bk.Publisher, q.Publisher) {
+			continue
+		}
+		if q.Collection != "" && !strings.EqualFold(bk.Collection, q.Collection) {
 			continue
 		}
 		if q.Query == "" {

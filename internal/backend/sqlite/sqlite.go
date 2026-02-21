@@ -69,7 +69,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -81,6 +81,7 @@ type schemaMigration struct {
 // Each migration is applied exactly once (when PRAGMA user_version < version).
 var schemaMigrations = []schemaMigration{
 	{version: 1, apply: migration1},
+	{version: 2, apply: migration2},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS books (
     series        TEXT NOT NULL DEFAULT '',
     series_index  TEXT NOT NULL DEFAULT '',
     series_total  TEXT NOT NULL DEFAULT '',
+    collection    TEXT NOT NULL DEFAULT '',
     is_read       INTEGER NOT NULL DEFAULT 0,
     rating        INTEGER NOT NULL DEFAULT 0,
     cover_url     TEXT NOT NULL DEFAULT '',
@@ -145,6 +147,12 @@ CREATE INDEX IF NOT EXISTS idx_books_added_at    ON books(added_at DESC);
 	} {
 		_, _ = db.Exec(alterSQL)
 	}
+	return nil
+}
+
+// migration2 adds the collection column for editorial collection support (version 1 → 2).
+func migration2(db *sql.DB) error {
+	_, _ = db.Exec(`ALTER TABLE books ADD COLUMN collection TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -280,12 +288,12 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 	_, err = tx.Exec(`
 INSERT OR IGNORE INTO books
     (id, title, summary, language, publisher, published_at, updated_at, added_at,
-     series, series_index, series_total, is_read, rating, cover_url, thumbnail_url,
+     series, series_index, series_total, collection, is_read, rating, cover_url, thumbnail_url,
      file_path, file_mime, file_size)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
 		pubAt, updAt, addedAt,
-		bk.Series, bk.SeriesIndex, bk.SeriesTotal, boolToInt(bk.IsRead), bk.Rating,
+		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, boolToInt(bk.IsRead), bk.Rating,
 		bk.CoverURL, bk.ThumbnailURL,
 		filePath, fileMIME, fileSize,
 	)
@@ -467,6 +475,10 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	if q.Publisher != "" {
 		extraClauses = append(extraClauses, "LOWER(b.publisher) = LOWER(?)")
 		extraArgs = append(extraArgs, q.Publisher)
+	}
+	if q.Collection != "" {
+		extraClauses = append(extraClauses, "LOWER(b.collection) = LOWER(?)")
+		extraArgs = append(extraArgs, q.Collection)
 	}
 
 	extraWhere := ""
@@ -691,6 +703,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	if update.SeriesTotal != nil {
 		bk.SeriesTotal = *update.SeriesTotal
 	}
+	if update.Collection != nil {
+		bk.Collection = *update.Collection
+	}
 	if update.IsRead != nil {
 		bk.IsRead = *update.IsRead
 	}
@@ -709,10 +724,10 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	_, err = tx.Exec(`
 UPDATE books SET
     title=?, summary=?, language=?, publisher=?,
-    updated_at=?, series=?, series_index=?, series_total=?, is_read=?, rating=?
+    updated_at=?, series=?, series_index=?, series_total=?, collection=?, is_read=?, rating=?
 WHERE id=?`,
 		bk.Title, bk.Summary, bk.Language, bk.Publisher,
-		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, boolToInt(bk.IsRead), bk.Rating,
+		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, boolToInt(bk.IsRead), bk.Rating,
 		id,
 	)
 	if err != nil {
@@ -871,6 +886,7 @@ type bookRow struct {
 	Series       string
 	SeriesIndex  string
 	SeriesTotal  string
+	Collection   string
 	IsRead       int
 	Rating       int
 	CoverURL     string
@@ -892,6 +908,7 @@ func (r bookRow) toBook() catalog.Book {
 		Series:       r.Series,
 		SeriesIndex:  r.SeriesIndex,
 		SeriesTotal:  r.SeriesTotal,
+		Collection:   r.Collection,
 		IsRead:       r.IsRead != 0,
 		Rating:       r.Rating,
 		CoverURL:     r.CoverURL,
@@ -928,7 +945,7 @@ func (r bookRow) toBook() catalog.Book {
 // bookSelectColumns is the SELECT list for querying full book records.
 const bookSelectColumns = `
     b.id, b.title, b.summary, b.language, b.publisher,
-    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.is_read, b.rating,
+    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.collection, b.is_read, b.rating,
     b.cover_url, b.thumbnail_url, b.file_path, b.file_mime, b.file_size,
     (SELECT json_group_array(json_object('name',ba.author_name,'uri',ba.author_uri))
        FROM book_authors ba WHERE ba.book_id = b.id) AS authors_json,
@@ -950,7 +967,7 @@ func (b *Backend) queryBooks(clause string, args ...any) ([]catalog.Book, error)
 		var r bookRow
 		if err := rows.Scan(
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
-			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.IsRead, &r.Rating,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.IsRead, &r.Rating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {

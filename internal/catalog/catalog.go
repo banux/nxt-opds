@@ -54,6 +54,11 @@ type Book struct {
 	// SeriesTotal is the total number of books in the series (e.g. "5").
 	SeriesTotal string
 
+	// Collection is the editorial collection name (e.g. "Folio SF", "J'ai Lu").
+	// This is distinct from Series: a collection groups books by publisher brand,
+	// not by narrative order (corresponds to EPUB3 belongs-to-collection with type="set").
+	Collection string
+
 	// IsRead indicates the user has marked this book as read.
 	IsRead bool
 
@@ -95,6 +100,9 @@ type SearchQuery struct {
 
 	// Publisher filters by exact publisher name.
 	Publisher string
+
+	// Collection filters by exact editorial collection name.
+	Collection string
 
 	// Language filters by BCP 47 language tag.
 	Language string
@@ -192,6 +200,7 @@ type BookUpdate struct {
 	Series      *string
 	SeriesIndex *string
 	SeriesTotal *string
+	Collection  *string
 	IsRead      *bool
 	Rating      *int
 }

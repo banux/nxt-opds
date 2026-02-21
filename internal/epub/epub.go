@@ -76,6 +76,10 @@ func ParseBook(path, coversDir string) (catalog.Book, error) {
 		book.SeriesIndex = seriesIdx
 	}
 
+	if col := extractCollectionFromMetas(meta.Metas); col != "" {
+		book.Collection = col
+	}
+
 	if coverPath := extractCoverFromPkg(&zr.Reader, opfPath, pkg, id, coversDir); coverPath != "" {
 		book.CoverURL = "/covers/" + id
 		book.ThumbnailURL = "/covers/" + id
@@ -549,6 +553,56 @@ func extractSeriesFromMetas(metas []opfMeta) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// extractCollectionFromMetas looks for editorial collection metadata in OPF meta elements.
+// It returns the name of the first "set"-type belongs-to-collection found.
+// This is distinct from extractSeriesFromMetas which handles "series"-type collections.
+//
+// EPUB3 OPF3 style:
+//
+//	<meta property="belongs-to-collection" id="c1">Folio SF</meta>
+//	<meta property="collection-type" refines="#c1">set</meta>
+func extractCollectionFromMetas(metas []opfMeta) string {
+	type collItem struct {
+		name    string
+		colType string
+	}
+	collections := make(map[string]*collItem) // keyed by id (without leading #)
+
+	for _, m := range metas {
+		if m.Property == "" {
+			continue
+		}
+		if m.Refines == "" {
+			if strings.EqualFold(m.Property, "belongs-to-collection") {
+				id := m.ID
+				if id == "" {
+					id = "_default"
+				}
+				if collections[id] == nil {
+					collections[id] = &collItem{}
+				}
+				collections[id].name = strings.TrimSpace(m.Value)
+			}
+		} else {
+			refID := strings.TrimPrefix(m.Refines, "#")
+			if collections[refID] == nil {
+				collections[refID] = &collItem{}
+			}
+			if strings.EqualFold(m.Property, "collection-type") {
+				collections[refID].colType = strings.TrimSpace(m.Value)
+			}
+		}
+	}
+
+	// Return the first set-type collection found
+	for _, c := range collections {
+		if c.name != "" && strings.EqualFold(c.colType, "set") {
+			return c.name
+		}
+	}
+	return ""
 }
 
 func mimeToExt(mimeType string) string {

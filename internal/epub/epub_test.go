@@ -166,3 +166,48 @@ func TestExtractSeriesFromMetas(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractCollectionFromMetas(t *testing.T) {
+	cases := []struct {
+		name    string
+		metas   []opfMeta
+		want    string
+	}{
+		{
+			name: "set-type collection extracted",
+			metas: []opfMeta{
+				{Property: "belongs-to-collection", ID: "c1", Value: "Folio SF"},
+				{Property: "collection-type", Refines: "#c1", Value: "set"},
+			},
+			want: "Folio SF",
+		},
+		{
+			name: "series-type collection not returned",
+			metas: []opfMeta{
+				{Property: "belongs-to-collection", ID: "s1", Value: "My Series"},
+				{Property: "collection-type", Refines: "#s1", Value: "series"},
+			},
+			want: "",
+		},
+		{
+			name: "untyped collection not returned (might be series, avoid false positive)",
+			metas: []opfMeta{
+				{Property: "belongs-to-collection", ID: "u1", Value: "Unknown"},
+			},
+			want: "",
+		},
+		{
+			name: "empty metas returns empty",
+			metas: nil,
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractCollectionFromMetas(tc.metas)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

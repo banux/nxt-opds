@@ -576,6 +576,7 @@ type bookJSON struct {
 	Series      string   `json:"series,omitempty"`
 	SeriesIndex string   `json:"seriesIndex,omitempty"`
 	SeriesTotal string   `json:"seriesTotal,omitempty"`
+	Collection  string   `json:"collection,omitempty"`
 	IsRead      bool     `json:"isRead"`
 	Rating      int      `json:"rating"`
 	DownloadURL string   `json:"downloadUrl"`
@@ -600,14 +601,15 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 
 // handleAPIBooks serves the full book list as JSON for the web frontend.
 // Supports optional ?q= search query, ?series= series filter, ?author= author filter,
-// ?tag= tag filter, ?publisher= publisher filter, ?unread=1 filter, ?sort= sort order,
-// and standard ?offset=&limit= pagination.
+// ?tag= tag filter, ?publisher= publisher filter, ?collection= collection filter,
+// ?unread=1 filter, ?sort= sort order, and standard ?offset=&limit= pagination.
 func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	seriesFilter := r.URL.Query().Get("series")
 	authorFilter := r.URL.Query().Get("author")
 	tagFilter := r.URL.Query().Get("tag")
 	publisherFilter := r.URL.Query().Get("publisher")
+	collectionFilter := r.URL.Query().Get("collection")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	offset, limit := parsePagination(r)
 	sortBy, sortOrder := parseSortParam(r)
@@ -618,6 +620,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		Author:     authorFilter,
 		Tag:        tagFilter,
 		Publisher:  publisherFilter,
+		Collection: collectionFilter,
 		Offset:     offset,
 		Limit:      limit,
 		UnreadOnly: unreadOnly,
@@ -642,6 +645,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			Series:      bk.Series,
 			SeriesIndex: bk.SeriesIndex,
 			SeriesTotal: bk.SeriesTotal,
+			Collection:  bk.Collection,
 			IsRead:      bk.IsRead,
 			Rating:      bk.Rating,
 			DownloadURL: "/opds/books/" + bk.ID + "/download",
@@ -671,6 +675,7 @@ type bookUpdateRequest struct {
 	Series      *string  `json:"series"`
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
+	Collection  *string  `json:"collection"`
 	IsRead      *bool    `json:"isRead"`
 	Rating      *int     `json:"rating"`
 }
@@ -697,6 +702,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		Series:      bk.Series,
 		SeriesIndex: bk.SeriesIndex,
 		SeriesTotal: bk.SeriesTotal,
+		Collection:  bk.Collection,
 		IsRead:      bk.IsRead,
 		Rating:      bk.Rating,
 		DownloadURL: "/opds/books/" + bk.ID + "/download",
@@ -735,6 +741,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		Series:      req.Series,
 		SeriesIndex: req.SeriesIndex,
 		SeriesTotal: req.SeriesTotal,
+		Collection:  req.Collection,
 		IsRead:      req.IsRead,
 		Rating:      req.Rating,
 	}
@@ -756,6 +763,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		Series:      bk.Series,
 		SeriesIndex: bk.SeriesIndex,
 		SeriesTotal: bk.SeriesTotal,
+		Collection:  bk.Collection,
 		IsRead:      bk.IsRead,
 		Rating:      bk.Rating,
 		DownloadURL: "/opds/books/" + bk.ID + "/download",
