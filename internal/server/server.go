@@ -117,6 +117,9 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/tags", s.handleTags).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/tags/{tag}", s.handleTagBooks).Methods(http.MethodGet)
 
+	// Unread books feed
+	protected.HandleFunc("/opds/unread", s.handleUnreadBooks).Methods(http.MethodGet)
+
 	// OpenSearch description document
 	protected.HandleFunc("/opds/opensearch.xml", s.handleOpenSearch).Methods(http.MethodGet)
 
@@ -161,6 +164,7 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/v2/authors/{author}", s.handleOPDS2AuthorBooks).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/tags", s.handleOPDS2Tags).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/tags/{tag}", s.handleOPDS2TagBooks).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/unread", s.handleOPDS2Unread).Methods(http.MethodGet)
 
 	// Frontend static assets – serves index.html at / and any static files.
 	// When StaticFS is nil (e.g. in tests), a catch-all 404 handler is

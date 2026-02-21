@@ -179,6 +179,47 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	feed.AddEntry(opds.Entry{
+		ID:      "urn:nxt-opds:unread",
+		Title:   opds.Text{Value: "Unread Books"},
+		Updated: opds.AtomDate{Time: now},
+		Content: &opds.Content{Type: "text", Value: "Browse books not yet read"},
+		Links: []opds.Link{
+			{Rel: opds.RelCatalogNavigation, Href: "/opds/unread", Type: opds.MIMEAcquisitionFeed},
+		},
+	})
+
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// handleUnreadBooks serves the OPDS 1.x acquisition feed filtered to unread books.
+func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
+	offset, limit := parsePagination(r)
+
+	books, total, err := s.catalog.Search(catalog.SearchQuery{
+		UnreadOnly: true,
+		Offset:     offset,
+		Limit:      limit,
+		SortBy:     "added",
+		SortOrder:  "desc",
+	})
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := opds.NewAcquisitionFeed(
+		"urn:nxt-opds:unread",
+		fmt.Sprintf("Unread Books (%d)", total),
+	)
+	feed.AddLink(opds.RelSelf, "/opds/unread", opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, "/opds", opds.MIMENavigationFeed)
+	addPaginationLinks(feed, r, offset, limit, total, opds.MIMEAcquisitionFeed)
+
+	for _, bk := range books {
+		feed.AddEntry(bookToEntry(bk))
+	}
+
 	writeOPDS(w, http.StatusOK, feed)
 }
 
@@ -1038,8 +1079,44 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 			{Title: "Tous les livres", Href: "/opds/v2/publications", Type: opds2.MIMEFeed, Rel: "current"},
 			{Title: "Par auteur", Href: "/opds/v2/authors", Type: opds2.MIMEFeed, Rel: "current"},
 			{Title: "Par genre", Href: "/opds/v2/tags", Type: opds2.MIMEFeed, Rel: "current"},
+			{Title: "Non lus", Href: "/opds/v2/unread", Type: opds2.MIMEFeed, Rel: "current"},
 		},
 	}
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
+// handleOPDS2Unread serves the OPDS 2.0 acquisition feed filtered to unread books.
+func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
+	offset, limit := parsePagination(r)
+
+	books, total, err := s.catalog.Search(catalog.SearchQuery{
+		UnreadOnly: true,
+		Offset:     offset,
+		Limit:      limit,
+		SortBy:     "added",
+		SortOrder:  "desc",
+	})
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{
+			Title:         fmt.Sprintf("Non lus (%d)", total),
+			NumberOfItems: total,
+		},
+		Links: []opds2.Link{
+			{Rel: "self", Href: "/opds/v2/unread", Type: opds2.MIMEFeed},
+			{Rel: "start", Href: "/opds/v2", Type: opds2.MIMEFeed},
+		},
+	}
+	addPaginationLinks2(feed, r, offset, limit, total)
+
+	for _, bk := range books {
+		feed.Publications = append(feed.Publications, bookToPublication(bk))
+	}
+
 	writeOPDS2(w, http.StatusOK, feed)
 }
 

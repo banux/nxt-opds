@@ -54,7 +54,8 @@
 - [x] Avoir une page des livres d'un auteur, doit aussi être dans les flux OPDS - **Done: Vue SPA #/authors/<name> page; ?author= filter added to /api/books + Search in fs+sqlite backends; GET /api/authors endpoint; author names clickable in grid cards and book detail; OPDS v1/v2 feeds were already implemented**
 - [ ] Avoir une page des livres d'un editeur, doit aussi être dans les flux OPDS
 - [x] Avoir une page des livres d'un tag, doit aussi être dans les flux OPDS - **Done: Vue SPA #/tags/<name> page; ?tag= filter added to /api/books + Search in fs+sqlite backends; GET /api/tags endpoint; tags clickable in book detail page; OPDS v1/v2 feeds were already implemented**
-- [ ] Avoir une catégorie non lu dans les flux OPDS
+- [x] Avoir une catégorie non lu dans les flux OPDS - **Done: handleUnreadBooks (GET /opds/unread) for OPDS v1; handleOPDS2Unread (GET /opds/v2/unread) for OPDS v2; nav entries added to both root feeds; uses Search(UnreadOnly:true) with added-desc sort**
+- [ ] Ajoute la collection avec un numéro dans les métadatas
 
 ## Completed
 - [x] Project enabled for Ralph
