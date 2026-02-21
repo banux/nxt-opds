@@ -16,6 +16,7 @@ const (
 	NSOPDS       = "http://opds-spec.org/2010/catalog"
 	NSDC         = "http://purl.org/dc/terms/"
 	NSDCElements = "http://purl.org/dc/elements/1.1/"
+	NSCalibre    = "http://calibre.kovidgoyal.net/2009/metadata"
 
 	// OPDS relation types
 	RelAcquisition         = "http://opds-spec.org/acquisition"
@@ -52,9 +53,10 @@ const (
 
 // Feed represents an OPDS Atom feed (navigation or acquisition).
 type Feed struct {
-	XMLName xml.Name `xml:"feed"`
-	Xmlns   string   `xml:"xmlns,attr"`
-	XmlnsOS string   `xml:"xmlns:os,attr,omitempty"`
+	XMLName      xml.Name `xml:"feed"`
+	Xmlns        string   `xml:"xmlns,attr"`
+	XmlnsOS      string   `xml:"xmlns:os,attr,omitempty"`
+	XmlnsCalibre string   `xml:"xmlns:calibre,attr,omitempty"`
 
 	ID      string  `xml:"id"`
 	Title   Text    `xml:"title"`
@@ -77,12 +79,14 @@ func NewNavigationFeed(id, title string) *Feed {
 }
 
 // NewAcquisitionFeed creates a new acquisition feed with standard namespaces.
+// The Calibre namespace is always declared so that series metadata can be included.
 func NewAcquisitionFeed(id, title string) *Feed {
 	return &Feed{
-		Xmlns:   NSAtom,
-		ID:      id,
-		Title:   Text{Value: title},
-		Updated: AtomDate{Time: time.Now()},
+		Xmlns:        NSAtom,
+		XmlnsCalibre: NSCalibre,
+		ID:           id,
+		Title:        Text{Value: title},
+		Updated:      AtomDate{Time: time.Now()},
 	}
 }
 
@@ -145,6 +149,10 @@ type Entry struct {
 	Language  string `xml:"language,omitempty"`
 	Publisher string `xml:"publisher,omitempty"`
 	Published string `xml:"published,omitempty"`
+
+	// Calibre series extensions (widely supported by OPDS clients)
+	CalSeries      string `xml:"http://calibre.kovidgoyal.net/2009/metadata series,omitempty"`
+	CalSeriesIndex string `xml:"http://calibre.kovidgoyal.net/2009/metadata series_index,omitempty"`
 
 	Links []Link `xml:"link"`
 }

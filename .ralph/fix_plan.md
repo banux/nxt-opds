@@ -56,7 +56,7 @@
 - [x] Avoir une page des livres d'un editeur, doit aussi être dans les flux OPDS - **Done: Vue SPA #/publishers/<name> page; ?publisher= filter added to /api/books + Search in fs+sqlite backends; GET /api/publishers endpoint; publisher name clickable in book detail page; OPDS v1 (GET /opds/publishers, /opds/publishers/{publisher}) and v2 (GET /opds/v2/publishers, /opds/v2/publishers/{publisher}) feeds; nav entries added to both root feeds**
 - [x] Avoir une page des livres d'un tag, doit aussi être dans les flux OPDS - **Done: Vue SPA #/tags/<name> page; ?tag= filter added to /api/books + Search in fs+sqlite backends; GET /api/tags endpoint; tags clickable in book detail page; OPDS v1/v2 feeds were already implemented**
 - [x] Avoir une catégorie non lu dans les flux OPDS - **Done: handleUnreadBooks (GET /opds/unread) for OPDS v1; handleOPDS2Unread (GET /opds/v2/unread) for OPDS v2; nav entries added to both root feeds; uses Search(UnreadOnly:true) with added-desc sort**
-- [ ] Ajoute la collection avec un numéro dans les métadatas
+- [x] Ajoute la collection avec un numéro dans les métadatas - **Done: epub.go parses series/collection from both Calibre-style EPUB2 (<meta name="calibre:series"/>) and EPUB3 OPF3 (<meta property="belongs-to-collection"/>) OPF metadata; populated into Book.Series/SeriesIndex at index time; OPDS v1 Entry gains CalSeries/CalSeriesIndex fields using Calibre namespace (http://calibre.kovidgoyal.net/2009/metadata) included in all acquisition feeds; bookToEntry() populates series in OPDS v1 entries; 9 new tests in epub_test.go**
 
 ## Completed
 - [x] Project enabled for Ralph

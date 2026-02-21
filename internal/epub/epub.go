@@ -71,6 +71,11 @@ func ParseBook(path, coversDir string) (catalog.Book, error) {
 		}
 	}
 
+	if series, seriesIdx := extractSeriesFromMetas(meta.Metas); series != "" {
+		book.Series = series
+		book.SeriesIndex = seriesIdx
+	}
+
 	if coverPath := extractCoverFromPkg(&zr.Reader, opfPath, pkg, id, coversDir); coverPath != "" {
 		book.CoverURL = "/covers/" + id
 		book.ThumbnailURL = "/covers/" + id
@@ -157,8 +162,14 @@ type opfAuthor struct {
 }
 
 type opfMeta struct {
+	// EPUB2 (Calibre) style: <meta name="..." content="..."/>
 	Name    string `xml:"name,attr"`
 	Content string `xml:"content,attr"`
+	// EPUB3 style: <meta property="..." id="..." refines="...">value</meta>
+	Property string `xml:"property,attr"`
+	ID       string `xml:"id,attr"`
+	Refines  string `xml:"refines,attr"`
+	Value    string `xml:",chardata"`
 }
 
 type opfManifest struct {
@@ -470,6 +481,74 @@ func findFirstImgSrc(html string) string {
 		src = src[:i]
 	}
 	return strings.TrimSpace(src)
+}
+
+// extractSeriesFromMetas looks for series/collection metadata in OPF meta elements.
+// It supports:
+//   - Calibre EPUB2 style: <meta name="calibre:series" content="..."/>
+//   - EPUB3 OPF3 style: <meta property="belongs-to-collection" id="s1">Name</meta>
+//     with optional <meta refines="#s1" property="group-position">1</meta>
+//
+// Returns (seriesName, seriesIndex) where either may be empty.
+func extractSeriesFromMetas(metas []opfMeta) (string, string) {
+	// EPUB2 / Calibre style (checked first as most common in practice)
+	var calibreSeries, calibreIndex string
+	for _, m := range metas {
+		switch strings.ToLower(m.Name) {
+		case "calibre:series":
+			calibreSeries = strings.TrimSpace(m.Content)
+		case "calibre:series_index":
+			calibreIndex = strings.TrimSpace(m.Content)
+		}
+	}
+	if calibreSeries != "" {
+		return calibreSeries, calibreIndex
+	}
+
+	// EPUB3 OPF3 style: belongs-to-collection
+	type collItem struct {
+		name     string
+		colType  string
+		position string
+	}
+	collections := make(map[string]*collItem) // keyed by id (without leading #)
+
+	for _, m := range metas {
+		if m.Property == "" {
+			continue
+		}
+		if m.Refines == "" {
+			if strings.EqualFold(m.Property, "belongs-to-collection") {
+				id := m.ID
+				if id == "" {
+					id = "_default"
+				}
+				if collections[id] == nil {
+					collections[id] = &collItem{}
+				}
+				collections[id].name = strings.TrimSpace(m.Value)
+			}
+		} else {
+			refID := strings.TrimPrefix(m.Refines, "#")
+			if collections[refID] == nil {
+				collections[refID] = &collItem{}
+			}
+			switch strings.ToLower(m.Property) {
+			case "collection-type":
+				collections[refID].colType = strings.TrimSpace(m.Value)
+			case "group-position":
+				collections[refID].position = strings.TrimSpace(m.Value)
+			}
+		}
+	}
+
+	// Return the first series-type collection found
+	for _, c := range collections {
+		if c.name != "" && (c.colType == "" || strings.EqualFold(c.colType, "series")) {
+			return c.name, c.position
+		}
+	}
+	return "", ""
 }
 
 func mimeToExt(mimeType string) string {

@@ -104,6 +104,11 @@ func bookToEntry(b catalog.Book) opds.Entry {
 		entry.Authors = append(entry.Authors, opds.Author{Name: a.Name, URI: a.URI})
 	}
 
+	if b.Series != "" {
+		entry.CalSeries = b.Series
+		entry.CalSeriesIndex = b.SeriesIndex
+	}
+
 	// Acquisition links for each available file
 	for _, f := range b.Files {
 		entry.Links = append(entry.Links, opds.Link{
