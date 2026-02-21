@@ -51,6 +51,10 @@
 - [x] refresh button use basic auth instead of session cookie - **Done: added apiFetch() helper in Vue SPA that checks every API response for HTTP 401 and immediately redirects to /login; replaces all 10 raw fetch('/api/…') calls – loadBooks, loadBook, loadSeries, toggleRead, setRating, saveEdits, deleteBook, onCoverFileChange, doRefresh, doUpload – so a stale/expired session is always handled cleanly (redirect to login) instead of showing a cryptic error toast or triggering a browser Basic-Auth dialog**
 - [x] Some cover are not extract from epub because of bad metadata, search the image on first html page - **Done: findCoverInSpine() walks OPF spine in order, opens first HTML/XHTML item, uses findFirstImgSrc() to locate first <img src="…">, saves image as book cover; 9 unit tests in epub_test.go**
 - [x] allow update cover - **Done: catalog.CoverUpdater interface; UpdateCover() on fs+sqlite backends (removes old cover files, writes new image, updates DB/in-memory records); POST /api/books/{id}/cover handler (20 MB limit, auto-detects ext from MIME/filename); "Changer la couverture" button in book detail left column (file input ref, cache-busts URL with ?t=timestamp after upload); handleCover now uses actual file mod-time for proper browser cache invalidation**
+- [x] Avoir une page des livres d'un auteur, doit aussi être dans les flux OPDS - **Done: Vue SPA #/authors/<name> page; ?author= filter added to /api/books + Search in fs+sqlite backends; GET /api/authors endpoint; author names clickable in grid cards and book detail; OPDS v1/v2 feeds were already implemented**
+- [ ] Avoir une page des livres d'un editeur, doit aussi être dans les flux OPDS
+- [x] Avoir une page des livres d'un tag, doit aussi être dans les flux OPDS - **Done: Vue SPA #/tags/<name> page; ?tag= filter added to /api/books + Search in fs+sqlite backends; GET /api/tags endpoint; tags clickable in book detail page; OPDS v1/v2 feeds were already implemented**
+- [ ] Avoir une catégorie non lu dans les flux OPDS
 
 ## Completed
 - [x] Project enabled for Ralph

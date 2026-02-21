@@ -456,6 +456,14 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		extraClauses = append(extraClauses, "b.series = ?")
 		extraArgs = append(extraArgs, q.Series)
 	}
+	if q.Author != "" {
+		extraClauses = append(extraClauses, "EXISTS (SELECT 1 FROM book_authors _ba WHERE _ba.book_id = b.id AND LOWER(_ba.author_name) = LOWER(?))")
+		extraArgs = append(extraArgs, q.Author)
+	}
+	if q.Tag != "" {
+		extraClauses = append(extraClauses, "EXISTS (SELECT 1 FROM book_tags _bt WHERE _bt.book_id = b.id AND LOWER(_bt.tag) = LOWER(?))")
+		extraArgs = append(extraArgs, q.Tag)
+	}
 
 	extraWhere := ""
 	for _, c := range extraClauses {

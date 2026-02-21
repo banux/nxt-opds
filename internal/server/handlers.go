@@ -466,11 +466,13 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 }
 
 // handleAPIBooks serves the full book list as JSON for the web frontend.
-// Supports optional ?q= search query, ?series= series filter, ?unread=1 filter,
-// ?sort= sort order, and standard ?offset=&limit= pagination.
+// Supports optional ?q= search query, ?series= series filter, ?author= author filter,
+// ?tag= tag filter, ?unread=1 filter, ?sort= sort order, and standard ?offset=&limit= pagination.
 func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	seriesFilter := r.URL.Query().Get("series")
+	authorFilter := r.URL.Query().Get("author")
+	tagFilter := r.URL.Query().Get("tag")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	offset, limit := parsePagination(r)
 	sortBy, sortOrder := parseSortParam(r)
@@ -478,6 +480,8 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
 		Query:      q,
 		Series:     seriesFilter,
+		Author:     authorFilter,
+		Tag:        tagFilter,
 		Offset:     offset,
 		Limit:      limit,
 		UnreadOnly: unreadOnly,
@@ -645,6 +649,34 @@ func (s *Server) handleAPIDeleteBook(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// handleAPIAuthors returns all distinct author names as a JSON array of strings.
+func (s *Server) handleAPIAuthors(w http.ResponseWriter, r *http.Request) {
+	authors, _, err := s.catalog.Authors(0, 10000)
+	if err != nil {
+		http.Error(w, "authors query error", http.StatusInternalServerError)
+		return
+	}
+	if authors == nil {
+		authors = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(authors)
+}
+
+// handleAPITags returns all distinct tag names as a JSON array of strings.
+func (s *Server) handleAPITags(w http.ResponseWriter, r *http.Request) {
+	tags, _, err := s.catalog.Tags(0, 10000)
+	if err != nil {
+		http.Error(w, "tags query error", http.StatusInternalServerError)
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(tags)
 }
 
 // handleAPISeries returns all distinct series as a JSON array of {name, count} objects.

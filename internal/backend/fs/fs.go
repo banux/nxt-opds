@@ -425,6 +425,30 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		if q.Series != "" && bk.Series != q.Series {
 			continue
 		}
+		if q.Author != "" {
+			authorMatch := false
+			for _, a := range bk.Authors {
+				if strings.EqualFold(a.Name, q.Author) {
+					authorMatch = true
+					break
+				}
+			}
+			if !authorMatch {
+				continue
+			}
+		}
+		if q.Tag != "" {
+			tagMatch := false
+			for _, t := range bk.Tags {
+				if strings.EqualFold(t, q.Tag) {
+					tagMatch = true
+					break
+				}
+			}
+			if !tagMatch {
+				continue
+			}
+		}
 		if q.Query == "" {
 			matched = append(matched, bk)
 			continue

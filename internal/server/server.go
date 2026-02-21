@@ -138,6 +138,12 @@ func (s *Server) registerRoutes() {
 	// API: upload a new book (enabled when backend supports it)
 	protected.HandleFunc("/api/upload", s.handleUpload).Methods(http.MethodPost)
 
+	// API: list all distinct authors
+	protected.HandleFunc("/api/authors", s.handleAPIAuthors).Methods(http.MethodGet)
+
+	// API: list all distinct tags
+	protected.HandleFunc("/api/tags", s.handleAPITags).Methods(http.MethodGet)
+
 	// API: list all distinct series
 	protected.HandleFunc("/api/series", s.handleAPISeries).Methods(http.MethodGet)
 
