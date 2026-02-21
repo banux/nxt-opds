@@ -223,3 +223,14 @@ type Deleter interface {
 	// deletes its file(s) and cover image from disk.
 	DeleteBook(id string) error
 }
+
+// Backupper is an optional interface for catalog backends that support
+// creating a consistent point-in-time backup of their persistent store.
+type Backupper interface {
+	// Backup writes a self-contained backup file named
+	// "catalog-YYYYMMDD-HHMMSS.db" into destDir and then prunes the
+	// oldest files in destDir so that at most keep backups are retained
+	// (keep ≤ 0 means unlimited).
+	// Returns the path of the newly created backup file.
+	Backup(destDir string, keep int) (string, error)
+}

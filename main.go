@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/banux/nxt-opds/internal/config"
@@ -71,6 +72,17 @@ func main() {
 		}()
 	}
 
+	// Start nightly backup goroutine if the backend supports it.
+	if bu, ok := cat.(catalog.Backupper); ok {
+		backupDir := cfg.BackupDir
+		if backupDir == "" {
+			backupDir = filepath.Join(cfg.BooksDir, ".backups")
+		}
+		keep := cfg.BackupKeep
+		log.Printf("nightly database backup enabled (dir: %s, keep: %d)", backupDir, keep)
+		go runNightlyBackup(bu, backupDir, keep)
+	}
+
 	opts := server.Options{
 		Password: cfg.Password,
 		StaticFS: web.FS,
@@ -81,5 +93,23 @@ func main() {
 	log.Printf("Web UI available at http://localhost%s/", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
 		log.Fatalf("server error: %v", err)
+	}
+}
+
+// runNightlyBackup sleeps until the next local midnight, then calls
+// bu.Backup every 24 hours.  It is intended to run in a goroutine.
+func runNightlyBackup(bu catalog.Backupper, backupDir string, keep int) {
+	for {
+		now := time.Now()
+		// Next midnight in local time.
+		next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		time.Sleep(time.Until(next))
+
+		path, err := bu.Backup(backupDir, keep)
+		if err != nil {
+			log.Printf("nightly backup error: %v", err)
+		} else {
+			log.Printf("nightly backup created: %s", path)
+		}
 	}
 }

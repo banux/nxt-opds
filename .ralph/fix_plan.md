@@ -14,7 +14,7 @@
 - [x] Add a filter on grid page to have only not readed book - **Done: "Non lus seulement" toggle pill in grid filter bar; ?unread=1 API param; UnreadOnly field in SearchQuery; both fs and sqlite backends filter by is_read=0**
 - [x] Sort Book by added date descending by default, add possibility to sort by name, added date - **Done: AddedAt field on Book (file mod time); SortBy/SortOrder on SearchQuery; fs backend sorts by AddedAt desc on Refresh and re-sorts matched slice; sqlite adds added_at column (migration-safe) + sortClause() helper; handleAPIBooks always uses Search with parsed ?sort= param (added_desc/added_asc/title_asc/title_desc); Vue sort selector in filter bar with localStorage persistence**
 - [x] Gérer les versions de schema de la base de données et quand une mise a jour de schéma est effectué faire une migration pour ne pas devoir remettre la base à zéro - **Done: PRAGMA user_version–based migration system in sqlite.go (schemaMigrations slice, migrateSchema(), currentSchemaVersion const); migration1 handles both fresh and pre-migration DBs; 3 tests (fresh, idempotent, legacy DB upgrade)**
-- [ ] Backup database every night 
+- [x] Backup database every night - **Done: catalog.Backupper interface; sqlite.Backend.Backup() uses VACUUM INTO for a live consistent copy; pruneBackups() keeps most recent N files; BackupDir/BackupKeep fields in Config (env: BACKUP_DIR/BACKUP_KEEP, default keep=7); runNightlyBackup() goroutine in main.go sleeps until next local midnight then repeats every 24h; 2 tests (file created, prune)**
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**

@@ -456,3 +456,87 @@ CREATE TABLE book_tags   (book_id TEXT, tag TEXT, PRIMARY KEY(book_id,tag));
 		t.Errorf("rating column not present after migration: %v", err)
 	}
 }
+
+// TestBackup_CreatesFile verifies that Backup() creates a non-empty .db file
+// in the specified directory and returns its path.
+func TestBackup_CreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	backupDir := filepath.Join(dir, "backups")
+	path, err := b.Backup(backupDir, 7)
+	if err != nil {
+		t.Fatalf("Backup() error: %v", err)
+	}
+
+	// File must exist and be non-empty.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("backup file not found at %s: %v", path, err)
+	}
+	if info.Size() == 0 {
+		t.Error("backup file is empty")
+	}
+
+	// File name must follow the naming convention.
+	name := filepath.Base(path)
+	if len(name) < 8 || name[:8] != "catalog-" || filepath.Ext(name) != ".db" {
+		t.Errorf("unexpected backup filename %q", name)
+	}
+}
+
+// TestBackup_PrunesOldFiles verifies that Backup() removes excess backups so
+// that at most keep files are retained.
+func TestBackup_PrunesOldFiles(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	backupDir := filepath.Join(dir, "backups")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	keep := 2
+
+	// Pre-seed the backup directory with 4 stale dummy backup files so that
+	// a single real Backup() call (keep=2) should prune down to 2 files.
+	staleNames := []string{
+		"catalog-20240101-000000.db",
+		"catalog-20240102-000000.db",
+		"catalog-20240103-000000.db",
+		"catalog-20240104-000000.db",
+	}
+	for _, n := range staleNames {
+		if err := os.WriteFile(filepath.Join(backupDir, n), []byte("dummy"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// One real backup (timestamp newer than all stale names) triggers pruning.
+	if _, err := b.Backup(backupDir, keep); err != nil {
+		t.Fatalf("Backup() error: %v", err)
+	}
+
+	// Count remaining backup files.
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("read backup dir: %v", err)
+	}
+	var count int
+	for _, e := range entries {
+		if !e.IsDir() {
+			count++
+		}
+	}
+	if count != keep {
+		t.Errorf("expected %d backups after pruning, got %d", keep, count)
+	}
+}

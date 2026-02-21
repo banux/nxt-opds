@@ -712,6 +712,63 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	return &bk, nil
 }
 
+// Backup creates a consistent snapshot of the catalog database in destDir
+// using SQLite's VACUUM INTO statement, which produces a defragmented copy
+// even while the database is in use.  The backup file is named
+// "catalog-YYYYMMDD-HHMMSS.db".  Afterwards the oldest backups in destDir
+// are pruned so that at most keep files remain (keep ≤ 0 = unlimited).
+// It implements catalog.Backupper.
+func (b *Backend) Backup(destDir string, keep int) (string, error) {
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return "", fmt.Errorf("create backup dir %q: %w", destDir, err)
+	}
+
+	name := "catalog-" + time.Now().Format("20060102-150405") + ".db"
+	destPath := filepath.Join(destDir, name)
+
+	if _, err := b.db.Exec(`VACUUM INTO ?`, destPath); err != nil {
+		return "", fmt.Errorf("vacuum into %q: %w", destPath, err)
+	}
+
+	if keep > 0 {
+		if err := pruneBackups(destDir, keep); err != nil {
+			// Non-fatal: log via return but don't abort.
+			return destPath, fmt.Errorf("prune backups: %w", err)
+		}
+	}
+	return destPath, nil
+}
+
+// pruneBackups keeps only the most recent keep files matching the backup
+// naming pattern "catalog-*.db" in dir, deleting older ones.
+func pruneBackups(dir string, keep int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read backup dir: %w", err)
+	}
+
+	// Collect files that match the backup naming convention.
+	var backups []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if len(n) >= 8 && n[:8] == "catalog-" && filepath.Ext(n) == ".db" {
+			backups = append(backups, filepath.Join(dir, n))
+		}
+	}
+
+	// os.ReadDir returns entries sorted by name, and our timestamp-named
+	// files sort chronologically, so oldest entries are first.
+	if len(backups) > keep {
+		for _, old := range backups[:len(backups)-keep] {
+			_ = os.Remove(old) // best-effort
+		}
+	}
+	return nil
+}
+
 // --- query helpers ---
 
 // bookRow is the raw data scanned from the books table plus JSON-encoded relations.

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -50,6 +51,16 @@ type Config struct {
 	// RefreshInterval is the parsed form of RefreshIntervalStr.
 	// Not marshalled to/from YAML directly.
 	RefreshInterval time.Duration `yaml:"-"`
+
+	// BackupDir is the directory where nightly database backups are stored.
+	// Defaults to "" which is resolved to {books_dir}/.backups at runtime.
+	// Only used when backend is "sqlite".
+	BackupDir string `yaml:"backup_dir"`
+
+	// BackupKeep is the number of backup files to retain.
+	// Older backups are pruned automatically.  0 or negative means unlimited.
+	// Default: 7.
+	BackupKeep int `yaml:"backup_keep"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -60,6 +71,7 @@ func Default() Config {
 		Backend:            "fs",
 		RefreshIntervalStr: "5m",
 		RefreshInterval:    5 * time.Minute,
+		BackupKeep:         7,
 	}
 }
 
@@ -95,6 +107,14 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("REFRESH_INTERVAL"); v != "" {
 		cfg.RefreshIntervalStr = v
+	}
+	if v := os.Getenv("BACKUP_DIR"); v != "" {
+		cfg.BackupDir = v
+	}
+	if v := os.Getenv("BACKUP_KEEP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.BackupKeep = n
+		}
 	}
 
 	// Parse the refresh interval string into a Duration.
