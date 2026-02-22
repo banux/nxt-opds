@@ -169,9 +169,10 @@ func TestExtractSeriesFromMetas(t *testing.T) {
 
 func TestExtractCollectionFromMetas(t *testing.T) {
 	cases := []struct {
-		name    string
-		metas   []opfMeta
-		want    string
+		name      string
+		metas     []opfMeta
+		wantName  string
+		wantIndex string
 	}{
 		{
 			name: "set-type collection extracted",
@@ -179,7 +180,18 @@ func TestExtractCollectionFromMetas(t *testing.T) {
 				{Property: "belongs-to-collection", ID: "c1", Value: "Folio SF"},
 				{Property: "collection-type", Refines: "#c1", Value: "set"},
 			},
-			want: "Folio SF",
+			wantName:  "Folio SF",
+			wantIndex: "",
+		},
+		{
+			name: "set-type collection with group-position",
+			metas: []opfMeta{
+				{Property: "belongs-to-collection", ID: "c1", Value: "Folio SF"},
+				{Property: "collection-type", Refines: "#c1", Value: "set"},
+				{Property: "group-position", Refines: "#c1", Value: "42"},
+			},
+			wantName:  "Folio SF",
+			wantIndex: "42",
 		},
 		{
 			name: "series-type collection not returned",
@@ -187,26 +199,32 @@ func TestExtractCollectionFromMetas(t *testing.T) {
 				{Property: "belongs-to-collection", ID: "s1", Value: "My Series"},
 				{Property: "collection-type", Refines: "#s1", Value: "series"},
 			},
-			want: "",
+			wantName:  "",
+			wantIndex: "",
 		},
 		{
 			name: "untyped collection not returned (might be series, avoid false positive)",
 			metas: []opfMeta{
 				{Property: "belongs-to-collection", ID: "u1", Value: "Unknown"},
 			},
-			want: "",
+			wantName:  "",
+			wantIndex: "",
 		},
 		{
-			name: "empty metas returns empty",
-			metas: nil,
-			want:  "",
+			name:      "empty metas returns empty",
+			metas:     nil,
+			wantName:  "",
+			wantIndex: "",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := extractCollectionFromMetas(tc.metas)
-			if got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+			gotName, gotIndex := extractCollectionFromMetas(tc.metas)
+			if gotName != tc.wantName {
+				t.Errorf("collection name = %q, want %q", gotName, tc.wantName)
+			}
+			if gotIndex != tc.wantIndex {
+				t.Errorf("collection index = %q, want %q", gotIndex, tc.wantIndex)
 			}
 		})
 	}

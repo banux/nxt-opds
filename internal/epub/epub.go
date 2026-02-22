@@ -76,8 +76,9 @@ func ParseBook(path, coversDir string) (catalog.Book, error) {
 		book.SeriesIndex = seriesIdx
 	}
 
-	if col := extractCollectionFromMetas(meta.Metas); col != "" {
+	if col, colIdx := extractCollectionFromMetas(meta.Metas); col != "" {
 		book.Collection = col
+		book.CollectionIndex = colIdx
 	}
 
 	if coverPath := extractCoverFromPkg(&zr.Reader, opfPath, pkg, id, coversDir); coverPath != "" {
@@ -556,17 +557,20 @@ func extractSeriesFromMetas(metas []opfMeta) (string, string) {
 }
 
 // extractCollectionFromMetas looks for editorial collection metadata in OPF meta elements.
-// It returns the name of the first "set"-type belongs-to-collection found.
+// It returns (name, index) for the first "set"-type belongs-to-collection found.
+// index corresponds to the group-position refine (e.g. "42"); may be empty.
 // This is distinct from extractSeriesFromMetas which handles "series"-type collections.
 //
 // EPUB3 OPF3 style:
 //
 //	<meta property="belongs-to-collection" id="c1">Folio SF</meta>
 //	<meta property="collection-type" refines="#c1">set</meta>
-func extractCollectionFromMetas(metas []opfMeta) string {
+//	<meta property="group-position" refines="#c1">42</meta>
+func extractCollectionFromMetas(metas []opfMeta) (string, string) {
 	type collItem struct {
-		name    string
-		colType string
+		name     string
+		colType  string
+		position string
 	}
 	collections := make(map[string]*collItem) // keyed by id (without leading #)
 
@@ -590,8 +594,11 @@ func extractCollectionFromMetas(metas []opfMeta) string {
 			if collections[refID] == nil {
 				collections[refID] = &collItem{}
 			}
-			if strings.EqualFold(m.Property, "collection-type") {
+			switch {
+			case strings.EqualFold(m.Property, "collection-type"):
 				collections[refID].colType = strings.TrimSpace(m.Value)
+			case strings.EqualFold(m.Property, "group-position"):
+				collections[refID].position = strings.TrimSpace(m.Value)
 			}
 		}
 	}
@@ -599,10 +606,10 @@ func extractCollectionFromMetas(metas []opfMeta) string {
 	// Return the first set-type collection found
 	for _, c := range collections {
 		if c.name != "" && strings.EqualFold(c.colType, "set") {
-			return c.name
+			return c.name, c.position
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func mimeToExt(mimeType string) string {

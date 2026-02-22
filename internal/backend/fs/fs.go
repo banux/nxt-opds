@@ -33,8 +33,9 @@ type metaOverride struct {
 	Series      *string  `json:"series"`
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
-	Collection  *string  `json:"collection"`
-	IsRead      *bool    `json:"isRead"`
+	Collection      *string `json:"collection"`
+	CollectionIndex *string `json:"collectionIndex"`
+	IsRead          *bool   `json:"isRead"`
 	Rating      *int     `json:"rating"`
 }
 
@@ -146,6 +147,9 @@ func mergeOverride(bk catalog.Book, ov metaOverride) catalog.Book {
 	if ov.Collection != nil {
 		bk.Collection = *ov.Collection
 	}
+	if ov.CollectionIndex != nil {
+		bk.CollectionIndex = *ov.CollectionIndex
+	}
 	if ov.IsRead != nil {
 		bk.IsRead = *ov.IsRead
 	}
@@ -198,6 +202,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	if update.Collection != nil {
 		ov.Collection = update.Collection
+	}
+	if update.CollectionIndex != nil {
+		ov.CollectionIndex = update.CollectionIndex
 	}
 	if update.IsRead != nil {
 		ov.IsRead = update.IsRead

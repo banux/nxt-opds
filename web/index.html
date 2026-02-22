@@ -507,7 +507,7 @@
           </div>
 
           <!-- Metadata table -->
-          <dl v-if="currentBook.publisher || currentBook.language || currentBook.collection" class="flex flex-wrap gap-x-8 gap-y-1 text-sm mb-4">
+          <dl v-if="currentBook.publisher || currentBook.language || currentBook.collection || currentBook.collectionIndex" class="flex flex-wrap gap-x-8 gap-y-1 text-sm mb-4">
             <template v-if="currentBook.publisher">
               <div class="flex gap-2">
                 <dt class="text-gray-500 dark:text-gray-400">Éditeur</dt>
@@ -523,6 +523,7 @@
                 <dd class="text-gray-900 dark:text-gray-100 font-medium">
                   <a @click="navigateTo('/collections/' + encodeURIComponent(currentBook.collection))"
                      class="hover:underline hover:text-purple-600 dark:hover:text-purple-400 cursor-pointer transition-colors">{{ currentBook.collection }}</a>
+                  <span v-if="currentBook.collectionIndex" class="ml-1 text-gray-500 dark:text-gray-400">#{{ currentBook.collectionIndex }}</span>
                 </dd>
               </div>
             </template>
@@ -1069,10 +1070,17 @@
           </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Collection éditoriale <span class="font-normal text-gray-400">(ex : Folio SF, J'ai Lu)</span></label>
-          <input v-model="editForm.collection" type="text" placeholder="Nom de la collection"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Collection éditoriale <span class="font-normal text-gray-400">(ex : Folio SF)</span></label>
+            <input v-model="editForm.collection" type="text" placeholder="Nom de la collection"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
+          <div class="w-24">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">N° collection</label>
+            <input v-model="editForm.collectionIndex" type="text" placeholder="42"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          </div>
         </div>
 
         <div class="flex gap-3">
@@ -1468,7 +1476,7 @@ createApp({
     const editError   = ref('')
     const editForm    = ref({
       title: '', authorsStr: '', tagsStr: '', summary: '',
-      publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '', collection: '',
+      publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '', collection: '', collectionIndex: '',
     })
 
     function openEdit(book) {
@@ -1482,8 +1490,9 @@ createApp({
         language:    book.language  || '',
         series:      book.series    || '',
         seriesIndex: book.seriesIndex || '',
-        seriesTotal: book.seriesTotal || '',
-        collection:  book.collection  || '',
+        seriesTotal:     book.seriesTotal     || '',
+        collection:      book.collection      || '',
+        collectionIndex: book.collectionIndex || '',
       }
       editError.value = ''
       editDialog.value = true
@@ -1510,8 +1519,9 @@ createApp({
           language:    editForm.value.language,
           series:      editForm.value.series,
           seriesIndex: editForm.value.seriesIndex,
-          seriesTotal: editForm.value.seriesTotal,
-          collection:  editForm.value.collection,
+          seriesTotal:     editForm.value.seriesTotal,
+          collection:      editForm.value.collection,
+          collectionIndex: editForm.value.collectionIndex,
         }
         const res = await apiFetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',

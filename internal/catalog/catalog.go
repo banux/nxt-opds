@@ -59,6 +59,10 @@ type Book struct {
 	// not by narrative order (corresponds to EPUB3 belongs-to-collection with type="set").
 	Collection string
 
+	// CollectionIndex is the position within the editorial collection (e.g. "42").
+	// Corresponds to the EPUB3 group-position refine on belongs-to-collection.
+	CollectionIndex string
+
 	// IsRead indicates the user has marked this book as read.
 	IsRead bool
 
@@ -200,8 +204,9 @@ type BookUpdate struct {
 	Series      *string
 	SeriesIndex *string
 	SeriesTotal *string
-	Collection  *string
-	IsRead      *bool
+	Collection      *string
+	CollectionIndex *string
+	IsRead          *bool
 	Rating      *int
 }
 

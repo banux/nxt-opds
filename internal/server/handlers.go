@@ -576,8 +576,9 @@ type bookJSON struct {
 	Series      string   `json:"series,omitempty"`
 	SeriesIndex string   `json:"seriesIndex,omitempty"`
 	SeriesTotal string   `json:"seriesTotal,omitempty"`
-	Collection  string   `json:"collection,omitempty"`
-	IsRead      bool     `json:"isRead"`
+	Collection      string `json:"collection,omitempty"`
+	CollectionIndex string `json:"collectionIndex,omitempty"`
+	IsRead          bool   `json:"isRead"`
 	Rating      int      `json:"rating"`
 	DownloadURL string   `json:"downloadUrl"`
 }
@@ -635,20 +636,21 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	result := make([]bookJSON, 0, len(books))
 	for _, bk := range books {
 		j := bookJSON{
-			ID:          bk.ID,
-			Title:       bk.Title,
-			CoverURL:    bk.CoverURL,
-			Tags:        bk.Tags,
-			Language:    bk.Language,
-			Publisher:   bk.Publisher,
-			Summary:     bk.Summary,
-			Series:      bk.Series,
-			SeriesIndex: bk.SeriesIndex,
-			SeriesTotal: bk.SeriesTotal,
-			Collection:  bk.Collection,
-			IsRead:      bk.IsRead,
-			Rating:      bk.Rating,
-			DownloadURL: "/opds/books/" + bk.ID + "/download",
+			ID:              bk.ID,
+			Title:           bk.Title,
+			CoverURL:        bk.CoverURL,
+			Tags:            bk.Tags,
+			Language:        bk.Language,
+			Publisher:       bk.Publisher,
+			Summary:         bk.Summary,
+			Series:          bk.Series,
+			SeriesIndex:     bk.SeriesIndex,
+			SeriesTotal:     bk.SeriesTotal,
+			Collection:      bk.Collection,
+			CollectionIndex: bk.CollectionIndex,
+			IsRead:          bk.IsRead,
+			Rating:          bk.Rating,
+			DownloadURL:     "/opds/books/" + bk.ID + "/download",
 		}
 		for _, a := range bk.Authors {
 			j.Authors = append(j.Authors, a.Name)
@@ -675,9 +677,10 @@ type bookUpdateRequest struct {
 	Series      *string  `json:"series"`
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
-	Collection  *string  `json:"collection"`
-	IsRead      *bool    `json:"isRead"`
-	Rating      *int     `json:"rating"`
+	Collection      *string `json:"collection"`
+	CollectionIndex *string `json:"collectionIndex"`
+	IsRead          *bool   `json:"isRead"`
+	Rating          *int    `json:"rating"`
 }
 
 // handleAPIBook handles GET /api/books/{id} to fetch a single book as JSON.
@@ -692,20 +695,21 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	j := bookJSON{
-		ID:          bk.ID,
-		Title:       bk.Title,
-		CoverURL:    bk.CoverURL,
-		Tags:        bk.Tags,
-		Language:    bk.Language,
-		Publisher:   bk.Publisher,
-		Summary:     bk.Summary,
-		Series:      bk.Series,
-		SeriesIndex: bk.SeriesIndex,
-		SeriesTotal: bk.SeriesTotal,
-		Collection:  bk.Collection,
-		IsRead:      bk.IsRead,
-		Rating:      bk.Rating,
-		DownloadURL: "/opds/books/" + bk.ID + "/download",
+		ID:              bk.ID,
+		Title:           bk.Title,
+		CoverURL:        bk.CoverURL,
+		Tags:            bk.Tags,
+		Language:        bk.Language,
+		Publisher:       bk.Publisher,
+		Summary:         bk.Summary,
+		Series:          bk.Series,
+		SeriesIndex:     bk.SeriesIndex,
+		SeriesTotal:     bk.SeriesTotal,
+		Collection:      bk.Collection,
+		CollectionIndex: bk.CollectionIndex,
+		IsRead:          bk.IsRead,
+		Rating:          bk.Rating,
+		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 	}
 	for _, a := range bk.Authors {
 		j.Authors = append(j.Authors, a.Name)
@@ -732,18 +736,19 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	update := catalog.BookUpdate{
-		Title:       req.Title,
-		Authors:     req.Authors,
-		Tags:        req.Tags,
-		Summary:     req.Summary,
-		Publisher:   req.Publisher,
-		Language:    req.Language,
-		Series:      req.Series,
-		SeriesIndex: req.SeriesIndex,
-		SeriesTotal: req.SeriesTotal,
-		Collection:  req.Collection,
-		IsRead:      req.IsRead,
-		Rating:      req.Rating,
+		Title:           req.Title,
+		Authors:         req.Authors,
+		Tags:            req.Tags,
+		Summary:         req.Summary,
+		Publisher:       req.Publisher,
+		Language:        req.Language,
+		Series:          req.Series,
+		SeriesIndex:     req.SeriesIndex,
+		SeriesTotal:     req.SeriesTotal,
+		Collection:      req.Collection,
+		CollectionIndex: req.CollectionIndex,
+		IsRead:          req.IsRead,
+		Rating:          req.Rating,
 	}
 
 	bk, err := s.updater.UpdateBook(id, update)
@@ -753,20 +758,21 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	j := bookJSON{
-		ID:          bk.ID,
-		Title:       bk.Title,
-		CoverURL:    bk.CoverURL,
-		Tags:        bk.Tags,
-		Language:    bk.Language,
-		Publisher:   bk.Publisher,
-		Summary:     bk.Summary,
-		Series:      bk.Series,
-		SeriesIndex: bk.SeriesIndex,
-		SeriesTotal: bk.SeriesTotal,
-		Collection:  bk.Collection,
-		IsRead:      bk.IsRead,
-		Rating:      bk.Rating,
-		DownloadURL: "/opds/books/" + bk.ID + "/download",
+		ID:              bk.ID,
+		Title:           bk.Title,
+		CoverURL:        bk.CoverURL,
+		Tags:            bk.Tags,
+		Language:        bk.Language,
+		Publisher:       bk.Publisher,
+		Summary:         bk.Summary,
+		Series:          bk.Series,
+		SeriesIndex:     bk.SeriesIndex,
+		SeriesTotal:     bk.SeriesTotal,
+		Collection:      bk.Collection,
+		CollectionIndex: bk.CollectionIndex,
+		IsRead:          bk.IsRead,
+		Rating:          bk.Rating,
+		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 	}
 	for _, a := range bk.Authors {
 		j.Authors = append(j.Authors, a.Name)
