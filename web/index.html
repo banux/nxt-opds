@@ -1048,14 +1048,25 @@
 
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Étiquettes <span class="font-normal text-gray-400">(séparées par des virgules)</span></label>
-          <input v-model="editForm.tagsStr" type="text"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+          <div class="relative">
+            <input v-model="editForm.tagsStr" type="text"
+              @input="onTagsInput" @focus="onTagsInput" @blur="hideTagsSuggestions"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+            <ul v-if="tagsSuggestionsVisible && tagsSuggestions.length"
+              class="absolute z-50 w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg mt-1 max-h-40 overflow-y-auto">
+              <li v-for="t in tagsSuggestions" :key="t"
+                @mousedown.prevent="selectTag(t)"
+                class="px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100">
+                {{ t }}
+              </li>
+            </ul>
+          </div>
         </div>
 
         <div class="flex gap-3">
           <div class="flex-1">
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Série</label>
-            <input v-model="editForm.series" type="text" placeholder="Nom de la série"
+            <input v-model="editForm.series" type="text" placeholder="Nom de la série" list="ac-series"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
           <div class="w-20">
@@ -1073,7 +1084,7 @@
         <div class="flex gap-3">
           <div class="flex-1">
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Collection éditoriale <span class="font-normal text-gray-400">(ex : Folio SF)</span></label>
-            <input v-model="editForm.collection" type="text" placeholder="Nom de la collection"
+            <input v-model="editForm.collection" type="text" placeholder="Nom de la collection" list="ac-collections"
               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
           </div>
           <div class="w-24">
@@ -1119,6 +1130,14 @@
       </div>
     </div>
   </div>
+
+  <!-- Autocomplete datalists -->
+  <datalist id="ac-series">
+    <option v-for="s in autocompleteSeries" :key="s" :value="s"/>
+  </datalist>
+  <datalist id="ac-collections">
+    <option v-for="c in autocompleteCollections" :key="c" :value="c"/>
+  </datalist>
 
   <!-- Toast -->
   <div v-if="toast.show"
@@ -1479,6 +1498,56 @@ createApp({
       publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '', collection: '', collectionIndex: '',
     })
 
+    // ---- Autocomplete for edit form ----
+    const autocompleteTags        = ref([])
+    const autocompleteSeries      = ref([])
+    const autocompleteCollections = ref([])
+    let autocompleteLoaded = false
+    const tagsSuggestionsVisible  = ref(false)
+
+    const tagsSuggestions = computed(() => {
+      const parts = editForm.value.tagsStr.split(',')
+      const last = parts[parts.length - 1].trim().toLowerCase()
+      const existing = new Set(parts.slice(0, -1).map(p => p.trim().toLowerCase()))
+      if (!last) return []
+      return autocompleteTags.value
+        .filter(t => t.toLowerCase().startsWith(last) && !existing.has(t.toLowerCase()))
+        .slice(0, 8)
+    })
+
+    async function loadAutocompleteData() {
+      if (autocompleteLoaded) return
+      try {
+        const [tagsRes, seriesRes, collRes] = await Promise.all([
+          apiFetch('/api/tags'),
+          apiFetch('/api/series'),
+          apiFetch('/api/collections'),
+        ])
+        if (tagsRes.ok) autocompleteTags.value = (await tagsRes.json()) || []
+        if (seriesRes.ok) {
+          const data = await seriesRes.json()
+          autocompleteSeries.value = (data || []).map(s => s.name)
+        }
+        if (collRes.ok) autocompleteCollections.value = (await collRes.json()) || []
+        autocompleteLoaded = true
+      } catch { /* non-critical */ }
+    }
+
+    function onTagsInput() {
+      tagsSuggestionsVisible.value = true
+    }
+
+    function hideTagsSuggestions() {
+      setTimeout(() => { tagsSuggestionsVisible.value = false }, 200)
+    }
+
+    function selectTag(tag) {
+      const parts = editForm.value.tagsStr.split(',')
+      parts[parts.length - 1] = ' ' + tag
+      editForm.value.tagsStr = parts.join(',') + ', '
+      tagsSuggestionsVisible.value = false
+    }
+
     function openEdit(book) {
       editBook.value = book
       editForm.value = {
@@ -1496,6 +1565,7 @@ createApp({
       }
       editError.value = ''
       editDialog.value = true
+      loadAutocompleteData()
     }
 
     function closeEdit() {
@@ -1718,6 +1788,8 @@ createApp({
       deleting, deleteBook,
       coverUploading, onCoverFileChange,
       editDialog, editForm, editSaving, editError, openEdit, closeEdit, saveEdits,
+      autocompleteSeries, autocompleteCollections,
+      tagsSuggestions, tagsSuggestionsVisible, onTagsInput, hideTagsSuggestions, selectTag,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
       refreshing, doRefresh,

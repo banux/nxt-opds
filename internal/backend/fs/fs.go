@@ -707,6 +707,28 @@ func (b *Backend) Series() ([]catalog.SeriesEntry, error) {
 	return entries, nil
 }
 
+// Collections returns all distinct non-empty editorial collection names sorted
+// alphabetically. It implements catalog.CollectionLister.
+func (b *Backend) Collections() ([]string, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	for _, bk := range b.books {
+		if bk.Collection != "" {
+			seen[bk.Collection] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return strings.ToLower(names[i]) < strings.ToLower(names[j])
+	})
+	return names, nil
+}
+
 // DeleteBook removes the book with the given ID from the catalog and deletes
 // its file(s) and cover image from disk. It implements catalog.Deleter.
 func (b *Backend) DeleteBook(id string) error {

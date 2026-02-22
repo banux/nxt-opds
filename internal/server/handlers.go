@@ -868,6 +868,25 @@ func (s *Server) handleAPISeries(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(result)
 }
 
+// handleAPICollections returns all distinct editorial collection names as a JSON array of strings.
+// Returns 501 if the backend does not support collection listing.
+func (s *Server) handleAPICollections(w http.ResponseWriter, r *http.Request) {
+	if s.collectionLister == nil {
+		http.Error(w, "collection listing not supported by this backend", http.StatusNotImplemented)
+		return
+	}
+	names, err := s.collectionLister.Collections()
+	if err != nil {
+		http.Error(w, "collections query error", http.StatusInternalServerError)
+		return
+	}
+	if names == nil {
+		names = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(names)
+}
+
 // handleCover serves the cached cover image for a book by its ID.
 // Returns 501 if the backend does not support cover serving.
 // Returns 404 if no cover image exists for the given ID.

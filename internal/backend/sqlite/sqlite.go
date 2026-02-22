@@ -672,6 +672,28 @@ ORDER BY LOWER(series)`)
 	return entries, rows.Err()
 }
 
+// Collections returns all distinct non-empty editorial collection names sorted
+// alphabetically. It implements catalog.CollectionLister.
+func (b *Backend) Collections() ([]string, error) {
+	rows, err := b.db.Query(`
+SELECT DISTINCT collection FROM books
+WHERE collection != ''
+ORDER BY LOWER(collection)`)
+	if err != nil {
+		return nil, fmt.Errorf("query collections: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // UpdateBook applies the given update to the book and persists it to the DB.
 // It implements catalog.Updater.
 func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Book, error) {

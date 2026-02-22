@@ -256,6 +256,14 @@ type CoverUpdater interface {
 	UpdateCover(id string, src io.ReadCloser, ext string) error
 }
 
+// CollectionLister is an optional interface for catalog backends that support
+// listing all distinct editorial collections.
+type CollectionLister interface {
+	// Collections returns all distinct non-empty editorial collection names
+	// sorted alphabetically.
+	Collections() ([]string, error)
+}
+
 // Backupper is an optional interface for catalog backends that support
 // creating a consistent point-in-time backup of their persistent store.
 type Backupper interface {

@@ -37,7 +37,8 @@ type Server struct {
 	updater       catalog.Updater       // optional; nil if backend doesn't support metadata editing
 	refresher     catalog.Refresher     // optional; nil if backend doesn't support manual refresh
 	deleter       catalog.Deleter       // optional; nil if backend doesn't support deletion
-	seriesLister  catalog.SeriesLister  // optional; nil if backend doesn't support series listing
+	seriesLister      catalog.SeriesLister      // optional; nil if backend doesn't support series listing
+	collectionLister  catalog.CollectionLister  // optional; nil if backend doesn't support collection listing
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	sessions      *sessionStore
 	opts          Options
@@ -77,6 +78,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if sl, ok := cat.(catalog.SeriesLister); ok {
 		s.seriesLister = sl
+	}
+	if cl, ok := cat.(catalog.CollectionLister); ok {
+		s.collectionLister = cl
 	}
 	s.mcpServer = mcp.New(cat)
 	s.registerRoutes()
@@ -166,6 +170,9 @@ func (s *Server) registerRoutes() {
 
 	// API: list all distinct series
 	protected.HandleFunc("/api/series", s.handleAPISeries).Methods(http.MethodGet)
+
+	// API: list all distinct editorial collections
+	protected.HandleFunc("/api/collections", s.handleAPICollections).Methods(http.MethodGet)
 
 	// API: public server config (opdsToken, etc.) for the web frontend
 	protected.HandleFunc("/api/config", s.handleAPIConfig).Methods(http.MethodGet)
