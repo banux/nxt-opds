@@ -88,16 +88,31 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore) func(htt
 				}
 			}
 
-			// 2. Token auth: accepted on OPDS routes and cover images via ?token= query param.
+			// 2. Token auth: accepted on OPDS routes and cover images via ?token= query param,
+			//    and on /mcp via Authorization: Bearer <token> header.
 			isOPDS := strings.HasPrefix(r.URL.Path, "/opds/") ||
 				r.URL.Path == "/opds" || r.URL.Path == "/opds/"
 			isCover := strings.HasPrefix(r.URL.Path, "/covers/")
+			isMCP := r.URL.Path == "/mcp"
 			if (isOPDS || isCover) && opdsToken != "" {
 				if tok := r.URL.Query().Get("token"); tok != "" {
 					if subtle.ConstantTimeCompare([]byte(tok), []byte(opdsToken)) == 1 {
 						next.ServeHTTP(w, r)
 						return
 					}
+				}
+			}
+			if isMCP && opdsToken != "" {
+				// Accept Bearer token in Authorization header or ?token= query param.
+				bearer := ""
+				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+					bearer = strings.TrimPrefix(auth, "Bearer ")
+				} else if tok := r.URL.Query().Get("token"); tok != "" {
+					bearer = tok
+				}
+				if bearer != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(opdsToken)) == 1 {
+					next.ServeHTTP(w, r)
+					return
 				}
 			}
 

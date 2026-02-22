@@ -94,6 +94,7 @@ func main() {
 	log.Printf("Web UI available at http://localhost%s/", cfg.ListenAddr)
 	if cfg.OPDSToken != "" {
 		log.Printf("OPDS feed URL (for reader apps): http://localhost%s/opds?token=%s", cfg.ListenAddr, cfg.OPDSToken)
+		log.Printf("MCP endpoint (for AI agents): http://localhost%s/mcp (Bearer token: %s)", cfg.ListenAddr, cfg.OPDSToken)
 	}
 	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
 		log.Fatalf("server error: %v", err)

@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/banux/nxt-opds/internal/catalog"
+	"github.com/banux/nxt-opds/internal/mcp"
 )
 
 // Options holds optional configuration for the Server.
@@ -37,6 +38,7 @@ type Server struct {
 	refresher     catalog.Refresher     // optional; nil if backend doesn't support manual refresh
 	deleter       catalog.Deleter       // optional; nil if backend doesn't support deletion
 	seriesLister  catalog.SeriesLister  // optional; nil if backend doesn't support series listing
+	mcpServer     *mcp.Server           // MCP server for AI agent access
 	sessions      *sessionStore
 	opts          Options
 	opdsToken     string // token for OPDS route authentication
@@ -76,6 +78,7 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	if sl, ok := cat.(catalog.SeriesLister); ok {
 		s.seriesLister = sl
 	}
+	s.mcpServer = mcp.New(cat)
 	s.registerRoutes()
 	return s
 }
@@ -169,6 +172,9 @@ func (s *Server) registerRoutes() {
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)
+
+	// MCP: Model Context Protocol endpoint for AI agent access
+	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)
 
 	// Cover image endpoint
 	protected.HandleFunc("/covers/{id}", s.handleCover).Methods(http.MethodGet)
