@@ -1061,3 +1061,48 @@ func TestOPDSRootFeed_NoTokenWhenAbsent(t *testing.T) {
 		}
 	}
 }
+
+// ---- Cover image token authentication ----
+
+// TestCoverToken_ValidToken verifies that a valid OPDS token grants access to /covers/{id}.
+// The cover endpoint should return 501 (backend doesn't support covers in this mock)
+// rather than 401 (unauthorized), confirming the token was accepted.
+func TestCoverToken_ValidToken(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{Password: "pw", OPDSToken: "cover-tok"})
+	req := httptest.NewRequest(http.MethodGet, "/covers/someid?token=cover-tok", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	// The mock backend doesn't implement CoverProvider so we expect 501,
+	// NOT 401. A 401 would mean the token was rejected.
+	if rr.Code == http.StatusUnauthorized {
+		t.Errorf("cover with valid token should not return 401; got %d", rr.Code)
+	}
+}
+
+// TestCoverToken_InvalidToken verifies that a wrong token is rejected for /covers/{id}.
+func TestCoverToken_InvalidToken(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{Password: "pw", OPDSToken: "cover-tok"})
+	req := httptest.NewRequest(http.MethodGet, "/covers/someid?token=wrong", nil)
+	req.Header.Set("Accept", "image/jpeg")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("cover with wrong token: expected 401, got %d", rr.Code)
+	}
+}
+
+// TestCoverToken_NoToken verifies that a missing token is rejected for /covers/{id}
+// when an OPDS token is configured.
+func TestCoverToken_NoToken(t *testing.T) {
+	srv := New(noRefreshCatalog{}, Options{Password: "pw", OPDSToken: "cover-tok"})
+	req := httptest.NewRequest(http.MethodGet, "/covers/someid", nil)
+	req.Header.Set("Accept", "image/jpeg")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("cover with no token: expected 401, got %d", rr.Code)
+	}
+}

@@ -40,6 +40,9 @@
 - [x] Add series page sort by number - **Done: catalog.SeriesLister interface; Series() on fs+sqlite backends; GET /api/series endpoint; ?series= + ?sort=series_index params on /api/books; series page view (#/series/<name>) in Vue SPA; clickable series links on grid card and book detail; "Tome N/Total" badge in series page; books sorted numerically by series_index**
 - [x] Add star rating - **Done: Rating int field (0=unrated, 1-5) throughout stack (catalog, fs, sqlite, handlers); interactive 5-star widget on book detail page (click same star to clear); small read-only stars on grid cards**
 - [x] Ajout d'un token d'authentification pour les flux OPDS à la place du basic auth - **Done: OPDSToken added to Config (yaml: opds_token / env: OPDS_TOKEN); if not set but password is configured, a stable 32-char hex token is auto-derived via SHA-256(password); authMiddleware now accepts ?token=<opds_token> on OPDS routes instead of Basic Auth (Basic Auth kept as fallback only when no token configured); GET /api/config returns opdsToken for the Vue UI; Vue SPA shows a "copy OPDS URL" clipboard button in the grid header that copies window.origin + /opds?token=xxx; startup logs the OPDS reader URL; 6 new tests**
+- [x] Pass the OPDS auth token in OPDS url to avoid 401 on sub url in feed - **Done: withToken(href, tok) helper; bookToEntry/bookToPublication accept tok param; all OPDS v1+v2 handlers extract tok from request and wrap all static hrefs; 9 new tests**
+- [x] Pass OPDS auth token to cover - **Done: authMiddleware now accepts ?token= on /covers/{id} paths in addition to /opds/* routes; 3 new tests**
+- [x] Make edit form larger - **Done: edit modal container changed from max-w-lg to max-w-2xl**
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
@@ -58,6 +61,8 @@
 - [x] Avoir une catégorie non lu dans les flux OPDS - **Done: handleUnreadBooks (GET /opds/unread) for OPDS v1; handleOPDS2Unread (GET /opds/v2/unread) for OPDS v2; nav entries added to both root feeds; uses Search(UnreadOnly:true) with added-desc sort**
 - [x] Ajoute la collection avec un numéro dans les métadatas - **Done: epub.go parses series/collection from both Calibre-style EPUB2 (<meta name="calibre:series"/>) and EPUB3 OPF3 (<meta property="belongs-to-collection"/>) OPF metadata; populated into Book.Series/SeriesIndex at index time; OPDS v1 Entry gains CalSeries/CalSeriesIndex fields using Calibre namespace (http://calibre.kovidgoyal.net/2009/metadata) included in all acquisition feeds; bookToEntry() populates series in OPDS v1 entries; 9 new tests in epub_test.go**
 - [x] La collection doit être modifiable dans le formulaire - **Done: already implemented — edit form has Série/N°/Total fields (editForm.series/seriesIndex/seriesTotal) populated by openEdit(), sent via PATCH /api/books/{id}, and handled in UpdateBook; the collection extraction added in the previous task populates Book.Series/SeriesIndex which flows into and out of the edit form transparently**
+- [x] Handle editorial collection - **Done: Collection field on catalog.Book/BookUpdate/SearchQuery; extractCollectionFromMetas() extracts EPUB3 set-type belongs-to-collection; SQLite migration v2 adds collection column; fs backend metaOverride + Search filter; API exposes ?collection= filter + bookJSON.Collection; Vue UI shows collection as clickable link in book detail (purple), editable in edit modal, full #/collections/<name> browse page; 4 new epub tests**
+- [ ] Add an editorial collection number
 
 ## Completed
 - [x] Project enabled for Ralph

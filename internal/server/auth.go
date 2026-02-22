@@ -88,10 +88,11 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore) func(htt
 				}
 			}
 
-			// 2. Token auth: accepted on OPDS routes via ?token= query param.
+			// 2. Token auth: accepted on OPDS routes and cover images via ?token= query param.
 			isOPDS := strings.HasPrefix(r.URL.Path, "/opds/") ||
 				r.URL.Path == "/opds" || r.URL.Path == "/opds/"
-			if isOPDS && opdsToken != "" {
+			isCover := strings.HasPrefix(r.URL.Path, "/covers/")
+			if (isOPDS || isCover) && opdsToken != "" {
 				if tok := r.URL.Query().Get("token"); tok != "" {
 					if subtle.ConstantTimeCompare([]byte(tok), []byte(opdsToken)) == 1 {
 						next.ServeHTTP(w, r)
