@@ -298,10 +298,13 @@ func extractCoverFromPkg(zr *zip.Reader, opfPath string, pkg opfPackage, bookID,
 		ext = ".jpg"
 	}
 
-	destPath := filepath.Join(coversDir, bookID+ext)
-	if _, err := os.Stat(destPath); err == nil {
-		return destPath
+	// If any cover already exists for this book (any supported extension),
+	// return it as-is to preserve user-uploaded covers across catalog refreshes.
+	if existingPath, err := CoverPath(coversDir, bookID); err == nil {
+		return existingPath
 	}
+
+	destPath := filepath.Join(coversDir, bookID+ext)
 
 	rc, err := coverFile.Open()
 	if err != nil {
@@ -326,6 +329,12 @@ func extractCoverFromPkg(zr *zip.Reader, opfPath string, pkg opfPackage, bookID,
 // item, and saves the first <img src="…"> it finds as the book cover.
 // Returns the saved cover path or "" if nothing is found.
 func findCoverInSpine(zr *zip.Reader, opfDir string, pkg opfPackage, bookID, coversDir string) string {
+	// If any cover already exists for this book (any supported extension),
+	// return it as-is to preserve user-uploaded covers across catalog refreshes.
+	if existingPath, err := CoverPath(coversDir, bookID); err == nil {
+		return existingPath
+	}
+
 	// Build manifest map: id → item.
 	byID := make(map[string]opfItem, len(pkg.Manifest.Items))
 	for _, item := range pkg.Manifest.Items {
@@ -411,9 +420,6 @@ func findCoverInSpine(zr *zip.Reader, opfDir string, pkg opfPackage, bookID, cov
 		}
 
 		destPath := filepath.Join(coversDir, bookID+ext)
-		if _, statErr := os.Stat(destPath); statErr == nil {
-			return destPath // already extracted
-		}
 
 		imgRC, err := imgFile.Open()
 		if err != nil {
