@@ -164,6 +164,8 @@ func (s *Server) registerRoutes() {
 
 	// API: list all distinct tags
 	protected.HandleFunc("/api/tags", s.handleAPITags).Methods(http.MethodGet)
+	// API: delete a tag from all books
+	protected.HandleFunc("/api/tags/{tag}", s.handleAPIDeleteTag).Methods(http.MethodDelete)
 
 	// API: list all distinct publishers
 	protected.HandleFunc("/api/publishers", s.handleAPIPublishers).Methods(http.MethodGet)

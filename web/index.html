@@ -120,6 +120,21 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Tags manage page: back button + title -->
+      <template v-else-if="currentView === 'tags-manage'">
+        <button @click="navigateTo('/')"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
+        </button>
+        <span class="font-semibold text-base truncate flex-1 min-w-0 text-blue-600 dark:text-blue-400">
+          Gérer les étiquettes
+        </span>
+        <div class="flex-1 sm:hidden"></div>
+      </template>
+
       <!-- Publisher page: back button + publisher name -->
       <template v-else-if="currentView === 'publisher'">
         <button @click="navigateTo('/')"
@@ -274,6 +289,15 @@
           </svg>
           Non lus seulement
         </button>
+
+        <!-- Tags management link -->
+        <a @click="navigateTo('/tags')"
+          class="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+          </svg>
+          Étiquettes
+        </a>
 
         <!-- Sort selector -->
         <div class="ml-auto flex items-center gap-1.5">
@@ -819,6 +843,54 @@
 
     </template><!-- end tag view -->
 
+    <!-- ===== TAGS MANAGEMENT PAGE ===== -->
+    <template v-else-if="currentView === 'tags-manage'">
+
+      <!-- Loading -->
+      <div v-if="tagsListLoading" class="flex justify-center items-center py-24">
+        <svg class="w-10 h-10 text-brand-600 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+        </svg>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else-if="allTagsList.length === 0" class="flex flex-col items-center justify-center py-24 text-center">
+        <p class="text-lg font-medium text-gray-500 dark:text-gray-400">Aucune étiquette dans la bibliothèque</p>
+        <button @click="navigateTo('/')" class="mt-4 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+          Retour à la bibliothèque
+        </button>
+      </div>
+
+      <!-- Tags list -->
+      <div v-else>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+          {{ allTagsList.length }} étiquette{{ allTagsList.length !== 1 ? 's' : '' }}
+          — cliquez sur la corbeille pour supprimer une étiquette de tous les livres.
+        </p>
+        <div class="flex flex-wrap gap-3">
+          <div v-for="tag in allTagsList" :key="tag"
+               class="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-sm">
+            <a @click="navigateTo('/tags/' + encodeURIComponent(tag))"
+               class="cursor-pointer hover:underline">{{ tag }}</a>
+            <button @click="deleteTag(tag)"
+              :disabled="deletingTag === tag"
+              title="Supprimer cette étiquette de tous les livres"
+              class="ml-1 text-blue-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-50">
+              <svg v-if="deletingTag !== tag" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+              <svg v-else class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </template><!-- end tags-manage view -->
+
     <!-- ===== PUBLISHER PAGE ===== -->
     <template v-else-if="currentView === 'publisher'">
 
@@ -1272,7 +1344,7 @@ createApp({
     }
 
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'collection'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection'
     const currentBook = ref(null)
     const bookLoading = ref(false)
     const currentSeries = ref('')
@@ -1290,6 +1362,9 @@ createApp({
     const currentCollection = ref('')
     const collectionBooks = ref([])
     const collectionLoading = ref(false)
+    const allTagsList = ref([])
+    const tagsListLoading = ref(false)
+    const deletingTag = ref('')
 
     function navigateTo(path) {
       window.location.hash = '#' + path
@@ -1390,6 +1465,35 @@ createApp({
       }
     }
 
+    async function loadAllTagsList() {
+      tagsListLoading.value = true
+      allTagsList.value = []
+      try {
+        const res = await apiFetch('/api/tags')
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        allTagsList.value = await res.json()
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        tagsListLoading.value = false
+      }
+    }
+
+    async function deleteTag(tag) {
+      if (!confirm(`Supprimer l'étiquette « ${tag} » de tous les livres ?`)) return
+      deletingTag.value = tag
+      try {
+        const res = await apiFetch('/api/tags/' + encodeURIComponent(tag), { method: 'DELETE' })
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        allTagsList.value = allTagsList.value.filter(t => t !== tag)
+        showToast(`Étiquette « ${tag} » supprimée`, 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        deletingTag.value = ''
+      }
+    }
+
     async function onHashChange() {
       const hash = window.location.hash
       const bookMatch = hash.match(/^#\/books\/(.+)$/)
@@ -1427,6 +1531,10 @@ createApp({
         currentCollection.value = decodeURIComponent(collectionMatch[1])
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadCollectionBooks(currentCollection.value)
+      } else if (hash === '#/tags') {
+        currentView.value = 'tags-manage'
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadAllTagsList()
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -1781,6 +1889,7 @@ createApp({
       currentSeries, seriesBooks, seriesLoading,
       currentAuthor, authorBooks, authorLoading,
       currentTag, tagBooks, tagLoading,
+      allTagsList, tagsListLoading, deletingTag, loadAllTagsList, deleteTag,
       currentPublisher, publisherBooks, publisherLoading,
       currentCollection, collectionBooks, collectionLoading,
       togglingRead, toggleRead,

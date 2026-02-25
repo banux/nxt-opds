@@ -264,6 +264,13 @@ type CollectionLister interface {
 	Collections() ([]string, error)
 }
 
+// TagDeleter is an optional interface for catalog backends that support
+// removing a tag from all books that have it.
+type TagDeleter interface {
+	// DeleteTag removes the given tag from all books in the catalog.
+	DeleteTag(tag string) error
+}
+
 // Backupper is an optional interface for catalog backends that support
 // creating a consistent point-in-time backup of their persistent store.
 type Backupper interface {

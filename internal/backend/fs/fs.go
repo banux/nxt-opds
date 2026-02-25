@@ -259,6 +259,38 @@ func removeID(ids []string, id string) []string {
 	return ids
 }
 
+// DeleteTag removes the given tag from all books that have it.
+// It implements catalog.TagDeleter.
+func (b *Backend) DeleteTag(tag string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bookIDs := b.tags[tag]
+	for _, id := range bookIDs {
+		bk, ok := b.byID[id]
+		if !ok {
+			continue
+		}
+		// Build new tag list without the deleted tag.
+		newTags := make([]string, 0, len(bk.Tags))
+		for _, t := range bk.Tags {
+			if t != tag {
+				newTags = append(newTags, t)
+			}
+		}
+		bk.Tags = newTags
+
+		// Persist: set override tags so the removal survives a Refresh.
+		ov := b.overrides[id]
+		ov.Tags = newTags
+		b.overrides[id] = ov
+	}
+
+	delete(b.tags, tag)
+
+	return b.saveOverrides()
+}
+
 // CoverPath returns the filesystem path to the cached cover image for a book ID.
 func (b *Backend) CoverPath(id string) (string, error) {
 	return epub.CoverPath(b.coversDir, id)

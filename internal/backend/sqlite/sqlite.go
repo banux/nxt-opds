@@ -794,6 +794,13 @@ WHERE id=?`,
 	return bk, nil
 }
 
+// DeleteTag removes the given tag from all books in the DB.
+// It implements catalog.TagDeleter.
+func (b *Backend) DeleteTag(tag string) error {
+	_, err := b.db.Exec(`DELETE FROM book_tags WHERE tag = ?`, tag)
+	return err
+}
+
 // StoreBook saves the uploaded file to the books directory, indexes it, and
 // returns the resulting Book. It implements catalog.Uploader.
 func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, error) {

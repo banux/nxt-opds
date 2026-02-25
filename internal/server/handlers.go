@@ -829,6 +829,21 @@ func (s *Server) handleAPITags(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(tags)
 }
 
+// handleAPIDeleteTag removes a tag from all books in the catalog.
+func (s *Server) handleAPIDeleteTag(w http.ResponseWriter, r *http.Request) {
+	tag, _ := url.PathUnescape(mux.Vars(r)["tag"])
+	td, ok := s.catalog.(catalog.TagDeleter)
+	if !ok {
+		http.Error(w, "not supported", http.StatusNotImplemented)
+		return
+	}
+	if err := td.DeleteTag(tag); err != nil {
+		http.Error(w, "delete tag error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleAPIPublishers returns all distinct publisher names as a JSON array of strings.
 func (s *Server) handleAPIPublishers(w http.ResponseWriter, r *http.Request) {
 	publishers, _, err := s.catalog.Publishers(0, 10000)
