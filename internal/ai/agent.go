@@ -20,7 +20,7 @@ import (
 const (
 	anthropicAPIURL    = "https://api.anthropic.com/v1/messages"
 	anthropicVersion   = "2023-06-01"
-	defaultModel       = "claude-3-5-sonnet-20241022"
+	defaultModel       = "claude-sonnet-4-6"
 	defaultMaxTokens   = 4096
 	maxAgentIterations = 10
 )
