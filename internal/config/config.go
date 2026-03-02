@@ -68,6 +68,11 @@ type Config struct {
 	// If empty and Password is set, a stable token is derived from the password.
 	// Set explicitly via OPDS_TOKEN env var or opds_token config key.
 	OPDSToken string `yaml:"opds_token"`
+
+	// AnthropicAPIKey is the API key for the Anthropic Claude AI service.
+	// Set via ANTHROPIC_API_KEY env var or anthropic_api_key config key.
+	// If empty, the AI chat endpoint (/api/ai/chat) is disabled.
+	AnthropicAPIKey string `yaml:"anthropic_api_key"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -125,6 +130,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("OPDS_TOKEN"); v != "" {
 		cfg.OPDSToken = v
+	}
+	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
+		cfg.AnthropicAPIKey = v
 	}
 
 	// If no explicit OPDS token but a password is set, derive a stable token

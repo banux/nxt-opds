@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"github.com/banux/nxt-opds/internal/ai"
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/mcp"
 )
@@ -25,6 +26,10 @@ type Options struct {
 	// StaticFS is the filesystem containing the frontend static assets.
 	// If nil, the frontend is not served.
 	StaticFS fs.FS
+
+	// AnthropicAPIKey is the Anthropic API key for the AI chat feature.
+	// If empty, the /api/ai/chat endpoint returns 503.
+	AnthropicAPIKey string
 }
 
 // Server is the HTTP server for the OPDS catalog.
@@ -40,6 +45,7 @@ type Server struct {
 	seriesLister      catalog.SeriesLister      // optional; nil if backend doesn't support series listing
 	collectionLister  catalog.CollectionLister  // optional; nil if backend doesn't support collection listing
 	mcpServer     *mcp.Server           // MCP server for AI agent access
+	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
 	opts          Options
 	opdsToken     string // token for OPDS route authentication
@@ -83,6 +89,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 		s.collectionLister = cl
 	}
 	s.mcpServer = mcp.New(cat)
+	if opts.AnthropicAPIKey != "" {
+		s.aiAgent = ai.New(opts.AnthropicAPIKey, cat)
+	}
 	s.registerRoutes()
 	return s
 }
@@ -184,6 +193,9 @@ func (s *Server) registerRoutes() {
 
 	// MCP: Model Context Protocol endpoint for AI agent access
 	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)
+
+	// AI: conversational assistant endpoint
+	protected.HandleFunc("/api/ai/chat", s.handleAIChat).Methods(http.MethodPost)
 
 	// Cover image endpoint
 	protected.HandleFunc("/covers/{id}", s.handleCover).Methods(http.MethodGet)

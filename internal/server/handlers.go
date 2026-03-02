@@ -987,9 +987,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 	type configJSON struct {
 		OPDSToken string `json:"opdsToken"`
+		AIEnabled bool   `json:"aiEnabled"`
 	}
 	cfg := configJSON{
 		OPDSToken: s.opdsToken,
+		AIEnabled: s.aiAgent != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(cfg)

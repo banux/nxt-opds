@@ -20,11 +20,17 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /nxt-opds .
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 2 – Runtime
 # Minimal Debian-slim image: has CA certs and a shell for debugging.
+# Includes Node.js + Claude Code CLI so AI-assisted workflows are available
+# inside the container (e.g. for operators via `docker exec`).
 # ──────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Install CA certificates (useful if you ever add HTTPS outgoing calls).
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+# Install CA certificates, Node.js (LTS via NodeSource) and Claude Code CLI.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g @anthropic-ai/claude-code && \
     rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user.

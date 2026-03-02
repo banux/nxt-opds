@@ -84,9 +84,13 @@ func main() {
 	}
 
 	opts := server.Options{
-		Password:  cfg.Password,
-		OPDSToken: cfg.OPDSToken,
-		StaticFS:  web.FS,
+		Password:        cfg.Password,
+		OPDSToken:       cfg.OPDSToken,
+		StaticFS:        web.FS,
+		AnthropicAPIKey: cfg.AnthropicAPIKey,
+	}
+	if cfg.AnthropicAPIKey != "" {
+		log.Printf("AI assistant enabled (Anthropic API key configured)")
 	}
 	srv := server.New(cat, opts)
 

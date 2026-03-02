@@ -238,6 +238,19 @@
           </button>
         </template>
 
+        <!-- AI Chat button (only when API key configured) -->
+        <button v-if="aiEnabled" @click="chatOpen = !chatOpen"
+          :title="chatOpen ? 'Fermer l\'assistant IA' : 'Assistant IA'"
+          class="p-2 rounded-lg transition-colors"
+          :class="chatOpen
+            ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20'
+            : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+          </svg>
+        </button>
+
         <button @click="toggleDark" title="Basculer le mode sombre"
           class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
           <svg v-if="isDark" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1213,15 +1226,95 @@
 
   <!-- Toast -->
   <div v-if="toast.show"
-    class="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all"
-    :class="toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'">
+    class="fixed bottom-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all"
+    :class="[toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white', chatOpen ? 'right-[26rem]' : 'right-4']">
     {{ toast.message }}
+  </div>
+
+  <!-- ===== AI Chat Panel ===== -->
+  <div v-if="aiEnabled && chatOpen"
+    class="fixed bottom-0 right-0 z-40 w-full sm:w-96 h-[32rem] flex flex-col bg-white dark:bg-gray-800 border-t sm:border border-gray-200 dark:border-gray-700 sm:rounded-tl-2xl shadow-2xl">
+
+    <!-- Chat header -->
+    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-violet-50 dark:bg-violet-900/20 sm:rounded-tl-2xl shrink-0">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+        </svg>
+        <span class="text-sm font-semibold text-violet-800 dark:text-violet-200">Assistant bibliothèque</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button v-if="chatMessages.length > 0" @click="clearChat" title="Effacer la conversation"
+          class="p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs">
+          Effacer
+        </button>
+        <button @click="chatOpen = false"
+          class="p-1.5 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div ref="chatScrollRef" class="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <!-- Welcome message -->
+      <div v-if="chatMessages.length === 0" class="text-center py-6">
+        <svg class="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+        </svg>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Posez une question sur votre bibliothèque.</p>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Ex : « Quels livres non lus ai-je ? »</p>
+      </div>
+
+      <!-- Chat messages -->
+      <div v-for="(msg, i) in chatMessages" :key="i"
+        :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+        <div :class="msg.role === 'user'
+          ? 'max-w-[80%] px-3 py-2 rounded-2xl rounded-br-sm bg-violet-600 text-white text-sm'
+          : 'max-w-[90%] px-3 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm'">
+          <pre class="whitespace-pre-wrap font-sans">{{ msg.content }}</pre>
+        </div>
+      </div>
+
+      <!-- Thinking indicator -->
+      <div v-if="chatLoading" class="flex justify-start">
+        <div class="px-4 py-3 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700">
+          <div class="flex gap-1">
+            <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay:0ms"></div>
+            <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay:150ms"></div>
+            <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay:300ms"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div class="shrink-0 border-t border-gray-200 dark:border-gray-700 px-3 py-3 flex gap-2">
+      <input
+        v-model="chatInput"
+        @keydown.enter.prevent="sendChatMessage"
+        :disabled="chatLoading"
+        type="text"
+        placeholder="Écrivez votre question…"
+        class="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50"
+      />
+      <button @click="sendChatMessage" :disabled="!chatInput.trim() || chatLoading"
+        class="px-3 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted } = Vue
+const { createApp, ref, computed, onMounted, nextTick } = Vue
 
 createApp({
   setup() {
@@ -1868,15 +1961,55 @@ createApp({
       }
     }
 
+    // ---- AI Chat ----
+    const aiEnabled    = ref(false)
+    const chatOpen     = ref(false)
+    const chatMessages = ref([]) // [{role:'user'|'assistant', content:string}]
+    const chatInput    = ref('')
+    const chatLoading  = ref(false)
+    const chatScrollRef = ref(null)
+
+    async function sendChatMessage() {
+      if (!chatInput.value.trim() || chatLoading.value) return
+      const prompt = chatInput.value.trim()
+      chatInput.value = ''
+      chatMessages.value.push({ role: 'user', content: prompt })
+      chatLoading.value = true
+      try {
+        // Build history excluding the latest user message we just pushed.
+        const history = chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+        const res = await apiFetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, history }),
+        })
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+        chatMessages.value.push({ role: 'assistant', content: data.response })
+      } catch (e) {
+        chatMessages.value.push({ role: 'assistant', content: 'Erreur : ' + e.message })
+      } finally {
+        chatLoading.value = false
+        await nextTick()
+        if (chatScrollRef.value) chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
+      }
+    }
+
+    function clearChat() {
+      chatMessages.value = []
+    }
+
     onMounted(async () => {
       window.addEventListener('hashchange', onHashChange)
       onHashChange()
-      // Load server config (OPDS token, etc.)
+      // Load server config (OPDS token, AI enabled, etc.)
       try {
         const res = await apiFetch('/api/config')
         if (res.ok) {
           const cfg = await res.json()
           opdsToken.value = cfg.opdsToken || ''
+          aiEnabled.value = !!cfg.aiEnabled
         }
       } catch { /* non-critical */ }
     })
@@ -1903,6 +2036,8 @@ createApp({
       onFileSelect, onDrop, doUpload, closeUpload,
       refreshing, doRefresh,
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
+      aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
+      sendChatMessage, clearChat,
       toast, formatBytes,
     }
   }

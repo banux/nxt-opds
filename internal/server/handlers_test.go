@@ -934,12 +934,12 @@ func TestAPIConfig_ReturnsToken(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
-	var resp map[string]string
+	var resp map[string]any
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if resp["opdsToken"] != "mytoken" {
-		t.Errorf("opdsToken: got %q, want mytoken", resp["opdsToken"])
+		t.Errorf("opdsToken: got %v, want mytoken", resp["opdsToken"])
 	}
 }
 
