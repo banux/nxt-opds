@@ -31,7 +31,10 @@ The 'has been read' must be a button and not in edit form.
 - Search the codebase before assuming something isn't implemented
 - Write comprehensive tests with clear documentation
 - Update fix_plan.md with your learnings
-- Commit working changes with descriptive messages
+- increment release version
+- Commit working changes with descriptive messages and tag release version
+- git push after commit
+- handle sql migration on database change
 
 ## Protected Files (DO NOT MODIFY)
 The following files and directories are part of Ralph's infrastructure.
