@@ -43,6 +43,7 @@
 - [x] Pass the OPDS auth token in OPDS url to avoid 401 on sub url in feed - **Done: withToken(href, tok) helper; bookToEntry/bookToPublication accept tok param; all OPDS v1+v2 handlers extract tok from request and wrap all static hrefs; 9 new tests**
 - [x] Pass OPDS auth token to cover - **Done: authMiddleware now accepts ?token= on /covers/{id} paths in addition to /opds/* routes; 3 new tests**
 - [x] Make edit form larger - **Done: edit modal container changed from max-w-lg to max-w-2xl**
+- [ ] Ajout des boutons de passage vers le livre précédent ou suivant depuis la fiche du livre
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
