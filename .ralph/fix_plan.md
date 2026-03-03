@@ -44,6 +44,7 @@
 - [x] Pass OPDS auth token to cover - **Done: authMiddleware now accepts ?token= on /covers/{id} paths in addition to /opds/* routes; 3 new tests**
 - [x] Make edit form larger - **Done: edit modal container changed from max-w-lg to max-w-2xl**
 - [ ] Ajout des boutons de passage vers le livre précédent ou suivant depuis la fiche du livre
+- [ ] Ajout d'un bouton recommandé avec une liste de personne : Bastien, Julie sur le livre et des pages de recommandations des personnes.
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
