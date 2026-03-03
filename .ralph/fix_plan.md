@@ -17,6 +17,7 @@
 - [x] Backup database every night - **Done: catalog.Backupper interface; sqlite.Backend.Backup() uses VACUUM INTO for a live consistent copy; pruneBackups() keeps most recent N files; BackupDir/BackupKeep fields in Config (env: BACKUP_DIR/BACKUP_KEEP, default keep=7); runNightlyBackup() goroutine in main.go sleeps until next local midnight then repeats every 24h; 2 tests (file created, prune)**
 - [x] Intégre l'agent sdk claude, tu dois mettre un prompt dans l'interface et ajoute l'install de claude code dans le docker - **Done: internal/ai/agent.go implements Anthropic Messages API agentic loop with catalog tools (search_books, get_book, update_book, list_authors, list_tags); POST /api/ai/chat endpoint; ANTHROPIC_API_KEY env var / anthropic_api_key config; floating violet chat panel in Vue UI shown when aiEnabled=true; Node.js + @anthropic-ai/claude-code installed in Docker runtime stage**
 - [x] Fix error "error":"API error not_found_error: model: claude-3-5-sonnet-20241022" - **Done: updated defaultModel in internal/ai/agent.go from deprecated claude-3-5-sonnet-20241022 to claude-sonnet-4-6**
+- [ ] Passe le projet en multi utilisateur, le mot de passe est partagé mais on choisi qui se connecte et on stocke le choix dans la session. Il faut une page d'admin pour pouvoir créer des utilisateurs et choisir le code couleur. Ce code couleur sera utilisé pour l'affichage du status lu qui doit être individualisé. Si le livre est lu par les plusieurs utilisateur il faut faire un mélange de couleur.
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
@@ -46,6 +47,8 @@
 - [x] Pass OPDS auth token to cover - **Done: authMiddleware now accepts ?token= on /covers/{id} paths in addition to /opds/* routes; 3 new tests**
 - [x] Make edit form larger - **Done: edit modal container changed from max-w-lg to max-w-2xl**
 - [x] Ajoute une page qui liste tout les tags et permettre de supprimer un tag - **Done: catalog.TagDeleter interface; DeleteTag on fs backend (removes from all books, persists via overrides) and sqlite backend (DELETE FROM book_tags); DELETE /api/tags/{tag} handler; Vue #/tags management page lists all tags as blue pills with trash-icon delete buttons + confirmation dialog; "Étiquettes" pill link in grid filter bar for navigation**
+- [ ] Ajout des boutons de passage vers le livre précédent ou suivant depuis la fiche du livre
+- [ ] Ajout d'un bouton recommandé pour un utilisateur sur le livre et des pages de recommandations des personnes.
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
