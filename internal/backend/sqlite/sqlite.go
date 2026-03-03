@@ -5,7 +5,9 @@
 package sqlite
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -83,6 +85,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 1, apply: migration1},
 	{version: 2, apply: migration2},
 	{version: 3, apply: migration3},
+	{version: 4, apply: migration4},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -162,6 +165,29 @@ func migration2(db *sql.DB) error {
 func migration3(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE books ADD COLUMN collection_index TEXT NOT NULL DEFAULT ''`)
 	return nil
+}
+
+// migration4 adds multi-user support: users table and per-user read status (version 3 → 4).
+func migration4(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS users (
+    id       TEXT PRIMARY KEY,
+    name     TEXT NOT NULL UNIQUE,
+    color    TEXT NOT NULL DEFAULT '#3B82F6',
+    is_admin INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS user_read_status (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, book_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_read_status_user ON user_read_status(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_read_status_book ON user_read_status(book_id);
+`)
+	return err
 }
 
 // migrateSchema reads PRAGMA user_version, applies every outstanding migration
@@ -466,7 +492,15 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	var extraArgs []any
 
 	if q.UnreadOnly {
-		extraClauses = append(extraClauses, "b.is_read = 0")
+		if q.UserID != "" {
+			// Per-user unread: book has no is_read=1 entry for this user.
+			extraClauses = append(extraClauses, `NOT EXISTS (
+				SELECT 1 FROM user_read_status _urs
+				WHERE _urs.book_id = b.id AND _urs.user_id = ? AND _urs.is_read = 1)`)
+			extraArgs = append(extraArgs, q.UserID)
+		} else {
+			extraClauses = append(extraClauses, "b.is_read = 0")
+		}
 	}
 	if q.Series != "" {
 		extraClauses = append(extraClauses, "b.series = ?")
@@ -1032,6 +1066,178 @@ func (b *Backend) countBooks(query string, args ...any) (int, error) {
 	var n int
 	err := b.db.QueryRow(q, args...).Scan(&n)
 	return n, err
+}
+
+// ─── UserManager ────────────────────────────────────────────────────────────
+
+// Users returns all registered users sorted by name.
+func (b *Backend) Users() ([]catalog.User, error) {
+	rows, err := b.db.Query(`SELECT id, name, color, is_admin FROM users ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []catalog.User
+	for rows.Next() {
+		var u catalog.User
+		var isAdmin int
+		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin); err != nil {
+			return nil, err
+		}
+		u.IsAdmin = isAdmin == 1
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// UserByID returns the user with the given ID.
+func (b *Backend) UserByID(id string) (*catalog.User, error) {
+	var u catalog.User
+	var isAdmin int
+	err := b.db.QueryRow(`SELECT id, name, color, is_admin FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Name, &u.Color, &isAdmin)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.IsAdmin = isAdmin == 1
+	return &u, nil
+}
+
+// CreateUser creates a new user and returns it.
+func (b *Backend) CreateUser(name, color string, isAdmin bool) (*catalog.User, error) {
+	id, err := newID()
+	if err != nil {
+		return nil, fmt.Errorf("generate user id: %w", err)
+	}
+	admin := 0
+	if isAdmin {
+		admin = 1
+	}
+	_, err = b.db.Exec(
+		`INSERT INTO users (id, name, color, is_admin) VALUES (?, ?, ?, ?)`,
+		id, name, color, admin,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert user: %w", err)
+	}
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin}, nil
+}
+
+// DeleteUser removes the user with the given ID.
+func (b *Backend) DeleteUser(id string) error {
+	_, err := b.db.Exec(`DELETE FROM users WHERE id = ?`, id)
+	return err
+}
+
+// UpdateUser updates the name, color, and admin status of an existing user.
+func (b *Backend) UpdateUser(id, name, color string, isAdmin bool) (*catalog.User, error) {
+	admin := 0
+	if isAdmin {
+		admin = 1
+	}
+	_, err := b.db.Exec(
+		`UPDATE users SET name = ?, color = ?, is_admin = ? WHERE id = ?`,
+		name, color, admin, id,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin}, nil
+}
+
+// ─── UserReadManager ─────────────────────────────────────────────────────────
+
+// SetUserRead marks (isRead=true) or clears (isRead=false) a book as read for a user.
+func (b *Backend) SetUserRead(userID, bookID string, isRead bool) error {
+	if isRead {
+		_, err := b.db.Exec(`
+INSERT INTO user_read_status (user_id, book_id, is_read) VALUES (?, ?, 1)
+ON CONFLICT(user_id, book_id) DO UPDATE SET is_read = 1`, userID, bookID)
+		return err
+	}
+	_, err := b.db.Exec(
+		`DELETE FROM user_read_status WHERE user_id = ? AND book_id = ?`,
+		userID, bookID,
+	)
+	return err
+}
+
+// UserReadStatuses returns a map of bookID → isRead for the given user
+// and the supplied list of book IDs.
+func (b *Backend) UserReadStatuses(userID string, bookIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(bookIDs))
+	if len(bookIDs) == 0 || userID == "" {
+		return result, nil
+	}
+	// Build placeholders: (?, ?, ...)
+	placeholders := strings.Repeat("?,", len(bookIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := []any{userID}
+	for _, id := range bookIDs {
+		args = append(args, id)
+	}
+	rows, err := b.db.Query(
+		`SELECT book_id, is_read FROM user_read_status WHERE user_id = ? AND book_id IN (`+placeholders+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bookID string
+		var isRead int
+		if err := rows.Scan(&bookID, &isRead); err != nil {
+			return nil, err
+		}
+		result[bookID] = isRead == 1
+	}
+	return result, rows.Err()
+}
+
+// BookReadColors returns for each supplied bookID the hex colours of all users
+// who have marked that book as read.
+func (b *Backend) BookReadColors(bookIDs []string) (map[string][]string, error) {
+	result := make(map[string][]string)
+	if len(bookIDs) == 0 {
+		return result, nil
+	}
+	placeholders := strings.Repeat("?,", len(bookIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(bookIDs))
+	for i, id := range bookIDs {
+		args[i] = id
+	}
+	rows, err := b.db.Query(`
+SELECT urs.book_id, u.color
+FROM user_read_status urs
+JOIN users u ON u.id = urs.user_id
+WHERE urs.is_read = 1 AND urs.book_id IN (`+placeholders+`)
+ORDER BY urs.book_id, u.name`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bookID, color string
+		if err := rows.Scan(&bookID, &color); err != nil {
+			return nil, err
+		}
+		result[bookID] = append(result[bookID], color)
+	}
+	return result, rows.Err()
+}
+
+// newID generates a random 16-byte hex string for use as a unique ID.
+func newID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func boolToInt(b bool) int {

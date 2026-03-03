@@ -165,6 +165,21 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Admin page: back button + title -->
+      <template v-else-if="currentView === 'admin'">
+        <button @click="navigateTo('/')"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
+        </button>
+        <span class="font-semibold text-base truncate flex-1 min-w-0 text-gray-900 dark:text-gray-100">
+          Administration des utilisateurs
+        </span>
+        <div class="flex-1 sm:hidden"></div>
+      </template>
+
       <!-- Grid page: logo + search -->
       <template v-else>
         <a href="#/" class="flex items-center gap-2 shrink-0">
@@ -235,6 +250,22 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
             </svg>
             <span class="hidden sm:inline">Téléverser</span>
+          </button>
+        </template>
+
+        <!-- Current user display + admin link (multi-user mode) -->
+        <template v-if="multiUser && currentUser">
+          <span class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400">
+            <span class="w-3.5 h-3.5 rounded-full shrink-0 border border-white/50" :style="{ background: currentUser.color }"></span>
+            <span class="hidden md:inline truncate max-w-[6rem]">{{ currentUser.name }}</span>
+          </span>
+          <button v-if="currentUser.isAdmin" @click="navigateTo('/admin')" title="Administration des utilisateurs"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
           </button>
         </template>
 
@@ -371,7 +402,7 @@
         >
           <!-- Cover -->
           <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
-               :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
+               :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
             <img
               v-if="book.coverUrl"
               :src="book.coverUrl"
@@ -390,8 +421,9 @@
             </div>
           </div>
           <!-- Read banner (below cover) -->
-          <div v-if="book.isRead"
-               class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+          <div v-if="showReadBanner(book)"
+               class="rounded-b-lg py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2"
+               :style="readBannerStyle(book)">
             <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
             </svg>
@@ -675,7 +707,7 @@
           >
             <!-- Cover -->
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
-                 :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
+                 :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
                    loading="lazy" @error="book.coverUrl = ''" />
@@ -688,8 +720,9 @@
               </div>
             </div>
             <!-- Read banner -->
-            <div v-if="book.isRead"
-                 class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+            <div v-if="showReadBanner(book)"
+                 class="rounded-b-lg py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2"
+                 :style="readBannerStyle(book)">
               <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
               </svg>
@@ -750,7 +783,7 @@
             class="group cursor-pointer"
           >
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
-                 :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
+                 :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
                    loading="lazy" @error="book.coverUrl = ''" />
@@ -762,8 +795,9 @@
                 <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
               </div>
             </div>
-            <div v-if="book.isRead"
-                 class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+            <div v-if="showReadBanner(book)"
+                 class="rounded-b-lg py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2"
+                 :style="readBannerStyle(book)">
               <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
               </svg>
@@ -819,7 +853,7 @@
             class="group cursor-pointer"
           >
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
-                 :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
+                 :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
                    loading="lazy" @error="book.coverUrl = ''" />
@@ -831,8 +865,9 @@
                 <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
               </div>
             </div>
-            <div v-if="book.isRead"
-                 class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+            <div v-if="showReadBanner(book)"
+                 class="rounded-b-lg py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2"
+                 :style="readBannerStyle(book)">
               <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
               </svg>
@@ -936,7 +971,7 @@
             class="group cursor-pointer"
           >
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
-                 :class="book.isRead ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
+                 :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
                    loading="lazy" @error="book.coverUrl = ''" />
@@ -948,8 +983,9 @@
                 <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
               </div>
             </div>
-            <div v-if="book.isRead"
-                 class="rounded-b-lg bg-gradient-to-r from-green-600 to-emerald-500 py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2">
+            <div v-if="showReadBanner(book)"
+                 class="rounded-b-lg py-1.5 px-2 flex items-center justify-center gap-1.5 mb-2"
+                 :style="readBannerStyle(book)">
               <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
               </svg>
@@ -1001,7 +1037,7 @@
               </div>
             </div>
             <!-- "Lu" banner -->
-            <div v-if="book.isRead" class="flex items-center justify-center gap-1 py-0.5 bg-gradient-to-r from-green-600 to-emerald-500 rounded-b-xl">
+            <div v-if="showReadBanner(book)" class="flex items-center justify-center gap-1 py-0.5 rounded-b-xl" :style="readBannerStyle(book)">
               <svg class="w-3.5 h-3.5 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
               </svg>
@@ -1023,6 +1059,105 @@
         </div>
       </div>
     </template><!-- end collection view -->
+
+    <!-- ===== ADMIN USERS PAGE ===== -->
+    <template v-else-if="currentView === 'admin'">
+      <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+
+        <!-- Loading -->
+        <div v-if="adminUsersLoading" class="flex justify-center items-center py-24">
+          <svg class="w-10 h-10 text-brand-600 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </div>
+
+        <template v-else>
+          <!-- User list -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-8 overflow-hidden">
+            <div class="px-5 py-3 border-b border-gray-100 dark:border-gray-700">
+              <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                Utilisateurs ({{ adminUsers.length }})
+              </h3>
+            </div>
+            <div v-if="adminUsers.length === 0" class="px-5 py-8 text-center text-gray-400 dark:text-gray-500 text-sm">
+              Aucun utilisateur créé. Utilisez le formulaire ci-dessous pour en créer un.
+            </div>
+            <ul v-else class="divide-y divide-gray-100 dark:divide-gray-700">
+              <li v-for="u in adminUsers" :key="u.id" class="flex items-center gap-3 px-5 py-3">
+                <span class="w-5 h-5 rounded-full shrink-0 border border-white shadow-sm"
+                      :style="{ background: u.color }"></span>
+                <span class="flex-1 font-medium text-gray-900 dark:text-gray-100 truncate">{{ u.name }}</span>
+                <span v-if="u.isAdmin"
+                      class="text-xs px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded-full shrink-0">
+                  Admin
+                </span>
+                <button @click="editAdminUser(u)" title="Modifier"
+                  class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                  </svg>
+                </button>
+                <button @click="deleteAdminUser(u.id)" title="Supprimer"
+                  class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Create / Edit user form -->
+          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              {{ adminEditingUserId ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur' }}
+            </h3>
+
+            <div class="space-y-4">
+              <div class="flex gap-4">
+                <!-- Colour picker swatch -->
+                <div class="flex flex-col items-center gap-1 shrink-0">
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Couleur</label>
+                  <label class="cursor-pointer" title="Choisir une couleur">
+                    <span class="block w-10 h-10 rounded-full border-2 border-gray-300 dark:border-gray-500 shadow"
+                          :style="{ background: adminUserForm.color }"></span>
+                    <input type="color" v-model="adminUserForm.color" class="sr-only"/>
+                  </label>
+                </div>
+                <!-- Name -->
+                <div class="flex-1">
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nom</label>
+                  <input v-model="adminUserForm.name" type="text" placeholder="Nom de l'utilisateur"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+                </div>
+              </div>
+
+              <!-- Admin checkbox -->
+              <label class="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" v-model="adminUserForm.isAdmin"
+                  class="w-4 h-4 accent-violet-600 rounded"/>
+                <span class="text-sm text-gray-700 dark:text-gray-300">Administrateur</span>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between mt-5">
+              <button v-if="adminEditingUserId" @click="resetAdminUserForm"
+                class="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                Annuler la modification
+              </button>
+              <div v-else></div>
+              <button @click="saveAdminUser" :disabled="!adminUserForm.name.trim() || adminUserFormSaving"
+                class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+                {{ adminUserFormSaving ? 'Enregistrement…' : (adminEditingUserId ? 'Mettre à jour' : 'Créer') }}
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template><!-- end admin view -->
 
   </main>
 
@@ -1628,6 +1763,10 @@ createApp({
         currentView.value = 'tags-manage'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadAllTagsList()
+      } else if (hash === '#/admin') {
+        currentView.value = 'admin'
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadAdminUsers()
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -1961,6 +2100,90 @@ createApp({
       }
     }
 
+    // ---- Multi-user ----
+    const multiUser   = ref(false)
+    const currentUser = ref(null) // {id, name, color, isAdmin} or null
+
+    // ---- Admin user management ----
+    const adminUsers        = ref([])
+    const adminUsersLoading = ref(false)
+    const adminEditingUserId = ref(null)
+    const adminUserForm     = ref({ name: '', color: '#3B82F6', isAdmin: false })
+    const adminUserFormSaving = ref(false)
+
+    async function loadAdminUsers() {
+      adminUsersLoading.value = true
+      try {
+        const res = await apiFetch('/api/users')
+        if (res.ok) adminUsers.value = await res.json()
+      } finally {
+        adminUsersLoading.value = false
+      }
+    }
+
+    async function saveAdminUser() {
+      if (!adminUserForm.value.name.trim()) return
+      adminUserFormSaving.value = true
+      try {
+        const url = adminEditingUserId.value ? '/api/users/' + adminEditingUserId.value : '/api/users'
+        const method = adminEditingUserId.value ? 'PATCH' : 'POST'
+        const res = await apiFetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(adminUserForm.value),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Erreur')
+        await loadAdminUsers()
+        resetAdminUserForm()
+        showToast(adminEditingUserId.value ? 'Utilisateur mis à jour' : 'Utilisateur créé', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        adminUserFormSaving.value = false
+      }
+    }
+
+    function editAdminUser(u) {
+      adminEditingUserId.value = u.id
+      adminUserForm.value = { name: u.name, color: u.color, isAdmin: u.isAdmin }
+    }
+
+    async function deleteAdminUser(id) {
+      if (!confirm('Supprimer cet utilisateur ? Cette action est irréversible.')) return
+      try {
+        const res = await apiFetch('/api/users/' + id, { method: 'DELETE' })
+        if (!res.ok) throw new Error(await res.text() || 'Erreur')
+        await loadAdminUsers()
+        if (adminEditingUserId.value === id) resetAdminUserForm()
+        showToast('Utilisateur supprimé', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      }
+    }
+
+    function resetAdminUserForm() {
+      adminEditingUserId.value = null
+      adminUserForm.value = { name: '', color: '#3B82F6', isAdmin: false }
+    }
+
+    // ---- Read banner helpers ----
+    function showReadBanner(book) {
+      return book.isRead || (book.readColors && book.readColors.length > 0)
+    }
+
+    function readBannerStyle(book) {
+      const colors = book.readColors
+      if (colors && colors.length > 0) {
+        if (colors.length === 1) return { background: colors[0] }
+        const stops = colors.map(function(c, i) {
+          return c + ' ' + Math.round(i * 100 / (colors.length - 1)) + '%'
+        }).join(', ')
+        return { background: 'linear-gradient(to right, ' + stops + ')' }
+      }
+      // fallback: default green gradient for non-multi-user mode
+      return { background: 'linear-gradient(to right, #16a34a, #10b981)' }
+    }
+
     // ---- AI Chat ----
     const aiEnabled    = ref(false)
     const chatOpen     = ref(false)
@@ -2010,6 +2233,8 @@ createApp({
           const cfg = await res.json()
           opdsToken.value = cfg.opdsToken || ''
           aiEnabled.value = !!cfg.aiEnabled
+          multiUser.value = !!cfg.multiUser
+          currentUser.value = cfg.currentUser || null
         }
       } catch { /* non-critical */ }
     })
@@ -2038,6 +2263,10 @@ createApp({
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
       sendChatMessage, clearChat,
+      multiUser, currentUser,
+      adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
+      loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
+      showReadBanner, readBannerStyle,
       toast, formatBytes,
     }
   }

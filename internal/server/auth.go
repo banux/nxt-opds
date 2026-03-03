@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -15,28 +16,39 @@ const (
 	sessionDuration   = 30 * 24 * time.Hour // 30 days
 )
 
+// contextKey is a private type for context keys in this package.
+type contextKey string
+
+// ctxUserID is the context key for the current user's ID.
+const ctxUserID contextKey = "userID"
+
+// sessionEntry holds session data: expiry and the ID of the logged-in user.
+type sessionEntry struct {
+	expiry time.Time
+	userID string // empty when no user selected (legacy / no-users mode)
+}
+
 // sessionStore holds active session tokens in memory.
 // For a personal single-user server this is perfectly sufficient.
 type sessionStore struct {
-	mu      sync.RWMutex
-	tokens  map[string]time.Time // token -> expiry
+	mu     sync.RWMutex
+	tokens map[string]sessionEntry // token -> entry
 }
 
 func newSessionStore() *sessionStore {
-	return &sessionStore{tokens: make(map[string]time.Time)}
+	return &sessionStore{tokens: make(map[string]sessionEntry)}
 }
 
-// create generates a new random session token, stores it, and returns it.
-func (s *sessionStore) create() (string, error) {
+// create generates a new random session token bound to userID, stores it,
+// and returns the token.  userID may be empty when no users are configured.
+func (s *sessionStore) create(userID string) (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
 	token := hex.EncodeToString(buf)
-	expiry := time.Now().Add(sessionDuration)
-
 	s.mu.Lock()
-	s.tokens[token] = expiry
+	s.tokens[token] = sessionEntry{expiry: time.Now().Add(sessionDuration), userID: userID}
 	s.mu.Unlock()
 	return token, nil
 }
@@ -44,18 +56,30 @@ func (s *sessionStore) create() (string, error) {
 // valid returns true if token exists and has not expired.
 func (s *sessionStore) valid(token string) bool {
 	s.mu.RLock()
-	exp, ok := s.tokens[token]
+	entry, ok := s.tokens[token]
 	s.mu.RUnlock()
 	if !ok {
 		return false
 	}
-	if time.Now().After(exp) {
+	if time.Now().After(entry.expiry) {
 		s.mu.Lock()
 		delete(s.tokens, token)
 		s.mu.Unlock()
 		return false
 	}
 	return true
+}
+
+// userIDForToken returns the userID stored in the session, or empty string if
+// the token is invalid or no user was bound to it.
+func (s *sessionStore) userIDForToken(token string) string {
+	s.mu.RLock()
+	entry, ok := s.tokens[token]
+	s.mu.RUnlock()
+	if !ok || time.Now().After(entry.expiry) {
+		return ""
+	}
+	return entry.userID
 }
 
 // delete removes a session token (logout).
@@ -83,6 +107,11 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore) func(htt
 			// 1. Check session cookie
 			if c, err := r.Cookie(sessionCookieName); err == nil {
 				if sessions.valid(c.Value) {
+					// Inject the user ID into the request context.
+					uid := sessions.userIDForToken(c.Value)
+					if uid != "" {
+						r = r.WithContext(context.WithValue(r.Context(), ctxUserID, uid))
+					}
 					next.ServeHTTP(w, r)
 					return
 				}

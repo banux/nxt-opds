@@ -576,11 +576,19 @@ type bookJSON struct {
 	Series      string   `json:"series,omitempty"`
 	SeriesIndex string   `json:"seriesIndex,omitempty"`
 	SeriesTotal string   `json:"seriesTotal,omitempty"`
-	Collection      string `json:"collection,omitempty"`
-	CollectionIndex string `json:"collectionIndex,omitempty"`
-	IsRead          bool   `json:"isRead"`
+	Collection      string   `json:"collection,omitempty"`
+	CollectionIndex string   `json:"collectionIndex,omitempty"`
+	IsRead          bool     `json:"isRead"`       // current user's read status
+	ReadColors      []string `json:"readColors"`   // hex colors of all users who have read it
 	Rating      int      `json:"rating"`
 	DownloadURL string   `json:"downloadUrl"`
+}
+
+// currentUserID returns the user ID stored in the request context (set by authMiddleware
+// after validating the session cookie).  Returns empty string when no user is in session.
+func currentUserID(r *http.Request) string {
+	uid, _ := r.Context().Value(ctxUserID).(string)
+	return uid
 }
 
 // parseSortParam maps the ?sort= query parameter to SortBy and SortOrder values.
@@ -614,6 +622,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	offset, limit := parsePagination(r)
 	sortBy, sortOrder := parseSortParam(r)
+	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
 		Query:      q,
@@ -625,6 +634,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		Offset:     offset,
 		Limit:      limit,
 		UnreadOnly: unreadOnly,
+		UserID:     userID,
 		SortBy:     sortBy,
 		SortOrder:  sortOrder,
 	})
@@ -633,8 +643,28 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build per-user read status and read-color maps (one DB round-trip each).
+	bookIDs := make([]string, len(books))
+	for i, bk := range books {
+		bookIDs[i] = bk.ID
+	}
+	userReadMap := map[string]bool{}
+	colorMap := map[string][]string{}
+	if s.userReadManager != nil && len(bookIDs) > 0 {
+		userReadMap, _ = s.userReadManager.UserReadStatuses(userID, bookIDs)
+		colorMap, _ = s.userReadManager.BookReadColors(bookIDs)
+	}
+
 	result := make([]bookJSON, 0, len(books))
 	for _, bk := range books {
+		isRead := bk.IsRead
+		if s.userReadManager != nil {
+			isRead = userReadMap[bk.ID]
+		}
+		colors := colorMap[bk.ID]
+		if colors == nil {
+			colors = []string{}
+		}
 		j := bookJSON{
 			ID:              bk.ID,
 			Title:           bk.Title,
@@ -648,7 +678,8 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			SeriesTotal:     bk.SeriesTotal,
 			Collection:      bk.Collection,
 			CollectionIndex: bk.CollectionIndex,
-			IsRead:          bk.IsRead,
+			IsRead:          isRead,
+			ReadColors:      colors,
 			Rating:          bk.Rating,
 			DownloadURL:     "/opds/books/" + bk.ID + "/download",
 		}
@@ -694,6 +725,18 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := currentUserID(r)
+	isRead := bk.IsRead
+	colors := []string{}
+	if s.userReadManager != nil {
+		rm, _ := s.userReadManager.UserReadStatuses(userID, []string{bk.ID})
+		isRead = rm[bk.ID]
+		cm, _ := s.userReadManager.BookReadColors([]string{bk.ID})
+		if c := cm[bk.ID]; c != nil {
+			colors = c
+		}
+	}
+
 	j := bookJSON{
 		ID:              bk.ID,
 		Title:           bk.Title,
@@ -707,7 +750,8 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		SeriesTotal:     bk.SeriesTotal,
 		Collection:      bk.Collection,
 		CollectionIndex: bk.CollectionIndex,
-		IsRead:          bk.IsRead,
+		IsRead:          isRead,
+		ReadColors:      colors,
 		Rating:          bk.Rating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 	}
@@ -735,6 +779,18 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// When per-user read management is available, route IsRead through it.
+	// Otherwise fall back to the legacy global is_read column.
+	updateIsRead := req.IsRead
+	userID := currentUserID(r)
+	if s.userReadManager != nil && req.IsRead != nil {
+		if err := s.userReadManager.SetUserRead(userID, id, *req.IsRead); err != nil {
+			http.Error(w, "set read status failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		updateIsRead = nil // don't also write to global is_read
+	}
+
 	update := catalog.BookUpdate{
 		Title:           req.Title,
 		Authors:         req.Authors,
@@ -747,7 +803,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		SeriesTotal:     req.SeriesTotal,
 		Collection:      req.Collection,
 		CollectionIndex: req.CollectionIndex,
-		IsRead:          req.IsRead,
+		IsRead:          updateIsRead,
 		Rating:          req.Rating,
 	}
 
@@ -755,6 +811,18 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "update failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
+	}
+
+	// Enrich response with per-user read status.
+	isRead := bk.IsRead
+	colors := []string{}
+	if s.userReadManager != nil {
+		rm, _ := s.userReadManager.UserReadStatuses(userID, []string{bk.ID})
+		isRead = rm[bk.ID]
+		cm, _ := s.userReadManager.BookReadColors([]string{bk.ID})
+		if c := cm[bk.ID]; c != nil {
+			colors = c
+		}
 	}
 
 	j := bookJSON{
@@ -770,7 +838,8 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		SeriesTotal:     bk.SeriesTotal,
 		Collection:      bk.Collection,
 		CollectionIndex: bk.CollectionIndex,
-		IsRead:          bk.IsRead,
+		IsRead:          isRead,
+		ReadColors:      colors,
 		Rating:          bk.Rating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 	}
@@ -985,16 +1054,218 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 // display the OPDS reader URL with the token for easy copy-paste.
 // Returns 200 with a JSON object.
 func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
+	type userJSON struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Color   string `json:"color"`
+		IsAdmin bool   `json:"isAdmin"`
+	}
 	type configJSON struct {
-		OPDSToken string `json:"opdsToken"`
-		AIEnabled bool   `json:"aiEnabled"`
+		OPDSToken       string    `json:"opdsToken"`
+		AIEnabled       bool      `json:"aiEnabled"`
+		MultiUser       bool      `json:"multiUser"`
+		CurrentUser     *userJSON `json:"currentUser,omitempty"`
 	}
 	cfg := configJSON{
 		OPDSToken: s.opdsToken,
 		AIEnabled: s.aiAgent != nil,
+		MultiUser: s.userManager != nil,
+	}
+	if s.userManager != nil {
+		uid := currentUserID(r)
+		if uid != "" {
+			if u, err := s.userManager.UserByID(uid); err == nil {
+				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin}
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(cfg)
+}
+
+// handleAPIMe returns the currently logged-in user's info.
+func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	uid := currentUserID(r)
+	if uid == "" {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`null`))
+		return
+	}
+	u, err := s.userManager.UserByID(uid)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":      u.ID,
+		"name":    u.Name,
+		"color":   u.Color,
+		"isAdmin": u.IsAdmin,
+	})
+}
+
+// handleAPIUsers returns all registered users as JSON.
+func (s *Server) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	users, err := s.userManager.Users()
+	if err != nil {
+		http.Error(w, "users query error", http.StatusInternalServerError)
+		return
+	}
+	type userJSON struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Color   string `json:"color"`
+		IsAdmin bool   `json:"isAdmin"`
+	}
+	result := make([]userJSON, 0, len(users))
+	for _, u := range users {
+		result = append(result, userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// handleAPICreateUser creates a new user.
+func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	var req struct {
+		Name    string `json:"name"`
+		Color   string `json:"color"`
+		IsAdmin bool   `json:"isAdmin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if req.Color == "" {
+		req.Color = "#3B82F6"
+	}
+	u, err := s.userManager.CreateUser(req.Name, req.Color, req.IsAdmin)
+	if err != nil {
+		http.Error(w, "create user failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":      u.ID,
+		"name":    u.Name,
+		"color":   u.Color,
+		"isAdmin": u.IsAdmin,
+	})
+}
+
+// handleAPIUpdateUser updates an existing user's name, color, and admin status.
+func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	var req struct {
+		Name    string `json:"name"`
+		Color   string `json:"color"`
+		IsAdmin bool   `json:"isAdmin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	u, err := s.userManager.UpdateUser(id, req.Name, req.Color, req.IsAdmin)
+	if err != nil {
+		http.Error(w, "update user failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":      u.ID,
+		"name":    u.Name,
+		"color":   u.Color,
+		"isAdmin": u.IsAdmin,
+	})
+}
+
+// handleAPIDeleteUser removes a user.
+func (s *Server) handleAPIDeleteUser(w http.ResponseWriter, r *http.Request) {
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	if err := s.userManager.DeleteUser(id); err != nil {
+		http.Error(w, "delete user failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPIToggleRead sets or clears the read status for the current user via
+// PUT /api/books/{id}/read with body {"isRead": true|false}.
+func (s *Server) handleAPIToggleRead(w http.ResponseWriter, r *http.Request) {
+	if s.userReadManager == nil {
+		// Fall back to legacy global is_read via UpdateBook
+		if s.updater == nil {
+			http.Error(w, "read status not supported by this backend", http.StatusNotImplemented)
+			return
+		}
+		id := mux.Vars(r)["id"]
+		var req struct{ IsRead bool `json:"isRead"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		bk, err := s.updater.UpdateBook(id, catalog.BookUpdate{IsRead: &req.IsRead})
+		if err != nil {
+			http.Error(w, "update failed: "+err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":     bk.ID,
+			"isRead": bk.IsRead,
+		})
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	userID := currentUserID(r)
+	var req struct{ IsRead bool `json:"isRead"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if err := s.userReadManager.SetUserRead(userID, id, req.IsRead); err != nil {
+		http.Error(w, "set read status failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	colors := []string{}
+	if cm, _ := s.userReadManager.BookReadColors([]string{id}); cm != nil {
+		if c := cm[id]; c != nil {
+			colors = c
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":         id,
+		"isRead":     req.IsRead,
+		"readColors": colors,
+	})
 }
 
 // handleAPIRefresh triggers an on-demand catalog refresh.
@@ -1585,12 +1856,13 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 // loginPageHTML is the standalone login form served at GET /login.
 // It is self-contained (Tailwind CDN) so it works even when the main
 // app SPA cannot be served (not authenticated yet).
+// The template supports multi-user mode when .Users is non-empty.
 const loginPageHTML = `<!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Login – nxt-opds</title>
+  <title>Connexion – nxt-opds</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -1600,8 +1872,8 @@ const loginPageHTML = `<!DOCTYPE html>
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
           d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
       </svg>
-      <h1 class="text-xl font-bold text-gray-900">nxt-opds Library</h1>
-      <p class="text-sm text-gray-500 mt-1">Enter your password to continue</p>
+      <h1 class="text-xl font-bold text-gray-900">nxt-opds Bibliothèque</h1>
+      <p class="text-sm text-gray-500 mt-1">Entrez votre mot de passe pour continuer</p>
     </div>
     {{if .Error}}
     <div class="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -1610,21 +1882,48 @@ const loginPageHTML = `<!DOCTYPE html>
     {{end}}
     <form method="POST" action="/login">
       <input type="hidden" name="redirect" value="{{.Redirect}}"/>
+      {{if .Users}}
       <div class="mb-4">
-        <label class="block text-sm font-medium text-gray-700 mb-1" for="password">Password</label>
+        <label class="block text-sm font-medium text-gray-700 mb-2">Qui êtes-vous ?</label>
+        <div class="grid grid-cols-2 gap-2">
+          {{range .Users}}
+          <label class="flex items-center gap-2 p-2 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+            <input type="radio" name="user_id" value="{{.ID}}" required class="sr-only"/>
+            <span class="w-4 h-4 rounded-full shrink-0" style="background-color:{{.Color}}"></span>
+            <span class="text-sm font-medium text-gray-800 truncate">{{.Name}}</span>
+          </label>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-1" for="password">Mot de passe</label>
         <input
           id="password" name="password" type="password" autocomplete="current-password"
-          autofocus required
+          {{if not .Users}}autofocus{{end}} required
           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
           placeholder="••••••••"
         />
       </div>
       <button type="submit"
         class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm transition-colors">
-        Sign in
+        Se connecter
       </button>
     </form>
   </div>
+  <script>
+    // Highlight selected user card
+    document.querySelectorAll('input[name="user_id"]').forEach(function(radio) {
+      radio.addEventListener('change', function() {
+        document.querySelectorAll('label:has([name="user_id"])').forEach(function(l) {
+          l.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+        radio.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+        // Focus password field after user selection
+        document.getElementById('password').focus();
+      });
+    });
+  </script>
 </body>
 </html>`
 
@@ -1656,6 +1955,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	password := r.FormValue("password")
 	redirect := r.FormValue("redirect")
+	userID := r.FormValue("user_id")
 	if redirect == "" || redirect[0] != '/' {
 		redirect = "/"
 	}
@@ -1664,26 +1964,34 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	passwordOK := s.opts.Password == "" ||
 		(subtle.ConstantTimeCompare([]byte(password), []byte(s.opts.Password)) == 1)
 
-	if passwordOK {
-		token, err := s.sessions.create()
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     sessionCookieName,
-			Value:    token,
-			Path:     "/",
-			MaxAge:   int(sessionDuration.Seconds()),
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-		})
-		http.Redirect(w, r, redirect, http.StatusSeeOther)
+	if !passwordOK {
+		// Wrong password – re-render the form with an error.
+		s.renderLoginPage(w, redirect, "Mot de passe incorrect. Veuillez réessayer.")
 		return
 	}
 
-	// Wrong password – re-render the form with an error.
-	s.renderLoginPage(w, redirect, "Incorrect password. Please try again.")
+	// Validate the selected user ID when user management is configured.
+	if s.userManager != nil && userID != "" {
+		if _, err := s.userManager.UserByID(userID); err != nil {
+			s.renderLoginPage(w, redirect, "Utilisateur invalide. Veuillez réessayer.")
+			return
+		}
+	}
+
+	token, err := s.sessions.create(userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(sessionDuration.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 // handleLogout clears the session cookie and redirects to /login.
@@ -1703,11 +2011,39 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // renderLoginPage writes the login HTML page with the given error message.
 func (s *Server) renderLoginPage(w http.ResponseWriter, redirect, errMsg string) {
+	type userTmpl struct {
+		ID    string
+		Name  string
+		Color string
+	}
 	type data struct {
 		Error    string
 		Redirect string
+		Users    []userTmpl
 	}
-	tmpl, err := template.New("login").Parse(loginPageHTML)
+
+	d := data{Error: errMsg, Redirect: redirect}
+	if s.userManager != nil {
+		if users, err := s.userManager.Users(); err == nil {
+			for _, u := range users {
+				d.Users = append(d.Users, userTmpl{ID: u.ID, Name: u.Name, Color: u.Color})
+			}
+		}
+	}
+
+	// Add a custom "not" function to the template FuncMap.
+	funcMap := template.FuncMap{
+		"not": func(v interface{}) bool {
+			if v == nil {
+				return true
+			}
+			if s, ok := v.([]userTmpl); ok {
+				return len(s) == 0
+			}
+			return false
+		},
+	}
+	tmpl, err := template.New("login").Funcs(funcMap).Parse(loginPageHTML)
 	if err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
@@ -1716,5 +2052,5 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, redirect, errMsg string)
 	if errMsg != "" {
 		w.WriteHeader(http.StatusUnauthorized)
 	}
-	_ = tmpl.Execute(w, data{Error: errMsg, Redirect: redirect})
+	_ = tmpl.Execute(w, d)
 }

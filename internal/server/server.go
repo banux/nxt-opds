@@ -44,6 +44,8 @@ type Server struct {
 	deleter       catalog.Deleter       // optional; nil if backend doesn't support deletion
 	seriesLister      catalog.SeriesLister      // optional; nil if backend doesn't support series listing
 	collectionLister  catalog.CollectionLister  // optional; nil if backend doesn't support collection listing
+	userManager     catalog.UserManager     // optional; nil if backend doesn't support user management
+	userReadManager catalog.UserReadManager // optional; nil if backend doesn't support per-user read
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
@@ -87,6 +89,12 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if cl, ok := cat.(catalog.CollectionLister); ok {
 		s.collectionLister = cl
+	}
+	if um, ok := cat.(catalog.UserManager); ok {
+		s.userManager = um
+	}
+	if urm, ok := cat.(catalog.UserReadManager); ok {
+		s.userReadManager = urm
 	}
 	s.mcpServer = mcp.New(cat)
 	if opts.AnthropicAPIKey != "" {
@@ -187,6 +195,18 @@ func (s *Server) registerRoutes() {
 
 	// API: public server config (opdsToken, etc.) for the web frontend
 	protected.HandleFunc("/api/config", s.handleAPIConfig).Methods(http.MethodGet)
+
+	// API: current logged-in user info
+	protected.HandleFunc("/api/me", s.handleAPIMe).Methods(http.MethodGet)
+
+	// API: user management (list, create, delete)
+	protected.HandleFunc("/api/users", s.handleAPIUsers).Methods(http.MethodGet)
+	protected.HandleFunc("/api/users", s.handleAPICreateUser).Methods(http.MethodPost)
+	protected.HandleFunc("/api/users/{id}", s.handleAPIUpdateUser).Methods(http.MethodPatch)
+	protected.HandleFunc("/api/users/{id}", s.handleAPIDeleteUser).Methods(http.MethodDelete)
+
+	// API: per-user read toggle
+	protected.HandleFunc("/api/books/{id}/read", s.handleAPIToggleRead).Methods(http.MethodPut)
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)

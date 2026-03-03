@@ -112,7 +112,13 @@ type SearchQuery struct {
 	Language string
 
 	// UnreadOnly restricts results to books not yet marked as read.
+	// When UserID is non-empty, "unread" is per-user; otherwise it uses the
+	// global is_read flag.
 	UnreadOnly bool
+
+	// UserID is the current user's ID for per-user read-status filtering.
+	// When empty, the global is_read column is used for UnreadOnly queries.
+	UserID string
 
 	// Series filters by exact series name (empty = no filter).
 	Series string
@@ -129,6 +135,61 @@ type SearchQuery struct {
 
 	// Limit is the maximum number of results to return (0 = server default).
 	Limit int
+}
+
+// User represents a library user with a personalised colour for read-status display.
+type User struct {
+	// ID is a UUID-style unique identifier.
+	ID string
+
+	// Name is the display name chosen by the user.
+	Name string
+
+	// Color is a CSS hex colour code (e.g. "#3B82F6") used to colour the
+	// "read" indicator for this user's books.
+	Color string
+
+	// IsAdmin indicates whether this user has administrative privileges.
+	IsAdmin bool
+}
+
+// UserManager is an optional interface for catalog backends that support
+// multi-user management.  Users share a single password but each has a
+// distinct name and colour.
+type UserManager interface {
+	// Users returns all registered users sorted by name.
+	Users() ([]User, error)
+
+	// UserByID returns the user with the given ID, or an error if not found.
+	UserByID(id string) (*User, error)
+
+	// CreateUser creates a new user with the given name and hex colour.
+	// If isAdmin is true the user has administrative privileges.
+	// Returns the newly created User.
+	CreateUser(name, color string, isAdmin bool) (*User, error)
+
+	// DeleteUser removes the user with the given ID.
+	DeleteUser(id string) error
+
+	// UpdateUser updates the name and/or color of an existing user.
+	UpdateUser(id, name, color string, isAdmin bool) (*User, error)
+}
+
+// UserReadManager is an optional interface for catalog backends that support
+// per-user read-status tracking.
+type UserReadManager interface {
+	// SetUserRead marks (isRead=true) or clears (isRead=false) a book as
+	// read for the specified user.
+	SetUserRead(userID, bookID string, isRead bool) error
+
+	// UserReadStatuses returns a map of bookID → isRead for the given user
+	// and the supplied list of book IDs.  Missing keys mean "not read".
+	UserReadStatuses(userID string, bookIDs []string) (map[string]bool, error)
+
+	// BookReadColors returns for each supplied bookID the hex colour codes
+	// of all users who have marked that book as read.
+	// Missing keys mean "no one has read it yet".
+	BookReadColors(bookIDs []string) (map[string][]string, error)
 }
 
 // Catalog is the interface that backend implementations must satisfy.

@@ -176,7 +176,7 @@ func TestAuth_SessionCookie_GrantsAccess(t *testing.T) {
 	srv := newTestServer(t, Options{Password: "secret"})
 
 	// Login to get a session token.
-	token, err := srv.sessions.create()
+	token, err := srv.sessions.create("")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestAuth_Logout_ClearsSession(t *testing.T) {
 	// POST /logout must invalidate the session and redirect to /login.
 	srv := newTestServer(t, Options{Password: "secret"})
 
-	token, err := srv.sessions.create()
+	token, err := srv.sessions.create("")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
