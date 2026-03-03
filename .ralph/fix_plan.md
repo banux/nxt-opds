@@ -15,6 +15,7 @@
 - [x] Sort Book by added date descending by default, add possibility to sort by name, added date - **Done: AddedAt field on Book (file mod time); SortBy/SortOrder on SearchQuery; fs backend sorts by AddedAt desc on Refresh and re-sorts matched slice; sqlite adds added_at column (migration-safe) + sortClause() helper; handleAPIBooks always uses Search with parsed ?sort= param (added_desc/added_asc/title_asc/title_desc); Vue sort selector in filter bar with localStorage persistence**
 - [x] Gérer les versions de schema de la base de données et quand une mise a jour de schéma est effectué faire une migration pour ne pas devoir remettre la base à zéro - **Done: PRAGMA user_version–based migration system in sqlite.go (schemaMigrations slice, migrateSchema(), currentSchemaVersion const); migration1 handles both fresh and pre-migration DBs; 3 tests (fresh, idempotent, legacy DB upgrade)**
 - [x] Backup database every night - **Done: catalog.Backupper interface; sqlite.Backend.Backup() uses VACUUM INTO for a live consistent copy; pruneBackups() keeps most recent N files; BackupDir/BackupKeep fields in Config (env: BACKUP_DIR/BACKUP_KEEP, default keep=7); runNightlyBackup() goroutine in main.go sleeps until next local midnight then repeats every 24h; 2 tests (file created, prune)**
+- [ ] Passe le projet en multi utilisateur, le mot de passe est partagé mais on choisi qui se connecte et on stocke le choix dans la session. Il faut une page d'admin pour pouvoir créer des utilisateurs et choisir le code couleur. Ce code couleur sera utilisé pour l'affichage du status lu qui doit être individualisé. Si le livre est lu par les plusieurs utilisateur il faut faire un mélange de couleur.
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**
@@ -44,7 +45,7 @@
 - [x] Pass OPDS auth token to cover - **Done: authMiddleware now accepts ?token= on /covers/{id} paths in addition to /opds/* routes; 3 new tests**
 - [x] Make edit form larger - **Done: edit modal container changed from max-w-lg to max-w-2xl**
 - [ ] Ajout des boutons de passage vers le livre précédent ou suivant depuis la fiche du livre
-- [ ] Ajout d'un bouton recommandé avec une liste de personne : Bastien, Julie sur le livre et des pages de recommandations des personnes.
+- [ ] Ajout d'un bouton recommandé pour un utilisateur sur le livre et des pages de recommandations des personnes.
 
 ## Low Priority
 - [x] Performance optimization (background indexing) - **Done: catalog.Refresher interface; background ticker goroutine in main.go (REFRESH_INTERVAL env / refresh_interval config, default 5m); POST /api/refresh manual endpoint; refresh button with spinner in Vue UI header**
