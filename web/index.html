@@ -72,7 +72,28 @@
         <span v-if="currentBook" class="font-semibold text-base truncate flex-1 min-w-0 text-gray-900 dark:text-gray-100">
           {{ currentBook.title }}
         </span>
-        <div class="flex-1 sm:hidden"></div>
+        <!-- Prev / Next navigation (only shown when a context list is available) -->
+        <div v-if="navBookIDs.length > 0" class="flex items-center gap-0.5 shrink-0">
+          <button @click="openBook(prevBookID)" :disabled="!prevBookID"
+            title="Livre précédent"
+            class="p-2 rounded-lg transition-colors"
+            :class="prevBookID ? 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' : 'text-gray-300 dark:text-gray-600 opacity-30 cursor-not-allowed'">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+            </svg>
+          </button>
+          <span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums select-none px-1">
+            {{ navBookIndex + 1 }}&thinsp;/&thinsp;{{ navBookIDs.length }}
+          </span>
+          <button @click="openBook(nextBookID)" :disabled="!nextBookID"
+            title="Livre suivant"
+            class="p-2 rounded-lg transition-colors"
+            :class="nextBookID ? 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' : 'text-gray-300 dark:text-gray-600 opacity-30 cursor-not-allowed'">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </div>
       </template>
 
       <!-- Series page: back button + series name -->
@@ -397,7 +418,7 @@
         <div
           v-for="book in books"
           :key="book.id"
-          @click="navigateTo('/books/' + book.id)"
+          @click="openBook(book.id, books)"
           class="group cursor-pointer"
         >
           <!-- Cover -->
@@ -566,13 +587,14 @@
             </span>
           </p>
 
-          <!-- Read badge -->
-          <div v-if="currentBook.isRead"
-               class="inline-flex items-center gap-1.5 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-sm font-medium mb-4">
+          <!-- Read badge: coloured for multi-user, green for single-user -->
+          <div v-if="showReadBanner(currentBook)"
+               class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-white text-sm font-medium mb-4"
+               :style="readBannerStyle(currentBook)">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            Lu
+            Lu<span v-if="currentBook.readColors && currentBook.readColors.length > 1"> ({{ currentBook.readColors.length }})</span>
           </div>
 
           <!-- Metadata table -->
@@ -702,7 +724,7 @@
           <div
             v-for="book in seriesBooks"
             :key="book.id"
-            @click="navigateTo('/books/' + book.id)"
+            @click="openBook(book.id, seriesBooks)"
             class="group cursor-pointer"
           >
             <!-- Cover -->
@@ -779,7 +801,7 @@
           <div
             v-for="book in authorBooks"
             :key="book.id"
-            @click="navigateTo('/books/' + book.id)"
+            @click="openBook(book.id, authorBooks)"
             class="group cursor-pointer"
           >
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
@@ -849,7 +871,7 @@
           <div
             v-for="book in tagBooks"
             :key="book.id"
-            @click="navigateTo('/books/' + book.id)"
+            @click="openBook(book.id, tagBooks)"
             class="group cursor-pointer"
           >
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
@@ -967,7 +989,7 @@
           <div
             v-for="book in publisherBooks"
             :key="book.id"
-            @click="navigateTo('/books/' + book.id)"
+            @click="openBook(book.id, publisherBooks)"
             class="group cursor-pointer"
           >
             <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
@@ -1027,7 +1049,7 @@
         </p>
         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
           <div v-for="book in collectionBooks" :key="book.id"
-            @click="navigateTo('/books/' + book.id)"
+            @click="openBook(book.id, collectionBooks)"
             class="cursor-pointer group flex flex-col rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-white dark:bg-gray-800">
             <div class="relative aspect-[2/3] overflow-hidden bg-gray-100 dark:bg-gray-700">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
@@ -1572,7 +1594,7 @@ createApp({
     }
 
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin'
     const currentBook = ref(null)
     const bookLoading = ref(false)
     const currentSeries = ref('')
@@ -1773,6 +1795,35 @@ createApp({
         await loadBooks()
         window.scrollTo({ top: 0, behavior: 'instant' })
       }
+    }
+
+    // ---- Book prev/next navigation context ----
+    const navBookIDs = ref([]) // ordered book ID list from the source list view
+
+    const navBookIndex = computed(() => {
+      if (!currentBook.value || navBookIDs.value.length === 0) return -1
+      return navBookIDs.value.indexOf(currentBook.value.id)
+    })
+
+    const prevBookID = computed(() => {
+      const idx = navBookIndex.value
+      return idx > 0 ? navBookIDs.value[idx - 1] : null
+    })
+
+    const nextBookID = computed(() => {
+      const idx = navBookIndex.value
+      return idx >= 0 && idx < navBookIDs.value.length - 1 ? navBookIDs.value[idx + 1] : null
+    })
+
+    // Navigate to a book detail page.
+    // When contextBooks is provided the navigation context (prev/next list) is updated.
+    // When omitted (e.g. prev/next button press) the existing context is kept.
+    function openBook(bookId, contextBooks) {
+      if (!bookId) return
+      if (contextBooks !== undefined) {
+        navBookIDs.value = contextBooks.map(function(b) { return b.id })
+      }
+      navigateTo('/books/' + bookId)
     }
 
     // ---- Toggle read ----
@@ -2244,6 +2295,7 @@ createApp({
       books, total, loading, page, searchQuery, unreadOnly, sortOrder, totalPages, pageNumbers,
       loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
+      navBookIDs, navBookIndex, prevBookID, nextBookID, openBook,
       currentSeries, seriesBooks, seriesLoading,
       currentAuthor, authorBooks, authorLoading,
       currentTag, tagBooks, tagLoading,
