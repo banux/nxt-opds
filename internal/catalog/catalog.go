@@ -342,3 +342,45 @@ type Backupper interface {
 	// Returns the path of the newly created backup file.
 	Backup(destDir string, keep int) (string, error)
 }
+
+// Recommendation represents a book recommendation from one user to another.
+type Recommendation struct {
+	// FromUser is the user who sent the recommendation.
+	FromUser User
+
+	// ToUser is the user the recommendation is addressed to.
+	ToUser User
+
+	// Book is the recommended book.
+	Book Book
+
+	// Message is the optional personalised message from the recommender.
+	Message string
+
+	// CreatedAt is when the recommendation was created or last updated.
+	CreatedAt time.Time
+}
+
+// Recommender is an optional interface for catalog backends that support
+// per-user book recommendations.
+type Recommender interface {
+	// RecommendBook creates or replaces a recommendation from fromUserID to
+	// toUserID for bookID.  message may be empty.
+	RecommendBook(fromUserID, toUserID, bookID, message string) error
+
+	// RemoveRecommendation deletes the recommendation (if it exists) from
+	// fromUserID to toUserID for bookID.
+	RemoveRecommendation(fromUserID, toUserID, bookID string) error
+
+	// RecommendationsForUser returns all recommendations addressed to toUserID,
+	// newest first.
+	RecommendationsForUser(toUserID string) ([]Recommendation, error)
+
+	// RecommendationsByUser returns all recommendations sent by fromUserID,
+	// newest first.
+	RecommendationsByUser(fromUserID string) ([]Recommendation, error)
+
+	// BookRecipients returns the IDs of users to whom fromUserID has
+	// recommended bookID.
+	BookRecipients(fromUserID, bookID string) ([]string, error)
+}

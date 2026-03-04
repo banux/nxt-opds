@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -86,6 +86,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 2, apply: migration2},
 	{version: 3, apply: migration3},
 	{version: 4, apply: migration4},
+	{version: 5, apply: migration5},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -1229,6 +1230,166 @@ ORDER BY urs.book_id, u.name`, args...)
 		result[bookID] = append(result[bookID], color)
 	}
 	return result, rows.Err()
+}
+
+// ─── Recommender ─────────────────────────────────────────────────────────────
+
+// migration5 adds the recommendations table (version 4 → 5).
+func migration5(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS recommendations (
+    from_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    book_id      TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    message      TEXT NOT NULL DEFAULT '',
+    created_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (from_user_id, to_user_id, book_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rec_to_user   ON recommendations(to_user_id);
+CREATE INDEX IF NOT EXISTS idx_rec_from_user ON recommendations(from_user_id);
+`)
+	return err
+}
+
+// RecommendBook creates or replaces a recommendation from fromUserID to toUserID for bookID.
+func (b *Backend) RecommendBook(fromUserID, toUserID, bookID, message string) error {
+	_, err := b.db.Exec(`
+INSERT INTO recommendations (from_user_id, to_user_id, book_id, message, created_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(from_user_id, to_user_id, book_id) DO UPDATE SET
+    message = excluded.message, created_at = excluded.created_at`,
+		fromUserID, toUserID, bookID, message, time.Now().Unix())
+	return err
+}
+
+// RemoveRecommendation deletes the recommendation (if any) from fromUserID to toUserID for bookID.
+func (b *Backend) RemoveRecommendation(fromUserID, toUserID, bookID string) error {
+	_, err := b.db.Exec(
+		`DELETE FROM recommendations WHERE from_user_id=? AND to_user_id=? AND book_id=?`,
+		fromUserID, toUserID, bookID)
+	return err
+}
+
+// scanRecommendationRows scans rows produced by a query that selects:
+//
+//	user.id, user.name, user.color, user.is_admin,
+//	r.message, r.created_at,
+//	<bookSelectColumns>
+//
+// otherUserFirst controls whether the first 4 columns are the "from" user (true)
+// or the "to" user (false).
+func scanRecommendationRows(rows *sql.Rows, fromFirst bool) ([]catalog.Recommendation, error) {
+	defer rows.Close()
+	var result []catalog.Recommendation
+	for rows.Next() {
+		var u catalog.User
+		var isAdminInt int
+		var message string
+		var createdAtUnix int64
+		var r bookRow
+		if err := rows.Scan(
+			&u.ID, &u.Name, &u.Color, &isAdminInt,
+			&message, &createdAtUnix,
+			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt,
+			&r.Series, &r.SeriesIndex, &r.SeriesTotal,
+			&r.Collection, &r.CollectionIndex,
+			&r.IsRead, &r.Rating,
+			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
+			&r.AuthorsJSON, &r.TagsJSON,
+		); err != nil {
+			return nil, err
+		}
+		u.IsAdmin = isAdminInt == 1
+		rec := catalog.Recommendation{
+			Book:      r.toBook(),
+			Message:   message,
+			CreatedAt: time.Unix(createdAtUnix, 0),
+		}
+		if fromFirst {
+			rec.FromUser = u
+		} else {
+			rec.ToUser = u
+		}
+		result = append(result, rec)
+	}
+	return result, rows.Err()
+}
+
+// RecommendationsForUser returns all recommendations addressed to toUserID, newest first.
+func (b *Backend) RecommendationsForUser(toUserID string) ([]catalog.Recommendation, error) {
+	rows, err := b.db.Query(`
+SELECT fu.id, fu.name, fu.color, fu.is_admin,
+       r.message, r.created_at,`+bookSelectColumns+`
+FROM recommendations r
+JOIN users fu ON fu.id = r.from_user_id
+JOIN books b  ON b.id  = r.book_id
+WHERE r.to_user_id = ?
+ORDER BY r.created_at DESC`, toUserID)
+	if err != nil {
+		return nil, err
+	}
+	recs, err := scanRecommendationRows(rows, true)
+	if err != nil {
+		return nil, err
+	}
+	// Populate ToUser for each rec (we know it's the queried user).
+	tu, err := b.UserByID(toUserID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range recs {
+		recs[i].ToUser = *tu
+	}
+	return recs, nil
+}
+
+// RecommendationsByUser returns all recommendations sent by fromUserID, newest first.
+func (b *Backend) RecommendationsByUser(fromUserID string) ([]catalog.Recommendation, error) {
+	rows, err := b.db.Query(`
+SELECT tu.id, tu.name, tu.color, tu.is_admin,
+       r.message, r.created_at,`+bookSelectColumns+`
+FROM recommendations r
+JOIN users tu ON tu.id = r.to_user_id
+JOIN books b  ON b.id  = r.book_id
+WHERE r.from_user_id = ?
+ORDER BY r.created_at DESC`, fromUserID)
+	if err != nil {
+		return nil, err
+	}
+	recs, err := scanRecommendationRows(rows, false)
+	if err != nil {
+		return nil, err
+	}
+	// Populate FromUser for each rec.
+	fu, err := b.UserByID(fromUserID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range recs {
+		recs[i].FromUser = *fu
+	}
+	return recs, nil
+}
+
+// BookRecipients returns the IDs of users to whom fromUserID has recommended bookID.
+func (b *Backend) BookRecipients(fromUserID, bookID string) ([]string, error) {
+	rows, err := b.db.Query(
+		`SELECT to_user_id FROM recommendations WHERE from_user_id=? AND book_id=?`,
+		fromUserID, bookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // newID generates a random 16-byte hex string for use as a unique ID.

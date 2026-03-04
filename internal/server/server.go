@@ -46,6 +46,7 @@ type Server struct {
 	collectionLister  catalog.CollectionLister  // optional; nil if backend doesn't support collection listing
 	userManager     catalog.UserManager     // optional; nil if backend doesn't support user management
 	userReadManager catalog.UserReadManager // optional; nil if backend doesn't support per-user read
+	recommender     catalog.Recommender     // optional; nil if backend doesn't support recommendations
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
@@ -95,6 +96,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if urm, ok := cat.(catalog.UserReadManager); ok {
 		s.userReadManager = urm
+	}
+	if rc, ok := cat.(catalog.Recommender); ok {
+		s.recommender = rc
 	}
 	s.mcpServer = mcp.New(cat)
 	if opts.AnthropicAPIKey != "" {
@@ -207,6 +211,12 @@ func (s *Server) registerRoutes() {
 
 	// API: per-user read toggle
 	protected.HandleFunc("/api/books/{id}/read", s.handleAPIToggleRead).Methods(http.MethodPut)
+
+	// API: book recommendations
+	protected.HandleFunc("/api/books/{id}/recommend", s.handleAPIRecommend).Methods(http.MethodPost)
+	protected.HandleFunc("/api/books/{id}/recommend/{toUserID}", s.handleAPIRemoveRecommend).Methods(http.MethodDelete)
+	protected.HandleFunc("/api/books/{id}/recipients", s.handleAPIBookRecipients).Methods(http.MethodGet)
+	protected.HandleFunc("/api/recommendations", s.handleAPIRecommendations).Methods(http.MethodGet)
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)

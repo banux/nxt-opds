@@ -201,6 +201,21 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Recommendations page: back button + title -->
+      <template v-else-if="currentView === 'recommendations'">
+        <button @click="navigateTo('/')"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
+        </button>
+        <span class="font-semibold text-base truncate flex-1 min-w-0 text-gray-900 dark:text-gray-100">
+          Recommandations
+        </span>
+        <div class="flex-1 sm:hidden"></div>
+      </template>
+
       <!-- Grid page: logo + search -->
       <template v-else>
         <a href="#/" class="flex items-center gap-2 shrink-0">
@@ -280,6 +295,16 @@
             <span class="w-3.5 h-3.5 rounded-full shrink-0 border border-white/50" :style="{ background: currentUser.color }"></span>
             <span class="hidden md:inline truncate max-w-[6rem]">{{ currentUser.name }}</span>
           </span>
+          <!-- Recommendations bell -->
+          <button @click="navigateTo('/recommendations')" title="Mes recommandations"
+            class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+            </svg>
+            <span v-if="myRecommendations.length > 0"
+              class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-violet-500"></span>
+          </button>
+
           <button v-if="currentUser.isAdmin" @click="navigateTo('/admin')" title="Administration des utilisateurs"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -418,7 +443,7 @@
         <div
           v-for="book in books"
           :key="book.id"
-          @click="openBook(book.id, books)"
+          @click="openBook(book.id, gridFilterParams())"
           class="group cursor-pointer"
         >
           <!-- Cover -->
@@ -661,11 +686,14 @@
           <!-- Action buttons -->
           <div class="flex flex-wrap gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
 
-            <!-- Toggle read button -->
+            <!-- Toggle read button: coloured with user colour in multi-user mode -->
             <button @click="toggleRead(currentBook)" :disabled="togglingRead"
-              :class="currentBook.isRead
-                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-200 dark:hover:bg-green-900/50'
-                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
+              :class="currentBook.isRead && multiUser && currentUser
+                ? 'text-white border-transparent'
+                : currentBook.isRead
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-200 dark:hover:bg-green-900/50'
+                  : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
+              :style="currentBook.isRead && multiUser && currentUser ? { backgroundColor: currentUser.color, borderColor: currentUser.color } : {}"
               class="flex items-center gap-2 px-4 py-2 border text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -679,6 +707,15 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
               </svg>
               Modifier les métadonnées
+            </button>
+
+            <!-- Recommend button (multi-user only) -->
+            <button v-if="multiUser && currentUser" @click="openRecommend(currentBook)"
+              class="flex items-center gap-2 px-4 py-2 border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 text-sm font-medium rounded-lg transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+              </svg>
+              Recommander
             </button>
 
             <!-- Delete button -->
@@ -1181,6 +1218,54 @@
       </div>
     </template><!-- end admin view -->
 
+    <!-- ===== RECOMMENDATIONS PAGE ===== -->
+    <template v-else-if="currentView === 'recommendations'">
+      <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Livres recommandés pour moi</h1>
+
+        <div v-if="recommendationsLoading" class="flex justify-center items-center py-24">
+          <svg class="w-10 h-10 text-violet-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </div>
+
+        <div v-else-if="myRecommendations.length === 0" class="text-center py-24 text-gray-400 dark:text-gray-500">
+          <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+          </svg>
+          Aucune recommandation pour l'instant.
+        </div>
+
+        <div v-else class="space-y-4">
+          <div v-for="rec in myRecommendations" :key="rec.bookId + rec.fromName"
+            class="flex gap-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md transition-shadow cursor-pointer"
+            @click="openBook(rec.bookId)">
+            <!-- Mini cover -->
+            <div class="w-14 shrink-0">
+              <div class="aspect-[2/3] rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
+                <img v-if="rec.coverUrl" :src="rec.coverUrl" :alt="rec.bookTitle" class="w-full h-full object-cover"/>
+                <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <!-- Info -->
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-gray-900 dark:text-gray-100 truncate">{{ rec.bookTitle }}</p>
+              <p class="flex items-center gap-1.5 text-sm text-violet-600 dark:text-violet-400 mt-1">
+                <span class="w-3 h-3 rounded-full shrink-0" :style="{ background: rec.fromColor }"></span>
+                Recommandé par <strong>{{ rec.fromName }}</strong>
+              </p>
+              <p v-if="rec.message" class="mt-1.5 text-sm text-gray-600 dark:text-gray-400 italic">"{{ rec.message }}"</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template><!-- end recommendations view -->
+
   </main>
 
   <!-- ===== Upload Modal ===== -->
@@ -1380,6 +1465,60 @@
   <datalist id="ac-collections">
     <option v-for="c in autocompleteCollections" :key="c" :value="c"/>
   </datalist>
+
+  <!-- ===== Recommend Dialog ===== -->
+  <div v-if="recommendDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="recommendDialog = false"></div>
+    <div class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 z-10">
+      <button @click="recommendDialog = false"
+        class="absolute top-3 right-3 p-1.5 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+      <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Recommander ce livre</h2>
+
+      <!-- User picker -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">À qui ?</label>
+        <div class="space-y-2 max-h-48 overflow-y-auto">
+          <label v-for="u in recommendableUsers" :key="u.id"
+            class="flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors"
+            :class="recommendToUserID === u.id
+              ? 'border-violet-400 bg-violet-50 dark:bg-violet-900/20'
+              : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'">
+            <input type="radio" :value="u.id" v-model="recommendToUserID" class="sr-only"/>
+            <span class="w-4 h-4 rounded-full shrink-0" :style="{ background: u.color }"></span>
+            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ u.name }}</span>
+            <svg v-if="recommendToUserID === u.id" class="w-4 h-4 ml-auto text-violet-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+          </label>
+          <p v-if="recommendableUsers.length === 0" class="text-sm text-gray-400 dark:text-gray-500 text-center py-2">
+            Aucun autre utilisateur.
+          </p>
+        </div>
+      </div>
+
+      <!-- Optional message -->
+      <div class="mb-5">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Message (optionnel)</label>
+        <textarea v-model="recommendMessage" rows="2" placeholder="Un mot pour accompagner la recommandation…"
+          class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"></textarea>
+      </div>
+
+      <div class="flex justify-end gap-3">
+        <button @click="recommendDialog = false"
+          class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
+          Annuler
+        </button>
+        <button @click="doRecommend" :disabled="!recommendToUserID || recommending"
+          class="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          {{ recommending ? 'Envoi…' : 'Recommander' }}
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast -->
   <div v-if="toast.show"
@@ -1594,7 +1733,7 @@ createApp({
     }
 
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin' | 'recommendations'
     const currentBook = ref(null)
     const bookLoading = ref(false)
     const currentSeries = ref('')
@@ -1789,6 +1928,10 @@ createApp({
         currentView.value = 'admin'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadAdminUsers()
+      } else if (hash === '#/recommendations') {
+        currentView.value = 'recommendations'
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadRecommendations()
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -1816,14 +1959,39 @@ createApp({
     })
 
     // Navigate to a book detail page.
-    // When contextBooks is provided the navigation context (prev/next list) is updated.
+    // contextBooks: array of book objects (series/author/tag/publisher/collection pages) OR
+    //               URLSearchParams string (grid page — all IDs fetched from server).
     // When omitted (e.g. prev/next button press) the existing context is kept.
-    function openBook(bookId, contextBooks) {
+    async function openBook(bookId, contextBooks) {
       if (!bookId) return
       if (contextBooks !== undefined) {
-        navBookIDs.value = contextBooks.map(function(b) { return b.id })
+        if (typeof contextBooks === 'string') {
+          // Grid view: fetch all matching IDs from the server (ids_only=1, no page limit)
+          // Navigate immediately; context will be set once the fetch completes.
+          navigateTo('/books/' + bookId)
+          try {
+            const res = await apiFetch('/api/books?' + contextBooks + '&ids_only=1')
+            if (res.ok) {
+              const data = await res.json()
+              navBookIDs.value = data.ids || []
+            }
+          } catch(e) { /* non-blocking */ }
+          return
+        } else {
+          // Direct book list (series/author/tag/publisher/collection pages)
+          navBookIDs.value = contextBooks.map(function(b) { return b.id })
+        }
       }
       navigateTo('/books/' + bookId)
+    }
+
+    // Build a query-string for the current grid filter state (used by openBook from grid).
+    function gridFilterParams() {
+      const p = new URLSearchParams()
+      if (searchQuery.value.trim()) p.set('q', searchQuery.value.trim())
+      if (unreadOnly.value) p.set('unread', '1')
+      if (sortOrder.value) p.set('sort', sortOrder.value)
+      return p.toString()
     }
 
     // ---- Toggle read ----
@@ -2217,6 +2385,59 @@ createApp({
       adminUserForm.value = { name: '', color: '#3B82F6', isAdmin: false }
     }
 
+    // ---- Recommendations ----
+    const myRecommendations    = ref([])
+    const recommendationsLoading = ref(false)
+    const recommendDialog      = ref(false)
+    const recommendBook        = ref(null)
+    const recommendToUserID    = ref('')
+    const recommendMessage     = ref('')
+    const recommending         = ref(false)
+
+    // Users available to recommend to (all users except current user)
+    const recommendableUsers = computed(() => {
+      if (!currentUser.value) return []
+      return adminUsers.value.filter(u => u.id !== currentUser.value.id)
+    })
+
+    async function loadRecommendations() {
+      if (!multiUser.value || !currentUser.value) return
+      recommendationsLoading.value = true
+      try {
+        const res = await apiFetch('/api/recommendations')
+        if (res.ok) myRecommendations.value = await res.json()
+      } catch(e) { /* non-blocking */ }
+      finally { recommendationsLoading.value = false }
+    }
+
+    async function openRecommend(book) {
+      recommendBook.value = book
+      recommendToUserID.value = ''
+      recommendMessage.value = ''
+      // Ensure user list is loaded
+      if (adminUsers.value.length === 0) await loadAdminUsers()
+      recommendDialog.value = true
+    }
+
+    async function doRecommend() {
+      if (!recommendBook.value || !recommendToUserID.value) return
+      recommending.value = true
+      try {
+        const res = await apiFetch('/api/books/' + recommendBook.value.id + '/recommend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ toUserID: recommendToUserID.value, message: recommendMessage.value }),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        recommendDialog.value = false
+        showToast('Livre recommandé !', 'success')
+      } catch(e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        recommending.value = false
+      }
+    }
+
     // ---- Read banner helpers ----
     function showReadBanner(book) {
       return book.isRead || (book.readColors && book.readColors.length > 0)
@@ -2286,6 +2507,9 @@ createApp({
           aiEnabled.value = !!cfg.aiEnabled
           multiUser.value = !!cfg.multiUser
           currentUser.value = cfg.currentUser || null
+          if (cfg.multiUser && cfg.currentUser) {
+            loadRecommendations()
+          }
         }
       } catch { /* non-critical */ }
     })
@@ -2295,7 +2519,7 @@ createApp({
       books, total, loading, page, searchQuery, unreadOnly, sortOrder, totalPages, pageNumbers,
       loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
-      navBookIDs, navBookIndex, prevBookID, nextBookID, openBook,
+      navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
       currentSeries, seriesBooks, seriesLoading,
       currentAuthor, authorBooks, authorLoading,
       currentTag, tagBooks, tagLoading,
@@ -2318,6 +2542,8 @@ createApp({
       multiUser, currentUser,
       adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
       loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
+      myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
+      recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,
       showReadBanner, readBannerStyle,
       toast, formatBytes,
     }

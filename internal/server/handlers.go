@@ -612,6 +612,8 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 // Supports optional ?q= search query, ?series= series filter, ?author= author filter,
 // ?tag= tag filter, ?publisher= publisher filter, ?collection= collection filter,
 // ?unread=1 filter, ?sort= sort order, and standard ?offset=&limit= pagination.
+// When ?ids_only=1 is set, returns {"ids":["id1","id2",...]} for all matching books
+// (no pagination limit) — used by the frontend to build the full prev/next context.
 func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	seriesFilter := r.URL.Query().Get("series")
@@ -620,9 +622,40 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	publisherFilter := r.URL.Query().Get("publisher")
 	collectionFilter := r.URL.Query().Get("collection")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
-	offset, limit := parsePagination(r)
+	idsOnly := r.URL.Query().Get("ids_only") == "1"
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
+
+	// ids_only mode: return just book IDs for all matching books (no page limit).
+	if idsOnly {
+		books, _, err := s.catalog.Search(catalog.SearchQuery{
+			Query:      q,
+			Series:     seriesFilter,
+			Author:     authorFilter,
+			Tag:        tagFilter,
+			Publisher:  publisherFilter,
+			Collection: collectionFilter,
+			Offset:     0,
+			Limit:      99999,
+			UnreadOnly: unreadOnly,
+			UserID:     userID,
+			SortBy:     sortBy,
+			SortOrder:  sortOrder,
+		})
+		if err != nil {
+			http.Error(w, "catalog error", http.StatusInternalServerError)
+			return
+		}
+		ids := make([]string, len(books))
+		for i, bk := range books {
+			ids[i] = bk.ID
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ids": ids})
+		return
+	}
+
+	offset, limit := parsePagination(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
 		Query:      q,
@@ -1266,6 +1299,125 @@ func (s *Server) handleAPIToggleRead(w http.ResponseWriter, r *http.Request) {
 		"isRead":     req.IsRead,
 		"readColors": colors,
 	})
+}
+
+// handleAPIRecommend creates or replaces a book recommendation from the current user
+// to one or more target users.
+// POST /api/books/{id}/recommend
+// Body: {"toUserID": "uid", "message": "optional message"}
+func (s *Server) handleAPIRecommend(w http.ResponseWriter, r *http.Request) {
+	if s.recommender == nil {
+		http.Error(w, "recommendations not supported", http.StatusNotImplemented)
+		return
+	}
+	bookID := mux.Vars(r)["id"]
+	fromUserID := currentUserID(r)
+	if fromUserID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		ToUserID string `json:"toUserID"`
+		Message  string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ToUserID == "" {
+		http.Error(w, "invalid request: toUserID required", http.StatusBadRequest)
+		return
+	}
+	if err := s.recommender.RecommendBook(fromUserID, req.ToUserID, bookID, req.Message); err != nil {
+		http.Error(w, "recommend failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPIRemoveRecommend removes a recommendation.
+// DELETE /api/books/{id}/recommend/{toUserID}
+func (s *Server) handleAPIRemoveRecommend(w http.ResponseWriter, r *http.Request) {
+	if s.recommender == nil {
+		http.Error(w, "recommendations not supported", http.StatusNotImplemented)
+		return
+	}
+	bookID := mux.Vars(r)["id"]
+	toUserID := mux.Vars(r)["toUserID"]
+	fromUserID := currentUserID(r)
+	if fromUserID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if err := s.recommender.RemoveRecommendation(fromUserID, toUserID, bookID); err != nil {
+		http.Error(w, "remove failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPIBookRecipients returns the list of users to whom the current user has
+// recommended a book.
+// GET /api/books/{id}/recipients
+func (s *Server) handleAPIBookRecipients(w http.ResponseWriter, r *http.Request) {
+	if s.recommender == nil {
+		http.Error(w, "recommendations not supported", http.StatusNotImplemented)
+		return
+	}
+	bookID := mux.Vars(r)["id"]
+	fromUserID := currentUserID(r)
+	if fromUserID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	ids, err := s.recommender.BookRecipients(fromUserID, bookID)
+	if err != nil {
+		http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(ids)
+}
+
+// handleAPIRecommendations returns all recommendations addressed to the current user.
+// GET /api/recommendations
+func (s *Server) handleAPIRecommendations(w http.ResponseWriter, r *http.Request) {
+	if s.recommender == nil {
+		http.Error(w, "recommendations not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	recs, err := s.recommender.RecommendationsForUser(userID)
+	if err != nil {
+		http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type recJSON struct {
+		BookID    string `json:"bookId"`
+		BookTitle string `json:"bookTitle"`
+		CoverURL  string `json:"coverUrl,omitempty"`
+		FromName  string `json:"fromName"`
+		FromColor string `json:"fromColor"`
+		Message   string `json:"message,omitempty"`
+		CreatedAt int64  `json:"createdAt"`
+	}
+	result := make([]recJSON, 0, len(recs))
+	for _, rec := range recs {
+		result = append(result, recJSON{
+			BookID:    rec.Book.ID,
+			BookTitle: rec.Book.Title,
+			CoverURL:  rec.Book.CoverURL,
+			FromName:  rec.FromUser.Name,
+			FromColor: rec.FromUser.Color,
+			Message:   rec.Message,
+			CreatedAt: rec.CreatedAt.Unix(),
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 // handleAPIRefresh triggers an on-demand catalog refresh.
