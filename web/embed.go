@@ -5,5 +5,5 @@ import "embed"
 
 // FS holds the embedded web directory contents.
 //
-//go:embed index.html
+//go:embed index.html favicon.svg
 var FS embed.FS

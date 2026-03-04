@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Blue rounded background -->
+  <rect width="32" height="32" rx="7" fill="#2563eb"/>
+  <!-- Open book: left page (curving from spine outward) -->
+  <path d="M5 10 L5 23 Q10.5 21.5 16 22.5 L16 9.5 Q10.5 8.5 5 10Z" fill="white"/>
+  <!-- Open book: right page -->
+  <path d="M27 10 L27 23 Q21.5 21.5 16 22.5 L16 9.5 Q21.5 8.5 27 10Z" fill="#bfdbfe"/>
+  <!-- Spine line -->
+  <line x1="16" y1="9.5" x2="16" y2="22.5" stroke="#1d4ed8" stroke-width="1"/>
+  <!-- Text lines on left page -->
+  <rect x="7" y="13" width="6.5" height="1" rx="0.5" fill="#93c5fd"/>
+  <rect x="7" y="15.5" width="6.5" height="1" rx="0.5" fill="#93c5fd"/>
+  <rect x="7" y="18" width="4.5" height="1" rx="0.5" fill="#93c5fd"/>
+  <!-- Text lines on right page -->
+  <rect x="18.5" y="13" width="6.5" height="1" rx="0.5" fill="#3b82f6"/>
+  <rect x="18.5" y="15.5" width="6.5" height="1" rx="0.5" fill="#3b82f6"/>
+  <rect x="18.5" y="18" width="4.5" height="1" rx="0.5" fill="#3b82f6"/>
+</svg>
