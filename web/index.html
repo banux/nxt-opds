@@ -529,7 +529,7 @@
     </template><!-- end grid view -->
 
     <!-- ===== BOOK DETAIL PAGE ===== -->
-    <template v-else-if="currentView === 'book'">
+    <div v-else-if="currentView === 'book'" @touchstart.passive="onBookTouchStart" @touchend="onBookTouchEnd">
 
       <!-- Loading state -->
       <div v-if="bookLoading" class="flex justify-center items-center py-24">
@@ -731,7 +731,7 @@
         </div><!-- end right column -->
       </div><!-- end book detail -->
 
-    </template><!-- end book view -->
+    </div><!-- end book view -->
 
     <!-- ===== SERIES PAGE ===== -->
     <template v-else-if="currentView === 'series'">
@@ -1985,6 +1985,32 @@ createApp({
       navigateTo('/books/' + bookId)
     }
 
+    // ---- Keyboard arrow navigation (book detail page) ----
+    function onKeyDown(e) {
+      if (currentView.value !== 'book') return
+      // Don't intercept when user is typing
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (e.key === 'ArrowLeft' && prevBookID.value) openBook(prevBookID.value)
+      else if (e.key === 'ArrowRight' && nextBookID.value) openBook(nextBookID.value)
+    }
+
+    // ---- Touch swipe navigation (book detail page) ----
+    const touchStartX = ref(0)
+    const touchStartY = ref(0)
+    function onBookTouchStart(e) {
+      touchStartX.value = e.touches[0].clientX
+      touchStartY.value = e.touches[0].clientY
+    }
+    function onBookTouchEnd(e) {
+      if (!e.changedTouches.length) return
+      const dx = e.changedTouches[0].clientX - touchStartX.value
+      const dy = e.changedTouches[0].clientY - touchStartY.value
+      // Require horizontal movement > 60px and > vertical movement (not a scroll)
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return
+      if (dx > 0 && prevBookID.value) openBook(prevBookID.value)
+      else if (dx < 0 && nextBookID.value) openBook(nextBookID.value)
+    }
+
     // Build a query-string for the current grid filter state (used by openBook from grid).
     function gridFilterParams() {
       const p = new URLSearchParams()
@@ -2497,6 +2523,7 @@ createApp({
 
     onMounted(async () => {
       window.addEventListener('hashchange', onHashChange)
+      window.addEventListener('keydown', onKeyDown)
       onHashChange()
       // Load server config (OPDS token, AI enabled, etc.)
       try {
@@ -2520,6 +2547,7 @@ createApp({
       loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
+      onBookTouchStart, onBookTouchEnd,
       currentSeries, seriesBooks, seriesLoading,
       currentAuthor, authorBooks, authorLoading,
       currentTag, tagBooks, tagLoading,
