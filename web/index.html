@@ -296,7 +296,7 @@
             </svg>
           </button>
 
-          <button @click="navigateTo('/wishlist')" title="Liste de souhaits"
+          <button v-if="!(multiUser && currentUser)" @click="navigateTo('/wishlist')" title="Liste de souhaits"
             class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
