@@ -361,6 +361,53 @@ type Recommendation struct {
 	CreatedAt time.Time
 }
 
+// WishlistItem represents a book a user wants to find or acquire.
+type WishlistItem struct {
+	// ID is a unique identifier for this wishlist entry.
+	ID string
+
+	// UserID is the ID of the user who added this item (empty in single-user mode).
+	UserID string
+
+	// UserName is the display name of the user (populated for display).
+	UserName string
+
+	// UserColor is the CSS hex colour of the user (populated for display).
+	UserColor string
+
+	// Title is the title of the book being searched.
+	Title string
+
+	// Author is the author of the book being searched.
+	Author string
+
+	// ReleaseDate is the expected/known publication date (optional, e.g. "2024" or "2024-03-15").
+	ReleaseDate string
+
+	// Notes is any additional notes (e.g. edition, ISBN hint).
+	Notes string
+
+	// CreatedAt is when this wishlist item was created.
+	CreatedAt time.Time
+}
+
+// WishlistManager is an optional interface for catalog backends that support
+// per-user wishlists of books the user wants to find or acquire.
+type WishlistManager interface {
+	// WishlistItems returns all wishlist items. If userID is non-empty, only
+	// items belonging to that user are returned; otherwise all items are returned.
+	WishlistItems(userID string) ([]WishlistItem, error)
+
+	// AddWishlistItem creates a new wishlist item.
+	AddWishlistItem(userID, title, author, releaseDate, notes string) (*WishlistItem, error)
+
+	// UpdateWishlistItem updates the editable fields of an existing item.
+	UpdateWishlistItem(id, title, author, releaseDate, notes string) (*WishlistItem, error)
+
+	// DeleteWishlistItem removes the wishlist item with the given ID.
+	DeleteWishlistItem(id string) error
+}
+
 // Recommender is an optional interface for catalog backends that support
 // per-user book recommendations.
 type Recommender interface {

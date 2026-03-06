@@ -1420,6 +1420,137 @@ func (s *Server) handleAPIRecommendations(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(result)
 }
 
+// ─── Wishlist ─────────────────────────────────────────────────────────────────
+
+// wishlistItemJSON is the JSON representation of a WishlistItem.
+type wishlistItemJSON struct {
+	ID          string `json:"id"`
+	UserID      string `json:"userId,omitempty"`
+	UserName    string `json:"userName,omitempty"`
+	UserColor   string `json:"userColor,omitempty"`
+	Title       string `json:"title"`
+	Author      string `json:"author,omitempty"`
+	ReleaseDate string `json:"releaseDate,omitempty"`
+	Notes       string `json:"notes,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+}
+
+func toWishlistItemJSON(it catalog.WishlistItem) wishlistItemJSON {
+	return wishlistItemJSON{
+		ID:          it.ID,
+		UserID:      it.UserID,
+		UserName:    it.UserName,
+		UserColor:   it.UserColor,
+		Title:       it.Title,
+		Author:      it.Author,
+		ReleaseDate: it.ReleaseDate,
+		Notes:       it.Notes,
+		CreatedAt:   it.CreatedAt.Unix(),
+	}
+}
+
+// handleAPIWishlist returns the wishlist for the current user (or all items in single-user mode).
+// GET /api/wishlist
+// Query params: ?all=1 to retrieve all users' items (default: current user only when multi-user).
+func (s *Server) handleAPIWishlist(w http.ResponseWriter, r *http.Request) {
+	if s.wishlistManager == nil {
+		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
+		return
+	}
+	// Determine which userID to filter on.
+	userID := ""
+	if r.URL.Query().Get("all") != "1" && s.userManager != nil {
+		userID = currentUserID(r)
+	}
+	items, err := s.wishlistManager.WishlistItems(userID)
+	if err != nil {
+		http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	result := make([]wishlistItemJSON, 0, len(items))
+	for _, it := range items {
+		result = append(result, toWishlistItemJSON(it))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// handleAPIAddWishlistItem adds a new item to the current user's wishlist.
+// POST /api/wishlist
+// Body: {"title":"…","author":"…","releaseDate":"…","notes":"…"}
+func (s *Server) handleAPIAddWishlistItem(w http.ResponseWriter, r *http.Request) {
+	if s.wishlistManager == nil {
+		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
+		return
+	}
+	var req struct {
+		Title       string `json:"title"`
+		Author      string `json:"author"`
+		ReleaseDate string `json:"releaseDate"`
+		Notes       string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+	userID := currentUserID(r)
+	it, err := s.wishlistManager.AddWishlistItem(userID, req.Title, req.Author, req.ReleaseDate, req.Notes)
+	if err != nil {
+		http.Error(w, "add failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(toWishlistItemJSON(*it))
+}
+
+// handleAPIUpdateWishlistItem updates an existing wishlist item.
+// PATCH /api/wishlist/{id}
+// Body: {"title":"…","author":"…","releaseDate":"…","notes":"…"}
+func (s *Server) handleAPIUpdateWishlistItem(w http.ResponseWriter, r *http.Request) {
+	if s.wishlistManager == nil {
+		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	var req struct {
+		Title       string `json:"title"`
+		Author      string `json:"author"`
+		ReleaseDate string `json:"releaseDate"`
+		Notes       string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	it, err := s.wishlistManager.UpdateWishlistItem(id, req.Title, req.Author, req.ReleaseDate, req.Notes)
+	if err != nil {
+		http.Error(w, "update failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(toWishlistItemJSON(*it))
+}
+
+// handleAPIDeleteWishlistItem removes a wishlist item.
+// DELETE /api/wishlist/{id}
+func (s *Server) handleAPIDeleteWishlistItem(w http.ResponseWriter, r *http.Request) {
+	if s.wishlistManager == nil {
+		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
+		return
+	}
+	id := mux.Vars(r)["id"]
+	if err := s.wishlistManager.DeleteWishlistItem(id); err != nil {
+		http.Error(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleAPIRefresh triggers an on-demand catalog refresh.
 // Returns 501 if the backend does not support refresh.
 // Returns 200 {"ok":true} on success, 500 on backend error.

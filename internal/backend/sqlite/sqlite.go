@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -87,6 +87,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 3, apply: migration3},
 	{version: 4, apply: migration4},
 	{version: 5, apply: migration5},
+	{version: 6, apply: migration6},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -1390,6 +1391,138 @@ func (b *Backend) BookRecipients(fromUserID, bookID string) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// ─── WishlistManager ──────────────────────────────────────────────────────────
+
+// migration6 adds the wishlist table (version 5 → 6).
+func migration6(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS wishlist (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL DEFAULT '',
+    title        TEXT NOT NULL DEFAULT '',
+    author       TEXT NOT NULL DEFAULT '',
+    release_date TEXT NOT NULL DEFAULT '',
+    notes        TEXT NOT NULL DEFAULT '',
+    created_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_wishlist_user ON wishlist(user_id);
+`)
+	return err
+}
+
+// WishlistItems returns all wishlist items. If userID is non-empty, only that user's items are returned.
+func (b *Backend) WishlistItems(userID string) ([]catalog.WishlistItem, error) {
+	var rows *sql.Rows
+	var err error
+	if userID != "" {
+		rows, err = b.db.Query(`
+SELECT w.id, w.user_id, COALESCE(u.name,''), COALESCE(u.color,'#6B7280'),
+       w.title, w.author, w.release_date, w.notes, w.created_at
+FROM wishlist w
+LEFT JOIN users u ON u.id = w.user_id
+WHERE w.user_id = ?
+ORDER BY w.created_at DESC`, userID)
+	} else {
+		rows, err = b.db.Query(`
+SELECT w.id, w.user_id, COALESCE(u.name,''), COALESCE(u.color,'#6B7280'),
+       w.title, w.author, w.release_date, w.notes, w.created_at
+FROM wishlist w
+LEFT JOIN users u ON u.id = w.user_id
+ORDER BY w.created_at DESC`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []catalog.WishlistItem
+	for rows.Next() {
+		var it catalog.WishlistItem
+		var createdAtUnix int64
+		if err := rows.Scan(
+			&it.ID, &it.UserID, &it.UserName, &it.UserColor,
+			&it.Title, &it.Author, &it.ReleaseDate, &it.Notes, &createdAtUnix,
+		); err != nil {
+			return nil, err
+		}
+		it.CreatedAt = time.Unix(createdAtUnix, 0)
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// AddWishlistItem creates a new wishlist item and returns it.
+func (b *Backend) AddWishlistItem(userID, title, author, releaseDate, notes string) (*catalog.WishlistItem, error) {
+	id, err := newID()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	_, err = b.db.Exec(`
+INSERT INTO wishlist (id, user_id, title, author, release_date, notes, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, userID, title, author, releaseDate, notes, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	it := &catalog.WishlistItem{
+		ID:          id,
+		UserID:      userID,
+		Title:       title,
+		Author:      author,
+		ReleaseDate: releaseDate,
+		Notes:       notes,
+		CreatedAt:   now,
+	}
+	// Populate user name/color if available.
+	if userID != "" {
+		if u, err := b.UserByID(userID); err == nil {
+			it.UserName = u.Name
+			it.UserColor = u.Color
+		}
+	}
+	return it, nil
+}
+
+// UpdateWishlistItem updates the editable fields of an existing wishlist item.
+func (b *Backend) UpdateWishlistItem(id, title, author, releaseDate, notes string) (*catalog.WishlistItem, error) {
+	_, err := b.db.Exec(`
+UPDATE wishlist SET title=?, author=?, release_date=?, notes=? WHERE id=?`,
+		title, author, releaseDate, notes, id)
+	if err != nil {
+		return nil, err
+	}
+	// Re-fetch to return the full item.
+	rows, err := b.db.Query(`
+SELECT w.id, w.user_id, COALESCE(u.name,''), COALESCE(u.color,'#6B7280'),
+       w.title, w.author, w.release_date, w.notes, w.created_at
+FROM wishlist w
+LEFT JOIN users u ON u.id = w.user_id
+WHERE w.id = ?`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, fmt.Errorf("wishlist item %q not found", id)
+	}
+	var it catalog.WishlistItem
+	var createdAtUnix int64
+	if err := rows.Scan(
+		&it.ID, &it.UserID, &it.UserName, &it.UserColor,
+		&it.Title, &it.Author, &it.ReleaseDate, &it.Notes, &createdAtUnix,
+	); err != nil {
+		return nil, err
+	}
+	it.CreatedAt = time.Unix(createdAtUnix, 0)
+	return &it, nil
+}
+
+// DeleteWishlistItem removes the wishlist item with the given ID.
+func (b *Backend) DeleteWishlistItem(id string) error {
+	_, err := b.db.Exec(`DELETE FROM wishlist WHERE id=?`, id)
+	return err
 }
 
 // newID generates a random 16-byte hex string for use as a unique ID.

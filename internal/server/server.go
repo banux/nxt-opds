@@ -47,6 +47,7 @@ type Server struct {
 	userManager     catalog.UserManager     // optional; nil if backend doesn't support user management
 	userReadManager catalog.UserReadManager // optional; nil if backend doesn't support per-user read
 	recommender     catalog.Recommender     // optional; nil if backend doesn't support recommendations
+	wishlistManager catalog.WishlistManager // optional; nil if backend doesn't support wishlists
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
@@ -99,6 +100,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if rc, ok := cat.(catalog.Recommender); ok {
 		s.recommender = rc
+	}
+	if wm, ok := cat.(catalog.WishlistManager); ok {
+		s.wishlistManager = wm
 	}
 	s.mcpServer = mcp.New(cat)
 	if opts.AnthropicAPIKey != "" {
@@ -217,6 +221,12 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/books/{id}/recommend/{toUserID}", s.handleAPIRemoveRecommend).Methods(http.MethodDelete)
 	protected.HandleFunc("/api/books/{id}/recipients", s.handleAPIBookRecipients).Methods(http.MethodGet)
 	protected.HandleFunc("/api/recommendations", s.handleAPIRecommendations).Methods(http.MethodGet)
+
+	// API: wishlist management
+	protected.HandleFunc("/api/wishlist", s.handleAPIWishlist).Methods(http.MethodGet)
+	protected.HandleFunc("/api/wishlist", s.handleAPIAddWishlistItem).Methods(http.MethodPost)
+	protected.HandleFunc("/api/wishlist/{id}", s.handleAPIUpdateWishlistItem).Methods(http.MethodPatch)
+	protected.HandleFunc("/api/wishlist/{id}", s.handleAPIDeleteWishlistItem).Methods(http.MethodDelete)
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)
