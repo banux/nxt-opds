@@ -171,6 +171,44 @@ func TestSQLiteBackend_Search(t *testing.T) {
 	}
 }
 
+func TestSQLiteBackend_SearchBySeries(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Book A", "Author A", "")
+	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Book B", "Author B", "")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	books, _, _ := b.Search(catalog.SearchQuery{Limit: 50})
+	if len(books) < 2 {
+		t.Fatalf("expected 2 books, got %d", len(books))
+	}
+	var bookAID string
+	for _, bk := range books {
+		if bk.Title == "Book A" {
+			bookAID = bk.ID
+		}
+	}
+	series := "Dune"
+	if _, err := b.UpdateBook(bookAID, catalog.BookUpdate{Series: &series}); err != nil {
+		t.Fatalf("UpdateBook() error: %v", err)
+	}
+
+	results, total, err := b.Search(catalog.SearchQuery{Query: "dune", Limit: 50})
+	if err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("search 'dune': expected 1 result, got %d", total)
+	}
+	if len(results) > 0 && results[0].Title != "Book A" {
+		t.Errorf("expected 'Book A', got %q", results[0].Title)
+	}
+}
+
 func TestSQLiteBackend_AuthorsAndTags(t *testing.T) {
 	dir := t.TempDir()
 	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Book A", "Author One", "SciFi")

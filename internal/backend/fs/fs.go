@@ -522,6 +522,10 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 			matched = append(matched, bk)
 			continue
 		}
+		if bk.Series != "" && strings.Contains(strings.ToLower(bk.Series), qLower) {
+			matched = append(matched, bk)
+			continue
+		}
 		for _, a := range bk.Authors {
 			if strings.Contains(strings.ToLower(a.Name), qLower) {
 				matched = append(matched, bk)

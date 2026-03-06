@@ -81,6 +81,7 @@
 - [x] Permet au serveur mcp d'uploader un livre avec authentification par le token - **Done: upload_book tool on MCP server; accepts filename + base64 content; auth via existing Bearer token / ?token= middleware on /mcp route; StoreBook called via catalog.Uploader; 2 tests (happy path + not supported); v1.51.0**
 - [x] Retire le lien recommandation en double - **Done: wishlist button was duplicated in the header (once in grid-only block, once in multi-user block); added v-if="!(multiUser && currentUser)" to the grid-only button so it only shows in single-user mode**
 - [x] Genere un fichier de config systemd pour l'utilisation du binaire - **Done: nxt-opds.service unit file (Type=simple, User=nxt-opds, WorkingDirectory=/opt/nxt-opds, all env vars documented, Restart=on-failure, security hardening directives, ReadWritePaths=/var/lib/nxt-opds)**
+- [x] La recherche doit aussi prendre en compte les noms des séries - **Done: added LOWER(b.series) LIKE ? to SQLite search JOIN; added series name check in fs backend Search loop; 2 new tests**
 
 ## Completed
 - [x] Project enabled for Ralph

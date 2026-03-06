@@ -544,22 +544,22 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 
 	like := "%" + strings.ToLower(q.Query) + "%"
 
-	countArgs := append([]any{like, like}, extraArgs...)
+	countArgs := append([]any{like, like, like}, extraArgs...)
 	total, err := b.countBooks(`
 SELECT COUNT(DISTINCT b.id) FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
-WHERE (LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ?)`+extraWhere, countArgs...)
+WHERE (LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ? OR LOWER(b.series) LIKE ?)`+extraWhere, countArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	queryArgs := append([]any{like, like}, extraArgs...)
+	queryArgs := append([]any{like, like, like}, extraArgs...)
 	queryArgs = append(queryArgs, q.Limit, q.Offset)
 	books, err := b.queryBooks(`
 JOIN (
     SELECT DISTINCT b2.id FROM books b2
     LEFT JOIN book_authors ba2 ON ba2.book_id = b2.id
-    WHERE (LOWER(b2.title) LIKE ? OR LOWER(ba2.author_name) LIKE ?)
+    WHERE (LOWER(b2.title) LIKE ? OR LOWER(ba2.author_name) LIKE ? OR LOWER(b2.series) LIKE ?)
 ) AS matched ON b.id = matched.id
 WHERE 1=1`+extraWhere+`
 `+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
