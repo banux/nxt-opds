@@ -12,8 +12,11 @@
 package mcp
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,9 +28,10 @@ const protocolVersion = "2024-11-05"
 
 // Server handles MCP requests over HTTP.
 type Server struct {
-	cat         catalog.Catalog
-	updater     catalog.Updater
+	cat          catalog.Catalog
+	updater      catalog.Updater
 	seriesLister catalog.SeriesLister
+	uploader     catalog.Uploader
 }
 
 // New creates a new MCP Server backed by the given catalog.
@@ -38,6 +42,9 @@ func New(cat catalog.Catalog) *Server {
 	}
 	if sl, ok := cat.(catalog.SeriesLister); ok {
 		s.seriesLister = sl
+	}
+	if up, ok := cat.(catalog.Uploader); ok {
+		s.uploader = up
 	}
 	return s
 }
@@ -281,6 +288,18 @@ func (s *Server) toolsList() toolsListResult {
 				},
 			},
 		},
+		{
+			Name:        "upload_book",
+			Description: "Téléverse un livre (EPUB ou PDF) dans le catalogue à partir de son contenu encodé en base64. Retourne les métadonnées du livre indexé.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"filename", "content"},
+				Properties: map[string]*jsonSchema{
+					"filename": {Type: "string", Description: "Nom du fichier avec extension (ex: monlivre.epub, roman.pdf)"},
+					"content":  {Type: "string", Description: "Contenu du fichier encodé en base64"},
+				},
+			},
+		},
 	}
 	return toolsListResult{Tools: tools}
 }
@@ -306,6 +325,8 @@ func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
 		return s.toolListSeries()
 	case "list_publishers":
 		return s.toolListPublishers(p.Arguments)
+	case "upload_book":
+		return s.toolUploadBook(p.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: "Unknown tool: " + p.Name}
 	}
@@ -566,6 +587,38 @@ func (s *Server) toolListPublishers(args map[string]any) (any, *rpcError) {
 		fmt.Fprintf(&sb, "- %s\n", p)
 	}
 	return textResult(sb.String()), nil
+}
+
+func (s *Server) toolUploadBook(args map[string]any) (any, *rpcError) {
+	if s.uploader == nil {
+		return errorResult("Le backend ne supporte pas le téléversement de livres"), nil
+	}
+
+	filename, ok := args["filename"].(string)
+	if !ok || filename == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'filename' requis"}
+	}
+	encoded, ok := args["content"].(string)
+	if !ok || encoded == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'content' requis (base64)"}
+	}
+
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		// Try URL-safe base64 as fallback.
+		data, err = base64.URLEncoding.DecodeString(encoded)
+		if err != nil {
+			return errorResult("Contenu base64 invalide : " + err.Error()), nil
+		}
+	}
+
+	rc := io.NopCloser(bytes.NewReader(data))
+	book, err := s.uploader.StoreBook(filename, rc)
+	if err != nil {
+		return errorResult("Erreur lors du téléversement : " + err.Error()), nil
+	}
+
+	return textResult("Livre téléversé avec succès.\n\n" + formatBookDetail(book)), nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

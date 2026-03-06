@@ -2,8 +2,10 @@ package mcp_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -362,5 +364,81 @@ func TestWrongHTTPMethod(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405, got %d", rec.Code)
+	}
+}
+
+// ─── upload_book tests ────────────────────────────────────────────────────────
+
+// uploadableCatalog embeds fakeCatalog and implements catalog.Uploader.
+type uploadableCatalog struct {
+	*fakeCatalog
+	stored []string // filenames passed to StoreBook
+}
+
+func (u *uploadableCatalog) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, error) {
+	defer src.Close()
+	u.stored = append(u.stored, filename)
+	return &catalog.Book{
+		ID:    "uploaded-1",
+		Title: "Uploaded Book",
+	}, nil
+}
+
+func TestToolUploadBook(t *testing.T) {
+	cat := &uploadableCatalog{fakeCatalog: newFakeCatalog()}
+	srv := mcp.New(cat)
+
+	content := base64.StdEncoding.EncodeToString([]byte("fake epub content"))
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      20,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "upload_book",
+			"arguments": map[string]any{
+				"filename": "test.epub",
+				"content":  content,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	content2 := result["content"].([]any)
+	text := content2[0].(map[string]any)["text"].(string)
+	if !containsStr(text, "succès") {
+		t.Errorf("expected success message, got: %s", text)
+	}
+	if !containsStr(text, "Uploaded Book") {
+		t.Errorf("expected book title in result, got: %s", text)
+	}
+	if len(cat.stored) != 1 || cat.stored[0] != "test.epub" {
+		t.Errorf("expected StoreBook called with 'test.epub', got: %v", cat.stored)
+	}
+}
+
+func TestToolUploadBookNotSupported(t *testing.T) {
+	// fakeCatalog does not implement Uploader → tool returns an error result.
+	srv := mcp.New(newFakeCatalog())
+	content := base64.StdEncoding.EncodeToString([]byte("data"))
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      21,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "upload_book",
+			"arguments": map[string]any{
+				"filename": "test.epub",
+				"content":  content,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	content2 := result["content"].([]any)
+	isError, _ := result["isError"].(bool)
+	text := content2[0].(map[string]any)["text"].(string)
+	if !isError {
+		t.Errorf("expected isError=true when uploader not supported")
+	}
+	if !containsStr(text, "supporte pas") {
+		t.Errorf("expected 'supporte pas' in error message, got: %s", text)
 	}
 }
