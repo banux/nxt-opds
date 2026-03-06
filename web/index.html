@@ -296,6 +296,17 @@
             </svg>
           </button>
 
+          <!-- Update available button -->
+          <button v-if="updateAvailable" @click="showUpdateDialog = true"
+            title="Mise à jour disponible"
+            class="relative p-2 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            <span class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          </button>
+
           <button v-if="!(multiUser && currentUser)" @click="navigateTo('/wishlist')" title="Liste de souhaits"
             class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1709,6 +1720,50 @@
     {{ toast.message }}
   </div>
 
+  <!-- ===== Update Dialog ===== -->
+  <div v-if="showUpdateDialog"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Mise à jour disponible</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            {{ appVersion }} → <span class="font-semibold text-amber-600 dark:text-amber-400">{{ latestVersion }}</span>
+          </p>
+        </div>
+      </div>
+      <div v-if="updateReleaseNotes" class="mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg text-sm text-gray-600 dark:text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono">{{ updateReleaseNotes }}</div>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+        La mise à jour remplacera le binaire en cours. Vous devrez <strong>redémarrer le serveur</strong> pour activer la nouvelle version.
+      </p>
+      <div class="flex gap-3 justify-end">
+        <button @click="showUpdateDialog = false; updateError = ''"
+          class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+          Annuler
+        </button>
+        <a :href="updateReleaseURL" target="_blank"
+          class="px-4 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors">
+          Voir les notes
+        </a>
+        <button @click="applyUpdate" :disabled="updating"
+          class="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2">
+          <svg v-if="updating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          {{ updating ? 'Mise à jour…' : 'Mettre à jour' }}
+        </button>
+      </div>
+      <p v-if="updateError" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ updateError }}</p>
+    </div>
+  </div>
+
   <!-- ===== AI Chat Panel ===== -->
   <div v-if="aiEnabled && chatOpen"
     class="fixed bottom-0 right-0 z-40 w-full sm:w-96 h-[32rem] flex flex-col bg-white dark:bg-gray-800 border-t sm:border border-gray-200 dark:border-gray-700 sm:rounded-tl-2xl shadow-2xl">
@@ -2742,6 +2797,50 @@ createApp({
       return { background: 'linear-gradient(to right, #16a34a, #10b981)' }
     }
 
+    // ---- Auto-update ----
+    const appVersion       = ref('dev')
+    const latestVersion    = ref('')
+    const updateAvailable  = ref(false)
+    const updateReleaseURL = ref('')
+    const updateReleaseNotes = ref('')
+    const showUpdateDialog = ref(false)
+    const updating         = ref(false)
+    const updateError      = ref('')
+
+    async function checkForUpdate() {
+      try {
+        const res = await apiFetch('/api/update/check')
+        if (!res.ok) return
+        const data = await res.json()
+        appVersion.value      = data.currentVersion || 'dev'
+        latestVersion.value   = data.latestVersion  || ''
+        updateAvailable.value = !!data.updateAvailable
+        updateReleaseURL.value   = data.releaseURL   || ''
+        updateReleaseNotes.value = data.releaseNotes || ''
+      } catch { /* non-critical */ }
+    }
+
+    async function applyUpdate() {
+      updating.value = true
+      updateError.value = ''
+      try {
+        const res = await apiFetch('/api/update/apply', { method: 'POST' })
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(text || 'HTTP ' + res.status)
+        }
+        const data = await res.json()
+        showUpdateDialog.value = false
+        updateAvailable.value  = false
+        toast.value = { message: `Mise à jour ${data.newVersion || ''} appliquée. Redémarrez le serveur.`, type: 'success' }
+        setTimeout(() => { toast.value = null }, 8000)
+      } catch (e) {
+        updateError.value = 'Erreur : ' + e.message
+      } finally {
+        updating.value = false
+      }
+    }
+
     // ---- AI Chat ----
     const aiEnabled    = ref(false)
     const chatOpen     = ref(false)
@@ -2794,6 +2893,7 @@ createApp({
           aiEnabled.value = !!cfg.aiEnabled
           multiUser.value = !!cfg.multiUser
           currentUser.value = cfg.currentUser || null
+          appVersion.value = cfg.version || 'dev'
           if (cfg.multiUser && cfg.currentUser) {
             loadRecommendations()
           }
@@ -2801,6 +2901,9 @@ createApp({
           loadWishlist()
         }
       } catch { /* non-critical */ }
+
+      // Check for updates in the background (non-blocking)
+      checkForUpdate()
     })
 
     return {
@@ -2826,6 +2929,8 @@ createApp({
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
       refreshing, doRefresh,
+      appVersion, latestVersion, updateAvailable, updateReleaseURL, updateReleaseNotes,
+      showUpdateDialog, updating, updateError, checkForUpdate, applyUpdate,
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
       sendChatMessage, clearChat,

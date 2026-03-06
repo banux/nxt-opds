@@ -21,6 +21,7 @@ import (
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/opds"
 	"github.com/banux/nxt-opds/internal/opds2"
+	"github.com/banux/nxt-opds/internal/updater"
 )
 
 const (
@@ -1094,15 +1095,17 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		IsAdmin bool   `json:"isAdmin"`
 	}
 	type configJSON struct {
-		OPDSToken       string    `json:"opdsToken"`
-		AIEnabled       bool      `json:"aiEnabled"`
-		MultiUser       bool      `json:"multiUser"`
-		CurrentUser     *userJSON `json:"currentUser,omitempty"`
+		OPDSToken   string    `json:"opdsToken"`
+		AIEnabled   bool      `json:"aiEnabled"`
+		MultiUser   bool      `json:"multiUser"`
+		CurrentUser *userJSON `json:"currentUser,omitempty"`
+		Version     string    `json:"version"`
 	}
 	cfg := configJSON{
 		OPDSToken: s.opdsToken,
 		AIEnabled: s.aiAgent != nil,
 		MultiUser: s.userManager != nil,
+		Version:   s.opts.Version,
 	}
 	if s.userManager != nil {
 		uid := currentUserID(r)
@@ -2336,4 +2339,55 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, redirect, errMsg string)
 		w.WriteHeader(http.StatusUnauthorized)
 	}
 	_ = tmpl.Execute(w, d)
+}
+
+// handleAPIUpdateCheck checks GitHub for the latest release and returns
+// version information as JSON.
+func (s *Server) handleAPIUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	current := s.opts.Version
+	release, err := updater.CheckLatest()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("update check failed: %v", err), http.StatusBadGateway)
+		return
+	}
+	available := release.TagName != current && current != "dev"
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"currentVersion":  current,
+		"latestVersion":   release.TagName,
+		"updateAvailable": available,
+		"releaseURL":      release.HTMLURL,
+		"releaseNotes":    release.Body,
+		"assetName":       updater.AssetName(release.TagName),
+	})
+}
+
+// handleAPIUpdateApply downloads the latest release binary and atomically
+// replaces the running executable. The server process must be restarted by
+// the operator (or init system) after this returns 200.
+func (s *Server) handleAPIUpdateApply(w http.ResponseWriter, r *http.Request) {
+	current := s.opts.Version
+	release, err := updater.CheckLatest()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("update check failed: %v", err), http.StatusBadGateway)
+		return
+	}
+	if release.TagName == current {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "up-to-date",
+			"version": current,
+		})
+		return
+	}
+	if err := updater.Apply(release); err != nil {
+		http.Error(w, fmt.Sprintf("update apply failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":     "updated",
+		"newVersion": release.TagName,
+		"message":    "Mise à jour appliquée. Redémarrez le serveur pour activer la nouvelle version.",
+	})
 }

@@ -16,6 +16,10 @@ import (
 	"github.com/banux/nxt-opds/web"
 )
 
+// version is set at build time via -ldflags "-X main.version=v1.x.y".
+// It defaults to "dev" when the binary is not built with a version tag.
+var version = "dev"
+
 func main() {
 	// Load configuration: YAML file (if found) merged with env var overrides.
 	cfgPath := config.FindConfigFile()
@@ -88,13 +92,14 @@ func main() {
 		OPDSToken:       cfg.OPDSToken,
 		StaticFS:        web.FS,
 		AnthropicAPIKey: cfg.AnthropicAPIKey,
+		Version:         version,
 	}
 	if cfg.AnthropicAPIKey != "" {
 		log.Printf("AI assistant enabled (Anthropic API key configured)")
 	}
 	srv := server.New(cat, opts)
 
-	log.Printf("nxt-opds starting on %s", cfg.ListenAddr)
+	log.Printf("nxt-opds %s starting on %s", version, cfg.ListenAddr)
 	log.Printf("Web UI available at http://localhost%s/", cfg.ListenAddr)
 	if cfg.OPDSToken != "" {
 		log.Printf("OPDS feed URL (for reader apps): http://localhost%s/opds?token=%s", cfg.ListenAddr, cfg.OPDSToken)

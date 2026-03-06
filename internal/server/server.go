@@ -30,6 +30,10 @@ type Options struct {
 	// AnthropicAPIKey is the Anthropic API key for the AI chat feature.
 	// If empty, the /api/ai/chat endpoint returns 503.
 	AnthropicAPIKey string
+
+	// Version is the current binary version (e.g. "v1.52.0" or "dev").
+	// Used by the update-check endpoint.
+	Version string
 }
 
 // Server is the HTTP server for the OPDS catalog.
@@ -230,6 +234,10 @@ func (s *Server) registerRoutes() {
 
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)
+
+	// API: auto-update check and apply
+	protected.HandleFunc("/api/update/check", s.handleAPIUpdateCheck).Methods(http.MethodGet)
+	protected.HandleFunc("/api/update/apply", s.handleAPIUpdateApply).Methods(http.MethodPost)
 
 	// MCP: Model Context Protocol endpoint for AI agent access
 	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)
