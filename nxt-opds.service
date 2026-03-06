@@ -1,0 +1,66 @@
+[Unit]
+Description=nxt-opds OPDS eBook catalog server
+Documentation=https://github.com/banux/nxt-opds
+After=network.target
+
+[Service]
+Type=simple
+User=nxt-opds
+Group=nxt-opds
+
+# --- Répertoire de travail et binaire ---
+WorkingDirectory=/opt/nxt-opds
+ExecStart=/opt/nxt-opds/nxt-opds
+
+# --- Configuration (variables d'environnement) ---
+# Adresse d'écoute (défaut : :8080)
+Environment=LISTEN_ADDR=:8080
+
+# Répertoire des livres (EPUB/PDF)
+Environment=BOOKS_DIR=/var/lib/nxt-opds/books
+
+# Mot de passe de connexion partagé (obligatoire en production)
+# Environment=AUTH_PASSWORD=changeme
+
+# Backend de catalogue : "fs" (in-memory) ou "sqlite" (persistant, recommandé)
+Environment=BACKEND=sqlite
+
+# Intervalle de re-scan automatique (ex: 5m, 30s, 1h — "0" désactive)
+Environment=REFRESH_INTERVAL=5m
+
+# Répertoire des sauvegardes nightly (sqlite uniquement)
+Environment=BACKUP_DIR=/var/lib/nxt-opds/backups
+
+# Nombre de sauvegardes conservées (défaut : 7)
+# Environment=BACKUP_KEEP=7
+
+# Token OPDS (laisser vide pour dérivation automatique depuis AUTH_PASSWORD)
+# Environment=OPDS_TOKEN=
+
+# Clé API Anthropic pour l'assistant IA (optionnel)
+# Environment=ANTHROPIC_API_KEY=
+
+# Chemin vers le fichier de configuration YAML (optionnel)
+# Environment=NXT_OPDS_CONFIG=/etc/nxt-opds/config.yaml
+
+# --- Redémarrage automatique ---
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+
+# --- Durcissement de sécurité (systemd >= 232) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nxt-opds
+
+# Empêche la modification du système de fichiers hors du répertoire des données
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
