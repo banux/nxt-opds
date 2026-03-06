@@ -208,6 +208,30 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	if s.wishlistManager != nil {
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:wishlist",
+			Title:   opds.Text{Value: "Liste de souhaits"},
+			Updated: opds.AtomDate{Time: now},
+			Content: &opds.Content{Type: "text", Value: "Livres recherchés"},
+			Links: []opds.Link{
+				{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/wishlist", tok), Type: opds.MIMENavigationFeed},
+			},
+		})
+	}
+
+	if s.recommender != nil && s.userManager != nil {
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:recommendations",
+			Title:   opds.Text{Value: "Recommandations"},
+			Updated: opds.AtomDate{Time: now},
+			Content: &opds.Content{Type: "text", Value: "Livres recommandés"},
+			Links: []opds.Link{
+				{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/recommendations", tok), Type: opds.MIMEAcquisitionFeed},
+			},
+		})
+	}
+
 	writeOPDS(w, http.StatusOK, feed)
 }
 
@@ -1554,6 +1578,199 @@ func (s *Server) handleAPIDeleteWishlistItem(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ─── OPDS Wishlist / Recommendations ─────────────────────────────────────────
+
+// handleOPDSWishlist serves an OPDS 1.x navigation feed of wishlist items.
+// GET /opds/wishlist
+// Wishlist items are not real catalog books, so they are exposed as navigation
+// entries with the title, author and notes in the content field.
+func (s *Server) handleOPDSWishlist(w http.ResponseWriter, r *http.Request) {
+	if s.wishlistManager == nil {
+		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
+		return
+	}
+	tok := r.URL.Query().Get("token")
+	items, err := s.wishlistManager.WishlistItems("") // all users
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := opds.NewNavigationFeed(
+		"urn:nxt-opds:wishlist",
+		fmt.Sprintf("Liste de souhaits (%d)", len(items)),
+	)
+	feed.Author = &opds.Author{Name: "nxt-opds"}
+	feed.AddLink(opds.RelSelf, withToken("/opds/wishlist", tok), opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
+
+	for _, it := range items {
+		content := it.Author
+		if it.ReleaseDate != "" {
+			if content != "" {
+				content += " – "
+			}
+			content += it.ReleaseDate
+		}
+		if it.Notes != "" {
+			if content != "" {
+				content += " – "
+			}
+			content += it.Notes
+		}
+		if it.UserName != "" {
+			content += " (souhaité par " + it.UserName + ")"
+		}
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:wishlist:" + it.ID,
+			Title:   opds.Text{Value: it.Title},
+			Updated: opds.AtomDate{Time: it.CreatedAt},
+			Content: &opds.Content{Type: "text", Value: content},
+			Links:   []opds.Link{{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/wishlist", tok), Type: opds.MIMENavigationFeed}},
+		})
+	}
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// handleOPDSRecommendations serves an OPDS 1.x acquisition feed of all
+// recommended books (deduplicated). Since OPDS clients have no user context,
+// all recommendations are returned regardless of sender/recipient.
+// GET /opds/recommendations
+func (s *Server) handleOPDSRecommendations(w http.ResponseWriter, r *http.Request) {
+	if s.recommender == nil {
+		http.Error(w, "recommendations not supported", http.StatusNotImplemented)
+		return
+	}
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	tok := r.URL.Query().Get("token")
+
+	// Gather all recommendations for all users (deduplicated by book ID).
+	users, err := s.userManager.Users()
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	seen := map[string]bool{}
+	var books []catalog.Book
+	for _, u := range users {
+		recs, err := s.recommender.RecommendationsForUser(u.ID)
+		if err != nil {
+			continue
+		}
+		for _, rec := range recs {
+			if seen[rec.Book.ID] {
+				continue
+			}
+			seen[rec.Book.ID] = true
+			books = append(books, rec.Book)
+		}
+	}
+
+	feed := opds.NewAcquisitionFeed(
+		"urn:nxt-opds:recommendations",
+		fmt.Sprintf("Recommandations (%d)", len(books)),
+	)
+	feed.Author = &opds.Author{Name: "nxt-opds"}
+	feed.AddLink(opds.RelSelf, withToken("/opds/recommendations", tok), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
+	for _, bk := range books {
+		feed.AddEntry(bookToEntry(bk, tok))
+	}
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// handleOPDS2Wishlist serves an OPDS 2.0 navigation feed of wishlist items.
+// GET /opds/v2/wishlist
+func (s *Server) handleOPDS2Wishlist(w http.ResponseWriter, r *http.Request) {
+	if s.wishlistManager == nil {
+		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
+		return
+	}
+	tok := r.URL.Query().Get("token")
+	items, err := s.wishlistManager.WishlistItems("") // all users
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{
+			Title:         fmt.Sprintf("Liste de souhaits (%d)", len(items)),
+			NumberOfItems: len(items),
+		},
+		Links: []opds2.Link{
+			{Rel: "self", Href: withToken("/opds/v2/wishlist", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+		},
+	}
+
+	for _, it := range items {
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: it.Title,
+			Href:  withToken("/opds/v2/wishlist", tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "current",
+		})
+	}
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
+// handleOPDS2Recommendations serves an OPDS 2.0 acquisition feed of all
+// recommended books (deduplicated across all users).
+// GET /opds/v2/recommendations
+func (s *Server) handleOPDS2Recommendations(w http.ResponseWriter, r *http.Request) {
+	if s.recommender == nil {
+		http.Error(w, "recommendations not supported", http.StatusNotImplemented)
+		return
+	}
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	tok := r.URL.Query().Get("token")
+
+	users, err := s.userManager.Users()
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+
+	seen := map[string]bool{}
+	var books []catalog.Book
+	for _, u := range users {
+		recs, err := s.recommender.RecommendationsForUser(u.ID)
+		if err != nil {
+			continue
+		}
+		for _, rec := range recs {
+			if seen[rec.Book.ID] {
+				continue
+			}
+			seen[rec.Book.ID] = true
+			books = append(books, rec.Book)
+		}
+	}
+
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{
+			Title:         fmt.Sprintf("Recommandations (%d)", len(books)),
+			NumberOfItems: len(books),
+		},
+		Links: []opds2.Link{
+			{Rel: "self", Href: withToken("/opds/v2/recommendations", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+		},
+	}
+	for _, bk := range books {
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+	}
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
 // handleAPIRefresh triggers an on-demand catalog refresh.
 // Returns 501 if the backend does not support refresh.
 // Returns 200 {"ok":true} on success, 500 on backend error.
@@ -1828,6 +2045,22 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 			{Title: "Par éditeur", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed, Rel: "current"},
 			{Title: "Non lus", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed, Rel: "current"},
 		},
+	}
+	if s.wishlistManager != nil {
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: "Liste de souhaits",
+			Href:  withToken("/opds/v2/wishlist", tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "current",
+		})
+	}
+	if s.recommender != nil && s.userManager != nil {
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: "Recommandations",
+			Href:  withToken("/opds/v2/recommendations", tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "current",
+		})
 	}
 	writeOPDS2(w, http.StatusOK, feed)
 }

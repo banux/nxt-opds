@@ -28,10 +28,13 @@ const protocolVersion = "2024-11-05"
 
 // Server handles MCP requests over HTTP.
 type Server struct {
-	cat          catalog.Catalog
-	updater      catalog.Updater
-	seriesLister catalog.SeriesLister
-	uploader     catalog.Uploader
+	cat             catalog.Catalog
+	updater         catalog.Updater
+	seriesLister    catalog.SeriesLister
+	uploader        catalog.Uploader
+	wishlistManager catalog.WishlistManager
+	recommender     catalog.Recommender
+	userManager     catalog.UserManager
 }
 
 // New creates a new MCP Server backed by the given catalog.
@@ -45,6 +48,15 @@ func New(cat catalog.Catalog) *Server {
 	}
 	if up, ok := cat.(catalog.Uploader); ok {
 		s.uploader = up
+	}
+	if wm, ok := cat.(catalog.WishlistManager); ok {
+		s.wishlistManager = wm
+	}
+	if rc, ok := cat.(catalog.Recommender); ok {
+		s.recommender = rc
+	}
+	if um, ok := cat.(catalog.UserManager); ok {
+		s.userManager = um
 	}
 	return s
 }
@@ -300,6 +312,52 @@ func (s *Server) toolsList() toolsListResult {
 				},
 			},
 		},
+		{
+			Name:        "list_wishlist",
+			Description: "Retourne la liste des livres souhaités (wishlist). Si user_id est fourni, filtre par utilisateur.",
+			InputSchema: &jsonSchema{
+				Type: "object",
+				Properties: map[string]*jsonSchema{
+					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur (optionnel, vide = tous les utilisateurs)"},
+				},
+			},
+		},
+		{
+			Name:        "add_wishlist_item",
+			Description: "Ajoute un livre à la liste de souhaits.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"title"},
+				Properties: map[string]*jsonSchema{
+					"title":        {Type: "string", Description: "Titre du livre recherché"},
+					"author":       {Type: "string", Description: "Auteur du livre (optionnel)"},
+					"release_date": {Type: "string", Description: "Date de parution (optionnel, ex: 2024 ou 2024-03-15)"},
+					"notes":        {Type: "string", Description: "Notes supplémentaires (optionnel)"},
+					"user_id":      {Type: "string", Description: "Identifiant de l'utilisateur (optionnel)"},
+				},
+			},
+		},
+		{
+			Name:        "delete_wishlist_item",
+			Description: "Supprime un élément de la liste de souhaits par son identifiant.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"id"},
+				Properties: map[string]*jsonSchema{
+					"id": {Type: "string", Description: "Identifiant de l'élément à supprimer"},
+				},
+			},
+		},
+		{
+			Name:        "list_recommendations",
+			Description: "Retourne la liste des recommandations de livres entre utilisateurs. Si to_user_id est fourni, filtre les recommandations destinées à cet utilisateur.",
+			InputSchema: &jsonSchema{
+				Type: "object",
+				Properties: map[string]*jsonSchema{
+					"to_user_id": {Type: "string", Description: "Identifiant du destinataire (optionnel, vide = toutes les recommandations)"},
+				},
+			},
+		},
 	}
 	return toolsListResult{Tools: tools}
 }
@@ -327,6 +385,14 @@ func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
 		return s.toolListPublishers(p.Arguments)
 	case "upload_book":
 		return s.toolUploadBook(p.Arguments)
+	case "list_wishlist":
+		return s.toolListWishlist(p.Arguments)
+	case "add_wishlist_item":
+		return s.toolAddWishlistItem(p.Arguments)
+	case "delete_wishlist_item":
+		return s.toolDeleteWishlistItem(p.Arguments)
+	case "list_recommendations":
+		return s.toolListRecommendations(p.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: "Unknown tool: " + p.Name}
 	}
@@ -619,6 +685,126 @@ func (s *Server) toolUploadBook(args map[string]any) (any, *rpcError) {
 	}
 
 	return textResult("Livre téléversé avec succès.\n\n" + formatBookDetail(book)), nil
+}
+
+func (s *Server) toolListWishlist(args map[string]any) (any, *rpcError) {
+	if s.wishlistManager == nil {
+		return errorResult("Le backend ne supporte pas la liste de souhaits"), nil
+	}
+	userID, _ := args["user_id"].(string)
+	items, err := s.wishlistManager.WishlistItems(userID)
+	if err != nil {
+		return errorResult("Erreur : " + err.Error()), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d élément(s) dans la liste de souhaits :\n\n", len(items))
+	for i, it := range items {
+		fmt.Fprintf(&sb, "%d. **%s**\n", i+1, it.Title)
+		fmt.Fprintf(&sb, "   ID: %s\n", it.ID)
+		if it.Author != "" {
+			fmt.Fprintf(&sb, "   Auteur: %s\n", it.Author)
+		}
+		if it.ReleaseDate != "" {
+			fmt.Fprintf(&sb, "   Date de parution: %s\n", it.ReleaseDate)
+		}
+		if it.Notes != "" {
+			fmt.Fprintf(&sb, "   Notes: %s\n", it.Notes)
+		}
+		if it.UserName != "" {
+			fmt.Fprintf(&sb, "   Souhaité par: %s\n", it.UserName)
+		}
+		fmt.Fprintf(&sb, "   Ajouté le: %s\n\n", it.CreatedAt.Format("2006-01-02"))
+	}
+	return textResult(sb.String()), nil
+}
+
+func (s *Server) toolAddWishlistItem(args map[string]any) (any, *rpcError) {
+	if s.wishlistManager == nil {
+		return errorResult("Le backend ne supporte pas la liste de souhaits"), nil
+	}
+	title, ok := args["title"].(string)
+	if !ok || title == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'title' requis"}
+	}
+	author, _ := args["author"].(string)
+	releaseDate, _ := args["release_date"].(string)
+	notes, _ := args["notes"].(string)
+	userID, _ := args["user_id"].(string)
+
+	it, err := s.wishlistManager.AddWishlistItem(userID, title, author, releaseDate, notes)
+	if err != nil {
+		return errorResult("Erreur lors de l'ajout : " + err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Élément ajouté à la liste de souhaits.\nID: %s\nTitre: %s", it.ID, it.Title)), nil
+}
+
+func (s *Server) toolDeleteWishlistItem(args map[string]any) (any, *rpcError) {
+	if s.wishlistManager == nil {
+		return errorResult("Le backend ne supporte pas la liste de souhaits"), nil
+	}
+	id, ok := args["id"].(string)
+	if !ok || id == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'id' requis"}
+	}
+	if err := s.wishlistManager.DeleteWishlistItem(id); err != nil {
+		return errorResult("Erreur lors de la suppression : " + err.Error()), nil
+	}
+	return textResult("Élément supprimé de la liste de souhaits."), nil
+}
+
+func (s *Server) toolListRecommendations(args map[string]any) (any, *rpcError) {
+	if s.recommender == nil {
+		return errorResult("Le backend ne supporte pas les recommandations"), nil
+	}
+
+	toUserID, _ := args["to_user_id"].(string)
+
+	var recs []catalog.Recommendation
+	var err error
+	if toUserID != "" {
+		recs, err = s.recommender.RecommendationsForUser(toUserID)
+	} else {
+		// Return all recommendations for all users (requires UserManager).
+		if s.userManager == nil {
+			return errorResult("Le backend ne supporte pas la gestion des utilisateurs"), nil
+		}
+		users, uerr := s.userManager.Users()
+		if uerr != nil {
+			return errorResult("Erreur lors de la récupération des utilisateurs : " + uerr.Error()), nil
+		}
+		seen := map[string]bool{}
+		for _, u := range users {
+			urecs, rerr := s.recommender.RecommendationsForUser(u.ID)
+			if rerr != nil {
+				continue
+			}
+			for _, rec := range urecs {
+				key := rec.Book.ID + ":" + rec.ToUser.ID
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				recs = append(recs, rec)
+			}
+		}
+	}
+	if err != nil {
+		return errorResult("Erreur : " + err.Error()), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d recommandation(s) :\n\n", len(recs))
+	for i, rec := range recs {
+		fmt.Fprintf(&sb, "%d. **%s**\n", i+1, rec.Book.Title)
+		fmt.Fprintf(&sb, "   ID du livre: %s\n", rec.Book.ID)
+		fmt.Fprintf(&sb, "   De: %s → À: %s\n", rec.FromUser.Name, rec.ToUser.Name)
+		if rec.Message != "" {
+			fmt.Fprintf(&sb, "   Message: %s\n", rec.Message)
+		}
+		fmt.Fprintf(&sb, "   Date: %s\n\n", rec.CreatedAt.Format("2006-01-02"))
+	}
+	return textResult(sb.String()), nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
