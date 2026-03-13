@@ -1813,6 +1813,7 @@
             <option :value="6">6+ (Enfants)</option>
             <option :value="10">10+ (Jeunesse)</option>
             <option :value="12">12+ (Adolescent)</option>
+            <option :value="16">16+ (Jeune adulte)</option>
             <option :value="18">18+ (Adulte)</option>
           </select>
         </div>
@@ -2735,12 +2736,14 @@ createApp({
         case 6:  return '6+'
         case 10: return '10+'
         case 12: return '12+'
+        case 16: return '16+'
         case 18: return '18+'
         default: return 'Non classifié'
       }
     }
     const ageRatingBadgeClass = (v) => {
       if (v >= 18) return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+      if (v >= 16) return 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'
       if (v >= 12) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
       if (v >= 10) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
       if (v >= 3)  return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
