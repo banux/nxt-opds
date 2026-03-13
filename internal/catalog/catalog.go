@@ -71,6 +71,11 @@ type Book struct {
 
 	// AddedAt is when this book was first added to the catalog.
 	AddedAt time.Time
+
+	// AgeRating is the minimum recommended age for this book.
+	// 0 = non classifié, 3 = petite enfance, 6 = enfants, 10 = jeunesse,
+	// 12 = adolescent, 18 = adulte.
+	AgeRating int
 }
 
 // Author represents a publication author.
@@ -110,6 +115,10 @@ type SearchQuery struct {
 
 	// Language filters by BCP 47 language tag.
 	Language string
+
+	// MaxAgeRating restricts results to books with AgeRating <= MaxAgeRating.
+	// 0 means no age filter is applied.
+	MaxAgeRating int
 
 	// UnreadOnly restricts results to books not yet marked as read.
 	// When UserID is non-empty, "unread" is per-user; otherwise it uses the
@@ -151,6 +160,11 @@ type User struct {
 
 	// IsAdmin indicates whether this user has administrative privileges.
 	IsAdmin bool
+
+	// IsChild indicates this is a child profile (age-restricted view).
+	// When true, the server will automatically apply a MaxAgeRating filter
+	// to hide adult/teen content from this user.
+	IsChild bool
 }
 
 // UserManager is an optional interface for catalog backends that support
@@ -165,14 +179,15 @@ type UserManager interface {
 
 	// CreateUser creates a new user with the given name and hex colour.
 	// If isAdmin is true the user has administrative privileges.
+	// If isChild is true the user is a child profile (age-restricted).
 	// Returns the newly created User.
-	CreateUser(name, color string, isAdmin bool) (*User, error)
+	CreateUser(name, color string, isAdmin, isChild bool) (*User, error)
 
 	// DeleteUser removes the user with the given ID.
 	DeleteUser(id string) error
 
-	// UpdateUser updates the name and/or color of an existing user.
-	UpdateUser(id, name, color string, isAdmin bool) (*User, error)
+	// UpdateUser updates the name, color, admin and child status of an existing user.
+	UpdateUser(id, name, color string, isAdmin, isChild bool) (*User, error)
 }
 
 // UserReadManager is an optional interface for catalog backends that support
@@ -268,7 +283,8 @@ type BookUpdate struct {
 	Collection      *string
 	CollectionIndex *string
 	IsRead          *bool
-	Rating      *int
+	Rating          *int
+	AgeRating       *int
 }
 
 // Updater is an optional interface for catalog backends that support book metadata editing.

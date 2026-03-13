@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -88,6 +88,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 4, apply: migration4},
 	{version: 5, apply: migration5},
 	{version: 6, apply: migration6},
+	{version: 7, apply: migration7},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -324,12 +325,12 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 	_, err = tx.Exec(`
 INSERT OR IGNORE INTO books
     (id, title, summary, language, publisher, published_at, updated_at, added_at,
-     series, series_index, series_total, collection, collection_index, is_read, rating, cover_url, thumbnail_url,
+     series, series_index, series_total, collection, collection_index, is_read, rating, age_rating, cover_url, thumbnail_url,
      file_path, file_mime, file_size)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
 		pubAt, updAt, addedAt,
-		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating,
+		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating,
 		bk.CoverURL, bk.ThumbnailURL,
 		filePath, fileMIME, fileSize,
 	)
@@ -523,6 +524,10 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	if q.Collection != "" {
 		extraClauses = append(extraClauses, "LOWER(b.collection) = LOWER(?)")
 		extraArgs = append(extraArgs, q.Collection)
+	}
+	if q.MaxAgeRating > 0 {
+		extraClauses = append(extraClauses, "(b.age_rating = 0 OR b.age_rating <= ?)")
+		extraArgs = append(extraArgs, q.MaxAgeRating)
 	}
 
 	extraWhere := ""
@@ -781,6 +786,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	if update.Rating != nil {
 		bk.Rating = *update.Rating
 	}
+	if update.AgeRating != nil {
+		bk.AgeRating = *update.AgeRating
+	}
 	bk.UpdatedAt = time.Now()
 
 	// Persist to DB.
@@ -793,10 +801,10 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	_, err = tx.Exec(`
 UPDATE books SET
     title=?, summary=?, language=?, publisher=?,
-    updated_at=?, series=?, series_index=?, series_total=?, collection=?, collection_index=?, is_read=?, rating=?
+    updated_at=?, series=?, series_index=?, series_total=?, collection=?, collection_index=?, is_read=?, rating=?, age_rating=?
 WHERE id=?`,
 		bk.Title, bk.Summary, bk.Language, bk.Publisher,
-		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating,
+		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating,
 		id,
 	)
 	if err != nil {
@@ -966,6 +974,7 @@ type bookRow struct {
 	CollectionIndex string
 	IsRead          int
 	Rating          int
+	AgeRating       int
 	CoverURL     string
 	ThumbnailURL string
 	FilePath     string
@@ -988,7 +997,8 @@ func (r bookRow) toBook() catalog.Book {
 		Collection:      r.Collection,
 		CollectionIndex: r.CollectionIndex,
 		IsRead:          r.IsRead != 0,
-		Rating:       r.Rating,
+		Rating:          r.Rating,
+		AgeRating:       r.AgeRating,
 		CoverURL:     r.CoverURL,
 		ThumbnailURL: r.ThumbnailURL,
 		UpdatedAt:    time.Unix(r.UpdatedAt, 0),
@@ -1023,7 +1033,7 @@ func (r bookRow) toBook() catalog.Book {
 // bookSelectColumns is the SELECT list for querying full book records.
 const bookSelectColumns = `
     b.id, b.title, b.summary, b.language, b.publisher,
-    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.collection, b.collection_index, b.is_read, b.rating,
+    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.collection, b.collection_index, b.is_read, b.rating, b.age_rating,
     b.cover_url, b.thumbnail_url, b.file_path, b.file_mime, b.file_size,
     (SELECT json_group_array(json_object('name',ba.author_name,'uri',ba.author_uri))
        FROM book_authors ba WHERE ba.book_id = b.id) AS authors_json,
@@ -1045,7 +1055,7 @@ func (b *Backend) queryBooks(clause string, args ...any) ([]catalog.Book, error)
 		var r bookRow
 		if err := rows.Scan(
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
-			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {
@@ -1074,7 +1084,7 @@ func (b *Backend) countBooks(query string, args ...any) (int, error) {
 
 // Users returns all registered users sorted by name.
 func (b *Backend) Users() ([]catalog.User, error) {
-	rows, err := b.db.Query(`SELECT id, name, color, is_admin FROM users ORDER BY name`)
+	rows, err := b.db.Query(`SELECT id, name, color, is_admin, COALESCE(is_child,0) FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1082,11 +1092,12 @@ func (b *Backend) Users() ([]catalog.User, error) {
 	var users []catalog.User
 	for rows.Next() {
 		var u catalog.User
-		var isAdmin int
-		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin); err != nil {
+		var isAdmin, isChild int
+		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild); err != nil {
 			return nil, err
 		}
 		u.IsAdmin = isAdmin == 1
+		u.IsChild = isChild == 1
 		users = append(users, u)
 	}
 	return users, rows.Err()
@@ -1095,9 +1106,9 @@ func (b *Backend) Users() ([]catalog.User, error) {
 // UserByID returns the user with the given ID.
 func (b *Backend) UserByID(id string) (*catalog.User, error) {
 	var u catalog.User
-	var isAdmin int
-	err := b.db.QueryRow(`SELECT id, name, color, is_admin FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Name, &u.Color, &isAdmin)
+	var isAdmin, isChild int
+	err := b.db.QueryRow(`SELECT id, name, color, is_admin, COALESCE(is_child,0) FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %s", id)
 	}
@@ -1105,11 +1116,12 @@ func (b *Backend) UserByID(id string) (*catalog.User, error) {
 		return nil, err
 	}
 	u.IsAdmin = isAdmin == 1
+	u.IsChild = isChild == 1
 	return &u, nil
 }
 
 // CreateUser creates a new user and returns it.
-func (b *Backend) CreateUser(name, color string, isAdmin bool) (*catalog.User, error) {
+func (b *Backend) CreateUser(name, color string, isAdmin, isChild bool) (*catalog.User, error) {
 	id, err := newID()
 	if err != nil {
 		return nil, fmt.Errorf("generate user id: %w", err)
@@ -1118,14 +1130,18 @@ func (b *Backend) CreateUser(name, color string, isAdmin bool) (*catalog.User, e
 	if isAdmin {
 		admin = 1
 	}
+	child := 0
+	if isChild {
+		child = 1
+	}
 	_, err = b.db.Exec(
-		`INSERT INTO users (id, name, color, is_admin) VALUES (?, ?, ?, ?)`,
-		id, name, color, admin,
+		`INSERT INTO users (id, name, color, is_admin, is_child) VALUES (?, ?, ?, ?, ?)`,
+		id, name, color, admin, child,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
-	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin}, nil
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild}, nil
 }
 
 // DeleteUser removes the user with the given ID.
@@ -1134,20 +1150,24 @@ func (b *Backend) DeleteUser(id string) error {
 	return err
 }
 
-// UpdateUser updates the name, color, and admin status of an existing user.
-func (b *Backend) UpdateUser(id, name, color string, isAdmin bool) (*catalog.User, error) {
+// UpdateUser updates the name, color, admin and child status of an existing user.
+func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool) (*catalog.User, error) {
 	admin := 0
 	if isAdmin {
 		admin = 1
 	}
+	child := 0
+	if isChild {
+		child = 1
+	}
 	_, err := b.db.Exec(
-		`UPDATE users SET name = ?, color = ?, is_admin = ? WHERE id = ?`,
-		name, color, admin, id,
+		`UPDATE users SET name = ?, color = ?, is_admin = ?, is_child = ? WHERE id = ?`,
+		name, color, admin, child, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
-	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin}, nil
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild}, nil
 }
 
 // ─── UserReadManager ─────────────────────────────────────────────────────────
@@ -1295,7 +1315,7 @@ func scanRecommendationRows(rows *sql.Rows, fromFirst bool) ([]catalog.Recommend
 			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt,
 			&r.Series, &r.SeriesIndex, &r.SeriesTotal,
 			&r.Collection, &r.CollectionIndex,
-			&r.IsRead, &r.Rating,
+			&r.IsRead, &r.Rating, &r.AgeRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {
@@ -1532,6 +1552,13 @@ func newID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// migration7 adds age_rating to books and is_child to users (version 6 → 7).
+func migration7(db *sql.DB) error {
+	_, _ = db.Exec(`ALTER TABLE books ADD COLUMN age_rating INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN is_child INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }
 
 func boolToInt(b bool) int {

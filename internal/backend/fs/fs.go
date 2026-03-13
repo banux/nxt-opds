@@ -36,7 +36,8 @@ type metaOverride struct {
 	Collection      *string `json:"collection"`
 	CollectionIndex *string `json:"collectionIndex"`
 	IsRead          *bool   `json:"isRead"`
-	Rating      *int     `json:"rating"`
+	Rating          *int    `json:"rating"`
+	AgeRating       *int    `json:"ageRating"`
 }
 
 // Backend is a filesystem-based catalog backend.
@@ -156,6 +157,9 @@ func mergeOverride(bk catalog.Book, ov metaOverride) catalog.Book {
 	if ov.Rating != nil {
 		bk.Rating = *ov.Rating
 	}
+	if ov.AgeRating != nil {
+		bk.AgeRating = *ov.AgeRating
+	}
 	return bk
 }
 
@@ -211,6 +215,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	if update.Rating != nil {
 		ov.Rating = update.Rating
+	}
+	if update.AgeRating != nil {
+		ov.AgeRating = update.AgeRating
 	}
 
 	b.overrides[id] = ov
@@ -512,6 +519,9 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 			continue
 		}
 		if q.Collection != "" && !strings.EqualFold(bk.Collection, q.Collection) {
+			continue
+		}
+		if q.MaxAgeRating > 0 && bk.AgeRating > q.MaxAgeRating {
 			continue
 		}
 		if q.Query == "" {

@@ -605,7 +605,8 @@ type bookJSON struct {
 	CollectionIndex string   `json:"collectionIndex,omitempty"`
 	IsRead          bool     `json:"isRead"`       // current user's read status
 	ReadColors      []string `json:"readColors"`   // hex colors of all users who have read it
-	Rating      int      `json:"rating"`
+	Rating          int      `json:"rating"`
+	AgeRating       int      `json:"ageRating"`
 	DownloadURL string   `json:"downloadUrl"`
 }
 
@@ -614,6 +615,23 @@ type bookJSON struct {
 func currentUserID(r *http.Request) string {
 	uid, _ := r.Context().Value(ctxUserID).(string)
 	return uid
+}
+
+// childMaxAgeRating is the maximum age_rating shown to child profiles.
+// Books with age_rating > childMaxAgeRating (but != 0) are hidden for child users.
+const childMaxAgeRating = 10
+
+// maxAgeRatingForUser returns the MaxAgeRating to apply for the current user.
+// Returns 0 (no filter) for non-child users or when multi-user is not available.
+func (s *Server) maxAgeRatingForUser(userID string) int {
+	if s.userManager == nil || userID == "" {
+		return 0
+	}
+	u, err := s.userManager.UserByID(userID)
+	if err != nil || !u.IsChild {
+		return 0
+	}
+	return childMaxAgeRating
 }
 
 // parseSortParam maps the ?sort= query parameter to SortBy and SortOrder values.
@@ -651,21 +669,24 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
 
+	maxAge := s.maxAgeRatingForUser(userID)
+
 	// ids_only mode: return just book IDs for all matching books (no page limit).
 	if idsOnly {
 		books, _, err := s.catalog.Search(catalog.SearchQuery{
-			Query:      q,
-			Series:     seriesFilter,
-			Author:     authorFilter,
-			Tag:        tagFilter,
-			Publisher:  publisherFilter,
-			Collection: collectionFilter,
-			Offset:     0,
-			Limit:      99999,
-			UnreadOnly: unreadOnly,
-			UserID:     userID,
-			SortBy:     sortBy,
-			SortOrder:  sortOrder,
+			Query:        q,
+			Series:       seriesFilter,
+			Author:       authorFilter,
+			Tag:          tagFilter,
+			Publisher:    publisherFilter,
+			Collection:   collectionFilter,
+			Offset:       0,
+			Limit:        99999,
+			UnreadOnly:   unreadOnly,
+			UserID:       userID,
+			SortBy:       sortBy,
+			SortOrder:    sortOrder,
+			MaxAgeRating: maxAge,
 		})
 		if err != nil {
 			http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -683,18 +704,19 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	offset, limit := parsePagination(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
-		Query:      q,
-		Series:     seriesFilter,
-		Author:     authorFilter,
-		Tag:        tagFilter,
-		Publisher:  publisherFilter,
-		Collection: collectionFilter,
-		Offset:     offset,
-		Limit:      limit,
-		UnreadOnly: unreadOnly,
-		UserID:     userID,
-		SortBy:     sortBy,
-		SortOrder:  sortOrder,
+		Query:        q,
+		Series:       seriesFilter,
+		Author:       authorFilter,
+		Tag:          tagFilter,
+		Publisher:    publisherFilter,
+		Collection:   collectionFilter,
+		Offset:       offset,
+		Limit:        limit,
+		UnreadOnly:   unreadOnly,
+		UserID:       userID,
+		SortBy:       sortBy,
+		SortOrder:    sortOrder,
+		MaxAgeRating: maxAge,
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -739,6 +761,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			IsRead:          isRead,
 			ReadColors:      colors,
 			Rating:          bk.Rating,
+			AgeRating:       bk.AgeRating,
 			DownloadURL:     "/opds/books/" + bk.ID + "/download",
 		}
 		for _, a := range bk.Authors {
@@ -770,6 +793,7 @@ type bookUpdateRequest struct {
 	CollectionIndex *string `json:"collectionIndex"`
 	IsRead          *bool   `json:"isRead"`
 	Rating          *int    `json:"rating"`
+	AgeRating       *int    `json:"ageRating"`
 }
 
 // handleAPIBook handles GET /api/books/{id} to fetch a single book as JSON.
@@ -811,6 +835,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		IsRead:          isRead,
 		ReadColors:      colors,
 		Rating:          bk.Rating,
+		AgeRating:       bk.AgeRating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 	}
 	for _, a := range bk.Authors {
@@ -863,6 +888,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		CollectionIndex: req.CollectionIndex,
 		IsRead:          updateIsRead,
 		Rating:          req.Rating,
+		AgeRating:       req.AgeRating,
 	}
 
 	bk, err := s.updater.UpdateBook(id, update)
@@ -899,6 +925,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		IsRead:          isRead,
 		ReadColors:      colors,
 		Rating:          bk.Rating,
+		AgeRating:       bk.AgeRating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 	}
 	for _, a := range bk.Authors {
@@ -1117,6 +1144,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
+		IsChild bool   `json:"isChild"`
 	}
 	type configJSON struct {
 		OPDSToken   string    `json:"opdsToken"`
@@ -1135,7 +1163,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		uid := currentUserID(r)
 		if uid != "" {
 			if u, err := s.userManager.UserByID(uid); err == nil {
-				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin}
+				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild}
 			}
 		}
 	}
@@ -1166,6 +1194,7 @@ func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
 		"name":    u.Name,
 		"color":   u.Color,
 		"isAdmin": u.IsAdmin,
+		"isChild": u.IsChild,
 	})
 }
 
@@ -1185,10 +1214,11 @@ func (s *Server) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
+		IsChild bool   `json:"isChild"`
 	}
 	result := make([]userJSON, 0, len(users))
 	for _, u := range users {
-		result = append(result, userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin})
+		result = append(result, userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
@@ -1204,6 +1234,7 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
+		IsChild bool   `json:"isChild"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -1216,7 +1247,7 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Color == "" {
 		req.Color = "#3B82F6"
 	}
-	u, err := s.userManager.CreateUser(req.Name, req.Color, req.IsAdmin)
+	u, err := s.userManager.CreateUser(req.Name, req.Color, req.IsAdmin, req.IsChild)
 	if err != nil {
 		http.Error(w, "create user failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -1228,10 +1259,11 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 		"name":    u.Name,
 		"color":   u.Color,
 		"isAdmin": u.IsAdmin,
+		"isChild": u.IsChild,
 	})
 }
 
-// handleAPIUpdateUser updates an existing user's name, color, and admin status.
+// handleAPIUpdateUser updates an existing user's name, color, admin and child status.
 func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if s.userManager == nil {
 		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
@@ -1242,12 +1274,13 @@ func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
+		IsChild bool   `json:"isChild"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	u, err := s.userManager.UpdateUser(id, req.Name, req.Color, req.IsAdmin)
+	u, err := s.userManager.UpdateUser(id, req.Name, req.Color, req.IsAdmin, req.IsChild)
 	if err != nil {
 		http.Error(w, "update user failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -1258,6 +1291,7 @@ func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 		"name":    u.Name,
 		"color":   u.Color,
 		"isAdmin": u.IsAdmin,
+		"isChild": u.IsChild,
 	})
 }
 
