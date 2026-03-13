@@ -244,6 +244,7 @@ func (s *Server) registerRoutes() {
 	// API: auto-update check and apply
 	protected.HandleFunc("/api/update/check", s.handleAPIUpdateCheck).Methods(http.MethodGet)
 	protected.HandleFunc("/api/update/apply", s.handleAPIUpdateApply).Methods(http.MethodPost)
+	protected.HandleFunc("/api/restart", s.handleAPIRestart).Methods(http.MethodPost)
 
 	// MCP: Model Context Protocol endpoint for AI agent access
 	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)

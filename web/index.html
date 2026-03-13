@@ -1782,28 +1782,63 @@
           </p>
         </div>
       </div>
-      <div v-if="updateReleaseNotes" class="mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg text-sm text-gray-600 dark:text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono">{{ updateReleaseNotes }}</div>
-      <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-        La mise à jour remplacera le binaire en cours. Vous devrez <strong>redémarrer le serveur</strong> pour activer la nouvelle version.
-      </p>
-      <div class="flex gap-3 justify-end">
-        <button @click="showUpdateDialog = false; updateError = ''"
-          class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
-          Annuler
-        </button>
-        <a :href="updateReleaseURL" target="_blank"
-          class="px-4 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors">
-          Voir les notes
-        </a>
-        <button @click="applyUpdate" :disabled="updating"
-          class="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2">
-          <svg v-if="updating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+      <!-- Before update applied -->
+      <template v-if="!updateApplied">
+        <div v-if="updateReleaseNotes" class="mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg text-sm text-gray-600 dark:text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono">{{ updateReleaseNotes }}</div>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          La mise à jour remplacera le binaire en cours. Vous devrez <strong>redémarrer le serveur</strong> pour activer la nouvelle version.
+        </p>
+        <div class="flex gap-3 justify-end">
+          <button @click="showUpdateDialog = false; updateError = ''"
+            class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+            Annuler
+          </button>
+          <a :href="updateReleaseURL" target="_blank"
+            class="px-4 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors">
+            Voir les notes
+          </a>
+          <button @click="applyUpdate" :disabled="updating"
+            class="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2">
+            <svg v-if="updating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            {{ updating ? 'Mise à jour…' : 'Mettre à jour' }}
+          </button>
+        </div>
+      </template>
+
+      <!-- After update applied: propose restart -->
+      <template v-else>
+        <div class="mb-4 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg flex items-center gap-3">
+          <svg class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
           </svg>
-          {{ updating ? 'Mise à jour…' : 'Mettre à jour' }}
-        </button>
-      </div>
+          <p class="text-sm text-green-800 dark:text-green-300 font-medium">Mise à jour appliquée avec succès !</p>
+        </div>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Le nouveau binaire est prêt. Redémarrez le serveur maintenant pour activer la nouvelle version.
+          La page se rechargera automatiquement après le redémarrage.
+        </p>
+        <div class="flex gap-3 justify-end">
+          <button @click="showUpdateDialog = false; updateApplied = false; updateError = ''"
+            class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+            Plus tard
+          </button>
+          <button @click="restartServer" :disabled="restarting"
+            class="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2">
+            <svg v-if="restarting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            {{ restarting ? 'Redémarrage…' : 'Redémarrer maintenant' }}
+          </button>
+        </div>
+      </template>
+
       <p v-if="updateError" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ updateError }}</p>
     </div>
   </div>
@@ -2872,6 +2907,8 @@ createApp({
     const showUpdateDialog = ref(false)
     const updating         = ref(false)
     const updateError      = ref('')
+    const updateApplied    = ref(false)
+    const restarting       = ref(false)
 
     async function checkForUpdate() {
       try {
@@ -2895,16 +2932,34 @@ createApp({
           const text = await res.text()
           throw new Error(text || 'HTTP ' + res.status)
         }
-        const data = await res.json()
-        showUpdateDialog.value = false
-        updateAvailable.value  = false
-        toast.value = { message: `Mise à jour ${data.newVersion || ''} appliquée. Redémarrez le serveur.`, type: 'success' }
-        setTimeout(() => { toast.value = null }, 8000)
+        await res.json()
+        updateAvailable.value = false
+        updateApplied.value   = true
       } catch (e) {
         updateError.value = 'Erreur : ' + e.message
       } finally {
         updating.value = false
       }
+    }
+
+    async function restartServer() {
+      restarting.value = true
+      updateError.value = ''
+      try {
+        // Fire the restart request (server will exec-replace itself; may not respond fully).
+        await apiFetch('/api/restart', { method: 'POST' }).catch(() => {})
+      } catch { /* expected: connection may drop */ }
+      // Poll /api/update/check until the server is back up (max 30 s).
+      const start = Date.now()
+      while (Date.now() - start < 30000) {
+        await new Promise(r => setTimeout(r, 1500))
+        try {
+          const res = await fetch('/api/update/check')
+          if (res.ok) { window.location.reload(); return }
+        } catch { /* still restarting */ }
+      }
+      restarting.value  = false
+      updateError.value = 'Le serveur ne répond pas après le redémarrage. Veuillez recharger la page manuellement.'
     }
 
     // ---- AI Chat ----
@@ -2997,7 +3052,8 @@ createApp({
       onFileSelect, onDrop, doUpload, closeUpload,
       refreshing, doRefresh,
       appVersion, latestVersion, updateAvailable, updateReleaseURL, updateReleaseNotes,
-      showUpdateDialog, updating, updateError, checkForUpdate, applyUpdate,
+      showUpdateDialog, updating, updateError, updateApplied, restarting,
+      checkForUpdate, applyUpdate, restartServer,
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
       sendChatMessage, clearChat,

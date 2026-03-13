@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -2657,4 +2658,29 @@ func (s *Server) handleAPIUpdateApply(w http.ResponseWriter, r *http.Request) {
 		"newVersion": release.TagName,
 		"message":    "Mise à jour appliquée. Redémarrez le serveur pour activer la nouvelle version.",
 	})
+}
+
+// handleAPIRestart restarts the server process by re-executing the current
+// binary with the same arguments and environment (syscall.Exec). This is
+// intended to be called after a binary update has been applied.
+func (s *Server) handleAPIRestart(w http.ResponseWriter, r *http.Request) {
+	exePath, err := os.Executable()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("restart: get executable: %v", err), http.StatusInternalServerError)
+		return
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("restart: resolve symlink: %v", err), http.StatusInternalServerError)
+		return
+	}
+	// Send response before replacing the process.
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
+	// Flush the response so the client receives it before exec replaces us.
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	// Replace this process with a fresh copy of the binary.
+	_ = syscall.Exec(exePath, os.Args, os.Environ())
 }
