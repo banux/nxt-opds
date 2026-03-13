@@ -609,6 +609,7 @@ type bookJSON struct {
 	Rating          int      `json:"rating"`
 	AgeRating       int      `json:"ageRating"`
 	DownloadURL string   `json:"downloadUrl"`
+	FileType    string   `json:"fileType,omitempty"` // MIME type of the primary file (e.g. "application/epub+zip")
 }
 
 // currentUserID returns the user ID stored in the request context (set by authMiddleware
@@ -746,6 +747,10 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		if colors == nil {
 			colors = []string{}
 		}
+		fileType := ""
+		if len(bk.Files) > 0 {
+			fileType = bk.Files[0].MIMEType
+		}
 		j := bookJSON{
 			ID:              bk.ID,
 			Title:           bk.Title,
@@ -764,6 +769,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			Rating:          bk.Rating,
 			AgeRating:       bk.AgeRating,
 			DownloadURL:     "/opds/books/" + bk.ID + "/download",
+			FileType:        fileType,
 		}
 		for _, a := range bk.Authors {
 			j.Authors = append(j.Authors, a.Name)
@@ -928,6 +934,12 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		Rating:          bk.Rating,
 		AgeRating:       bk.AgeRating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
+		FileType:        func() string {
+			if len(bk.Files) > 0 {
+				return bk.Files[0].MIMEType
+			}
+			return ""
+		}(),
 	}
 	for _, a := range bk.Authors {
 		j.Authors = append(j.Authors, a.Name)

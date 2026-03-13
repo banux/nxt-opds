@@ -21,6 +21,7 @@
 - [x] Ajoute une classification d'age sur les livres - **Done: AgeRating int field on Book (0=non classifié, 3/6/10/12/18+); select in edit form; coloured badge on book detail page; SQLite migration v7; fs+sqlite backends updated**
 - [x] Rajoute un profil enfant qui filtrera les livres par age - **Done: IsChild bool on User; CreateUser/UpdateUser accept isChild; migration v7 adds is_child to users; maxAgeRatingForUser() auto-filters books (MaxAgeRating=10) for child users; isChild checkbox in admin form; Enfant badge in user list; pink notice banner on grid page for child profiles**
 - [x] Proposer de redemarrer après la mise à jour - **Done: POST /api/restart handler uses syscall.Exec to re-exec the current binary; update dialog shows a "Redémarrer maintenant" green button after apply succeeds; restartServer() polls /api/update/check until server is back up then auto-reloads; "Plus tard" button closes the dialog without restarting**
+- [x] Ajoute un lecteur epub intégré - **Done: epub.js (CDN) integrated in Vue SPA; "Lire" button on book detail page (only for EPUB files); #/read/{id} route; reader view with TOC panel, font-size ±10% controls (persisted in localStorage), progress bar (0–100%), position save/restore per book (localStorage), keyboard arrows, epub.js renderTo(container, {paginated}); FileType field added to bookJSON API**
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**

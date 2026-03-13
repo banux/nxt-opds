@@ -7,6 +7,8 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -51,6 +53,9 @@
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+    }
+    #reader-container iframe {
+      border: none !important;
     }
   </style>
 </head>
@@ -232,6 +237,40 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Reader page: back button + title + controls -->
+      <template v-else-if="currentView === 'reader'">
+        <button @click="closeReader()"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Fiche du livre</span>
+        </button>
+        <span v-if="readerBook" class="font-semibold text-base truncate flex-1 min-w-0 text-gray-900 dark:text-gray-100">
+          {{ readerBook.title }}
+        </span>
+        <div class="flex items-center gap-1 shrink-0">
+          <!-- Font size decrease -->
+          <button @click="readerFontSize = Math.max(60, readerFontSize - 10); applyReaderFontSize()"
+            title="Réduire la police"
+            class="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm font-bold">A-</button>
+          <span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums w-8 text-center">{{ readerFontSize }}%</span>
+          <!-- Font size increase -->
+          <button @click="readerFontSize = Math.min(200, readerFontSize + 10); applyReaderFontSize()"
+            title="Agrandir la police"
+            class="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-sm font-bold">A+</button>
+          <!-- TOC toggle -->
+          <button @click="readerTocOpen = !readerTocOpen"
+            title="Table des matières"
+            class="p-1.5 rounded-lg transition-colors"
+            :class="readerTocOpen ? 'text-brand-600 bg-blue-50 dark:bg-blue-900/20' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h10M4 18h10"/>
+            </svg>
+          </button>
+        </div>
+      </template>
+
       <!-- Grid page: logo + search -->
       <template v-else>
         <a href="#/" class="flex items-center gap-2 shrink-0">
@@ -401,7 +440,7 @@
   </header>
 
   <!-- Main content -->
-  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6" :class="currentView === 'reader' ? 'overflow-hidden' : ''">
 
     <!-- ===== GRID VIEW ===== -->
     <template v-if="currentView === 'grid'">
@@ -621,9 +660,20 @@
             </div>
           </div>
 
+          <!-- Read EPUB button (only for EPUB files) -->
+          <button v-if="currentBook.fileType === 'application/epub+zip'"
+            @click="openReader(currentBook)"
+            class="mt-4 w-48 sm:w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-xl transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
+            Lire
+          </button>
+
           <!-- Download button -->
           <a :href="currentBook.downloadUrl"
-            class="mt-4 w-48 sm:w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-xl transition-colors">
+            class="mt-2 w-48 sm:w-full flex items-center justify-center gap-2 px-4 py-2.5"
+            :class="currentBook.fileType === 'application/epub+zip' ? 'border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-colors text-sm font-medium' : 'bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-xl transition-colors'">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
@@ -795,6 +845,96 @@
       </div><!-- end book detail -->
 
     </div><!-- end book view -->
+
+    <!-- ===== READER VIEW ===== -->
+    <template v-else-if="currentView === 'reader'">
+      <div class="flex overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8 -mt-6" style="height: calc(100vh - 3.5rem);">
+
+        <!-- TOC panel -->
+        <aside v-show="readerTocOpen"
+          class="w-64 shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto flex flex-col">
+          <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="font-semibold text-sm text-gray-700 dark:text-gray-300">Table des matières</h2>
+          </div>
+          <nav class="flex-1 overflow-y-auto py-2">
+            <template v-if="readerToc.length === 0">
+              <p class="px-4 py-3 text-sm text-gray-400 dark:text-gray-500 italic">Aucune table des matières</p>
+            </template>
+            <template v-else>
+              <button v-for="item in readerToc" :key="item.href"
+                @click="readerGoTo(item.href); readerTocOpen = false"
+                class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors truncate"
+                :style="{ paddingLeft: (1 + (item.depth || 0)) + 'rem' }">
+                {{ item.label }}
+              </button>
+            </template>
+          </nav>
+        </aside>
+
+        <!-- Main reader area -->
+        <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900">
+
+          <!-- Loading state -->
+          <div v-if="readerLoading" class="flex-1 flex items-center justify-center">
+            <div class="text-center">
+              <svg class="w-10 h-10 text-brand-600 animate-spin mx-auto mb-3" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+              <p class="text-sm text-gray-500 dark:text-gray-400">Chargement du livre…</p>
+            </div>
+          </div>
+
+          <!-- Error state -->
+          <div v-else-if="readerError" class="flex-1 flex items-center justify-center p-8">
+            <div class="text-center">
+              <svg class="w-12 h-12 text-red-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <p class="text-gray-600 dark:text-gray-400">{{ readerError }}</p>
+              <button @click="closeReader()" class="mt-4 px-4 py-2 bg-brand-600 text-white rounded-lg text-sm">Retour</button>
+            </div>
+          </div>
+
+          <!-- epub.js render target -->
+          <div v-show="!readerLoading && !readerError"
+            ref="readerContainer"
+            id="reader-container"
+            class="flex-1 overflow-hidden"
+            style="background: white;">
+          </div>
+
+          <!-- Bottom navigation bar -->
+          <div v-show="!readerLoading && !readerError"
+            class="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-2 flex items-center gap-4">
+            <!-- Prev page -->
+            <button @click="readerPrev()" title="Page précédente"
+              class="p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+              </svg>
+            </button>
+
+            <!-- Progress -->
+            <div class="flex-1 flex flex-col gap-1">
+              <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                <div class="bg-brand-600 h-1.5 rounded-full transition-all duration-300"
+                  :style="{ width: readerProgress + '%' }"></div>
+              </div>
+              <p class="text-xs text-center text-gray-400 dark:text-gray-500">{{ Math.round(readerProgress) }}%</p>
+            </div>
+
+            <!-- Next page -->
+            <button @click="readerNext()" title="Page suivante"
+              class="p-2 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <!-- ===== SERIES PAGE ===== -->
     <template v-else-if="currentView === 'series'">
@@ -2048,8 +2188,176 @@ createApp({
       return GRADIENTS[h % GRADIENTS.length]
     }
 
+    // ---- EPUB Reader ----
+    const readerBook = ref(null)       // catalog book object
+    const readerLoading = ref(false)
+    const readerError = ref('')
+    const readerTocOpen = ref(false)
+    const readerToc = ref([])          // [{label, href, depth}]
+    const readerProgress = ref(0)      // 0-100
+    const readerFontSize = ref(100)    // percent
+    const readerContainer = ref(null)  // DOM ref
+
+    let _epubBook = null
+    let _epubRendition = null
+
+    async function initReader(bookId) {
+      readerLoading.value = true
+      readerError.value = ''
+      readerToc.value = []
+      readerProgress.value = 0
+      readerBook.value = null
+
+      // Fetch book metadata
+      try {
+        const res = await apiFetch('/api/books/' + encodeURIComponent(bookId))
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        readerBook.value = await res.json()
+      } catch (e) {
+        readerError.value = 'Impossible de charger le livre.'
+        readerLoading.value = false
+        return
+      }
+
+      if (readerBook.value.fileType !== 'application/epub+zip') {
+        readerError.value = 'Ce format n\'est pas supporté par le lecteur intégré.'
+        readerLoading.value = false
+        return
+      }
+
+      // Wait for DOM container to be available
+      await nextTick()
+
+      const container = document.getElementById('reader-container')
+      if (!container) {
+        readerError.value = 'Erreur interne : conteneur introuvable.'
+        readerLoading.value = false
+        return
+      }
+
+      // Destroy any previous instance
+      destroyReader(false)
+
+      try {
+        _epubBook = ePub(readerBook.value.downloadUrl)
+
+        _epubRendition = _epubBook.renderTo(container, {
+          width: '100%',
+          height: '100%',
+          flow: 'paginated',
+          spread: 'none',
+        })
+
+        // Apply saved font size
+        const savedSize = localStorage.getItem('reader-font-size')
+        if (savedSize) readerFontSize.value = parseInt(savedSize) || 100
+        _epubRendition.themes.fontSize(readerFontSize.value + '%')
+
+        // Load TOC
+        _epubBook.loaded.navigation.then(nav => {
+          const flatToc = []
+          function walk(items, depth) {
+            for (const item of items) {
+              flatToc.push({ label: item.label, href: item.href, depth })
+              if (item.subitems && item.subitems.length) walk(item.subitems, depth + 1)
+            }
+          }
+          walk(nav.toc, 0)
+          readerToc.value = flatToc
+        }).catch(() => {})
+
+        // Restore saved position or start from beginning
+        const savedCfi = localStorage.getItem('reader-pos-' + bookId)
+
+        await _epubRendition.display(savedCfi || undefined)
+
+        // Track progress
+        _epubBook.ready.then(() => {
+          _epubBook.locations.generate(1024).then(() => {
+            updateReaderProgress()
+          }).catch(() => {})
+        }).catch(() => {})
+
+        // Save position on page change
+        _epubRendition.on('relocated', location => {
+          if (location && location.start && location.start.cfi) {
+            localStorage.setItem('reader-pos-' + bookId, location.start.cfi)
+          }
+          updateReaderProgress()
+        })
+
+        // Keyboard navigation inside iframe
+        _epubRendition.on('keydown', (e) => {
+          if (e.key === 'ArrowRight') readerNext()
+          if (e.key === 'ArrowLeft') readerPrev()
+        })
+
+        readerLoading.value = false
+      } catch (e) {
+        readerError.value = 'Erreur lors du chargement du livre : ' + e.message
+        readerLoading.value = false
+      }
+    }
+
+    function updateReaderProgress() {
+      if (!_epubBook || !_epubRendition) return
+      try {
+        const loc = _epubRendition.currentLocation()
+        if (loc && loc.start && _epubBook.locations && _epubBook.locations.percentageFromCfi) {
+          const pct = _epubBook.locations.percentageFromCfi(loc.start.cfi)
+          if (typeof pct === 'number') readerProgress.value = Math.round(pct * 100)
+        }
+      } catch {}
+    }
+
+    function applyReaderFontSize() {
+      localStorage.setItem('reader-font-size', readerFontSize.value)
+      if (_epubRendition) _epubRendition.themes.fontSize(readerFontSize.value + '%')
+    }
+
+    function readerPrev() {
+      if (_epubRendition) _epubRendition.prev()
+    }
+
+    function readerNext() {
+      if (_epubRendition) _epubRendition.next()
+    }
+
+    function readerGoTo(href) {
+      if (_epubRendition) _epubRendition.display(href)
+    }
+
+    function destroyReader(clearBook = true) {
+      if (_epubRendition) {
+        try { _epubRendition.destroy() } catch {}
+        _epubRendition = null
+      }
+      if (_epubBook) {
+        try { _epubBook.destroy() } catch {}
+        _epubBook = null
+      }
+      if (clearBook) {
+        readerBook.value = null
+        readerToc.value = []
+        readerProgress.value = 0
+        readerError.value = ''
+      }
+    }
+
+    function openReader(book) {
+      navigateTo('/read/' + encodeURIComponent(book.id))
+    }
+
+    function closeReader() {
+      if (readerBook.value) {
+        navigateTo('/books/' + encodeURIComponent(readerBook.value.id))
+      } else {
+        navigateTo('/')
+      }
+    }
+
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin' | 'recommendations'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin' | 'recommendations' | 'reader'
     const currentBook = ref(null)
     const bookLoading = ref(false)
     const currentSeries = ref('')
@@ -2201,13 +2509,23 @@ createApp({
 
     async function onHashChange() {
       const hash = window.location.hash
+      // Destroy epub.js when leaving reader
+      if (currentView.value === 'reader' && !hash.match(/^#\/read\//)) {
+        destroyReader()
+      }
       const bookMatch = hash.match(/^#\/books\/(.+)$/)
+      const readerMatch = hash.match(/^#\/read\/(.+)$/)
       const seriesMatch = hash.match(/^#\/series\/(.+)$/)
       const authorMatch = hash.match(/^#\/authors\/(.+)$/)
       const tagMatch = hash.match(/^#\/tags\/(.+)$/)
       const publisherMatch = hash.match(/^#\/publishers\/(.+)$/)
       const collectionMatch = hash.match(/^#\/collections\/(.+)$/)
-      if (bookMatch) {
+      if (readerMatch) {
+        currentView.value = 'reader'
+        const rid = decodeURIComponent(readerMatch[1])
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await initReader(rid)
+      } else if (bookMatch) {
         currentView.value = 'book'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadBook(decodeURIComponent(bookMatch[1]))
@@ -2305,8 +2623,14 @@ createApp({
       navigateTo('/books/' + bookId)
     }
 
-    // ---- Keyboard arrow navigation (book detail page) ----
+    // ---- Keyboard arrow navigation (book detail page + reader) ----
     function onKeyDown(e) {
+      if (currentView.value === 'reader') {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+        if (e.key === 'ArrowLeft') readerPrev()
+        else if (e.key === 'ArrowRight') readerNext()
+        return
+      }
       if (currentView.value !== 'book') return
       // Don't intercept when user is typing
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
@@ -3066,6 +3390,8 @@ createApp({
       loadWishlist, openWishlistForm, cancelWishlistEdit, saveWishlistItem, deleteWishlistItem,
       showReadBanner, readBannerStyle,
       toast, formatBytes,
+      readerBook, readerLoading, readerError, readerTocOpen, readerToc, readerProgress, readerFontSize,
+      readerContainer, openReader, closeReader, readerPrev, readerNext, readerGoTo, applyReaderFontSize,
     }
   }
 }).mount('#app')
