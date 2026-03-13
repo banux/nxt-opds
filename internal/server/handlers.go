@@ -584,6 +584,15 @@ func (s *Server) handleOpenSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHealth serves a simple health-check endpoint.
+// handleOPDSNotFound handles any unmatched /opds/** paths by returning a
+// well-formed XML 404 response so that OPDS clients receive parseable XML
+// instead of an HTML error page.
+func (s *Server) handleOPDSNotFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(xml.Header + `<error xmlns="http://opds-spec.org/2010/catalog"><message>Not found</message></error>`))
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"status":"ok"}`))

@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/banux/nxt-opds/internal/catalog"
 )
 
 const (
@@ -28,15 +31,37 @@ type sessionEntry struct {
 	userID string // empty when no user selected (legacy / no-users mode)
 }
 
-// sessionStore holds active session tokens in memory.
-// For a personal single-user server this is perfectly sufficient.
+// sessionStore holds active session tokens in memory and optionally persists
+// them to a catalog.SessionPersistence backend so they survive restarts.
 type sessionStore struct {
-	mu     sync.RWMutex
-	tokens map[string]sessionEntry // token -> entry
+	mu          sync.RWMutex
+	tokens      map[string]sessionEntry    // token -> entry
+	persistence catalog.SessionPersistence // optional; nil = in-memory only
 }
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{tokens: make(map[string]sessionEntry)}
+}
+
+// loadFromPersistence loads all non-expired sessions from the persistence
+// backend into the in-memory map.  Should be called once after construction.
+func (s *sessionStore) loadFromPersistence() {
+	if s.persistence == nil {
+		return
+	}
+	sessions, err := s.persistence.LoadSessions()
+	if err != nil {
+		log.Printf("session store: failed to load sessions: %v", err)
+		return
+	}
+	s.mu.Lock()
+	for _, sd := range sessions {
+		if time.Now().Before(sd.Expiry) {
+			s.tokens[sd.Token] = sessionEntry{expiry: sd.Expiry, userID: sd.UserID}
+		}
+	}
+	s.mu.Unlock()
+	log.Printf("session store: loaded %d session(s) from database", len(sessions))
 }
 
 // create generates a new random session token bound to userID, stores it,
@@ -47,9 +72,15 @@ func (s *sessionStore) create(userID string) (string, error) {
 		return "", err
 	}
 	token := hex.EncodeToString(buf)
+	expiry := time.Now().Add(sessionDuration)
 	s.mu.Lock()
-	s.tokens[token] = sessionEntry{expiry: time.Now().Add(sessionDuration), userID: userID}
+	s.tokens[token] = sessionEntry{expiry: expiry, userID: userID}
 	s.mu.Unlock()
+	if s.persistence != nil {
+		if err := s.persistence.SaveSession(token, userID, expiry); err != nil {
+			log.Printf("session store: failed to persist session: %v", err)
+		}
+	}
 	return token, nil
 }
 
@@ -87,6 +118,11 @@ func (s *sessionStore) delete(token string) {
 	s.mu.Lock()
 	delete(s.tokens, token)
 	s.mu.Unlock()
+	if s.persistence != nil {
+		if err := s.persistence.DeleteSession(token); err != nil {
+			log.Printf("session store: failed to delete persisted session: %v", err)
+		}
+	}
 }
 
 // authMiddleware returns a middleware that enforces session-cookie authentication.

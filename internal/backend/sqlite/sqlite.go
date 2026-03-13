@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -89,6 +89,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 5, apply: migration5},
 	{version: 6, apply: migration6},
 	{version: 7, apply: migration7},
+	{version: 8, apply: migration8},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -1559,6 +1560,69 @@ func migration7(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE books ADD COLUMN age_rating INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN is_child INTEGER NOT NULL DEFAULT 0`)
 	return nil
+}
+
+// migration8 adds the sessions table for persistent session storage (version 7 → 8).
+func migration8(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS sessions (
+    token    TEXT PRIMARY KEY,
+    user_id  TEXT NOT NULL DEFAULT '',
+    expiry   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expiry);
+`)
+	return err
+}
+
+// SaveSession upserts a session token into the sessions table.
+// Implements catalog.SessionPersistence.
+func (b *Backend) SaveSession(token, userID string, expiry time.Time) error {
+	_, err := b.db.Exec(
+		`INSERT INTO sessions (token, user_id, expiry) VALUES (?, ?, ?)
+         ON CONFLICT(token) DO UPDATE SET user_id=excluded.user_id, expiry=excluded.expiry`,
+		token, userID, expiry.Unix(),
+	)
+	return err
+}
+
+// DeleteSession removes a session token from the sessions table.
+// Implements catalog.SessionPersistence.
+func (b *Backend) DeleteSession(token string) error {
+	_, err := b.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
+	return err
+}
+
+// LoadSessions returns all non-expired session tokens from the database.
+// Implements catalog.SessionPersistence.
+func (b *Backend) LoadSessions() ([]catalog.SessionData, error) {
+	now := time.Now().Unix()
+	rows, err := b.db.Query(
+		`SELECT token, user_id, expiry FROM sessions WHERE expiry > ?`, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []catalog.SessionData
+	for rows.Next() {
+		var sd catalog.SessionData
+		var expiryUnix int64
+		if err := rows.Scan(&sd.Token, &sd.UserID, &expiryUnix); err != nil {
+			return nil, err
+		}
+		sd.Expiry = time.Unix(expiryUnix, 0)
+		sessions = append(sessions, sd)
+	}
+	return sessions, rows.Err()
+}
+
+// PruneExpiredSessions removes all sessions whose expiry is in the past.
+// Implements catalog.SessionPersistence.
+func (b *Backend) PruneExpiredSessions() error {
+	_, err := b.db.Exec(`DELETE FROM sessions WHERE expiry <= ?`, time.Now().Unix())
+	return err
 }
 
 func boolToInt(b bool) int {

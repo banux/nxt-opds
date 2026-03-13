@@ -424,6 +424,29 @@ type WishlistManager interface {
 	DeleteWishlistItem(id string) error
 }
 
+// SessionData holds the persisted data for a single session token.
+type SessionData struct {
+	Token  string
+	UserID string
+	Expiry time.Time
+}
+
+// SessionPersistence is an optional interface for catalog backends that support
+// persisting session tokens across server restarts.
+type SessionPersistence interface {
+	// SaveSession upserts a session token with its associated userID and expiry.
+	SaveSession(token, userID string, expiry time.Time) error
+
+	// DeleteSession removes a session token (e.g. on logout).
+	DeleteSession(token string) error
+
+	// LoadSessions returns all non-expired session tokens.
+	LoadSessions() ([]SessionData, error)
+
+	// PruneExpiredSessions deletes all sessions whose expiry is in the past.
+	PruneExpiredSessions() error
+}
+
 // Recommender is an optional interface for catalog backends that support
 // per-user book recommendations.
 type Recommender interface {

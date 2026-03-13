@@ -111,6 +111,17 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	if wm, ok := cat.(catalog.WishlistManager); ok {
 		s.wishlistManager = wm
 	}
+	// If the catalog backend supports session persistence, wire it up and load
+	// any sessions that survived the previous process run.
+	if sp, ok := cat.(catalog.SessionPersistence); ok {
+		s.sessions.persistence = sp
+		s.sessions.loadFromPersistence()
+		// Best-effort prune of stale rows at startup.
+		if err := sp.PruneExpiredSessions(); err != nil {
+			_ = err // non-fatal
+		}
+	}
+
 	s.mcpServer = mcp.New(cat)
 	if opts.AnthropicAPIKey != "" {
 		s.aiAgent = ai.New(opts.AnthropicAPIKey, cat)
@@ -272,6 +283,10 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/v2/unread", s.handleOPDS2Unread).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/wishlist", s.handleOPDS2Wishlist).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/recommendations", s.handleOPDS2Recommendations).Methods(http.MethodGet)
+
+	// Catch-all for any unmatched /opds/** path – returns a proper XML 404
+	// instead of an HTML page so OPDS clients receive parseable XML.
+	protected.PathPrefix("/opds/").HandlerFunc(s.handleOPDSNotFound)
 
 	// Frontend static assets – serves index.html at / and any static files.
 	// When StaticFS is nil (e.g. in tests), a catch-all 404 handler is
