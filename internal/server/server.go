@@ -4,6 +4,7 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -56,7 +57,8 @@ type Server struct {
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
 	opts          Options
-	opdsToken     string // token for OPDS route authentication
+	opdsToken     string    // token for OPDS route authentication
+	startedAt     time.Time // process start time, used by /api/ping for restart detection
 }
 
 // New creates and configures a new Server with the given catalog backend and options.
@@ -71,6 +73,7 @@ func New(cat catalog.Catalog, opts Options) *Server {
 		sessions:  newSessionStore(),
 		opts:      opts,
 		opdsToken: opts.OPDSToken,
+		startedAt: time.Now(),
 	}
 	if u, ok := cat.(catalog.Uploader); ok {
 		s.uploader = u
@@ -128,6 +131,7 @@ func (s *Server) registerRoutes() {
 
 	// Always-public endpoints (no auth required)
 	r.HandleFunc("/health", s.handleHealth).Methods(http.MethodGet)
+	r.HandleFunc("/api/ping", s.handleAPIPing).Methods(http.MethodGet)
 	r.HandleFunc("/login", s.handleLoginPage).Methods(http.MethodGet)
 	r.HandleFunc("/login", s.handleLoginPost).Methods(http.MethodPost)
 	r.HandleFunc("/logout", s.handleLogout).Methods(http.MethodPost, http.MethodGet)

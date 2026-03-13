@@ -589,6 +589,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
+// handleAPIPing returns the server startup timestamp in Unix milliseconds.
+// Used by the frontend to detect when the server has been restarted.
+func (s *Server) handleAPIPing(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"startedAt": s.startedAt.UnixMilli(),
+	})
+}
+
 // bookJSON is the JSON representation of a book for the frontend API.
 type bookJSON struct {
 	ID          string   `json:"id"`
@@ -844,6 +854,12 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		Rating:          bk.Rating,
 		AgeRating:       bk.AgeRating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
+		FileType: func() string {
+			if len(bk.Files) > 0 {
+				return bk.Files[0].MIMEType
+			}
+			return ""
+		}(),
 	}
 	for _, a := range bk.Authors {
 		j.Authors = append(j.Authors, a.Name)

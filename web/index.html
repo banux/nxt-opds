@@ -3269,17 +3269,33 @@ createApp({
     async function restartServer() {
       restarting.value = true
       updateError.value = ''
+      // Record the current startup timestamp so we can detect a true restart.
+      let prevStartedAt = 0
+      try {
+        const pingRes = await fetch('/api/ping')
+        if (pingRes.ok) {
+          const pingData = await pingRes.json()
+          prevStartedAt = pingData.startedAt || 0
+        }
+      } catch { /* ignore */ }
       try {
         // Fire the restart request (server will exec-replace itself; may not respond fully).
         await apiFetch('/api/restart', { method: 'POST' }).catch(() => {})
       } catch { /* expected: connection may drop */ }
-      // Poll /api/update/check until the server is back up (max 30 s).
+      // Poll /api/ping until the server is back up with a NEW startup timestamp (max 30 s).
       const start = Date.now()
       while (Date.now() - start < 30000) {
-        await new Promise(r => setTimeout(r, 1500))
+        await new Promise(r => setTimeout(r, 800))
         try {
-          const res = await fetch('/api/update/check')
-          if (res.ok) { window.location.reload(); return }
+          const res = await fetch('/api/ping')
+          if (res.ok) {
+            const data = await res.json()
+            // Accept if startup time changed (real restart) or if we couldn't record previous time.
+            if (prevStartedAt === 0 || data.startedAt !== prevStartedAt) {
+              window.location.reload()
+              return
+            }
+          }
         } catch { /* still restarting */ }
       }
       restarting.value  = false
