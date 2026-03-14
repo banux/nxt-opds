@@ -1,6 +1,7 @@
 package server
 
 import (
+	"archive/zip"
 	"crypto/subtle"
 	"encoding/json"
 	"encoding/xml"
@@ -584,6 +585,70 @@ func (s *Server) handleOpenSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHealth serves a simple health-check endpoint.
+// handleEPUBFile serves a file from inside an EPUB (ZIP) archive.
+// Route: GET /opds/books/{id}/{filepath:.*}
+// Some OPDS readers follow links to internal EPUB resources (e.g. META-INF/container.xml).
+// This handler opens the EPUB as a ZIP archive and streams the requested inner file.
+func (s *Server) handleEPUBFile(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+	innerPath := vars["filepath"]
+
+	// Prevent path traversal
+	if strings.Contains(innerPath, "..") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	bk, err := s.catalog.BookByID(id)
+	if err != nil || len(bk.Files) == 0 {
+		s.handleOPDSNotFound(w, r)
+		return
+	}
+
+	// Find the first EPUB file
+	var epubPath string
+	for _, f := range bk.Files {
+		if f.MIMEType == "application/epub+zip" || strings.HasSuffix(strings.ToLower(f.Path), ".epub") {
+			epubPath = f.Path
+			break
+		}
+	}
+	if epubPath == "" {
+		s.handleOPDSNotFound(w, r)
+		return
+	}
+
+	zr, err := zip.OpenReader(epubPath)
+	if err != nil {
+		http.Error(w, "cannot open epub", http.StatusInternalServerError)
+		return
+	}
+	defer zr.Close()
+
+	for _, zf := range zr.File {
+		if zf.Name == innerPath {
+			rc, err := zf.Open()
+			if err != nil {
+				http.Error(w, "cannot read file", http.StatusInternalServerError)
+				return
+			}
+			defer rc.Close()
+
+			ct := mime.TypeByExtension(filepath.Ext(zf.Name))
+			if ct == "" {
+				ct = "application/octet-stream"
+			}
+			w.Header().Set("Content-Type", ct)
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.Copy(w, rc)
+			return
+		}
+	}
+
+	s.handleOPDSNotFound(w, r)
+}
+
 // handleOPDSNotFound handles any unmatched /opds/** paths by returning a
 // well-formed XML 404 response so that OPDS clients receive parseable XML
 // instead of an HTML error page.

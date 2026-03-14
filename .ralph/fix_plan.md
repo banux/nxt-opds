@@ -23,6 +23,12 @@
 - [x] Proposer de redemarrer après la mise à jour - **Done: POST /api/restart handler uses syscall.Exec to re-exec the current binary; update dialog shows a "Redémarrer maintenant" green button after apply succeeds; restartServer() polls /api/update/check until server is back up then auto-reloads; "Plus tard" button closes the dialog without restarting**
 - [x] Ajoute un lecteur epub intégré - **Done: epub.js (CDN) integrated in Vue SPA; "Lire" button on book detail page (only for EPUB files); #/read/{id} route; reader view with TOC panel, font-size ±10% controls (persisted in localStorage), progress bar (0–100%), position save/restore per book (localStorage), keyboard arrows, epub.js renderTo(container, {paginated}); FileType field added to bookJSON API**
 - [x] Le boutton Lire ne s'affiche pas - **Done: handleAPIBook was missing FileType in bookJSON response; added FileType via bk.Files[0].MIMEType (same pattern as handleAPIUpdateBook)**
+- [x] Ajoute la categorie +16 dans la classification d'age - **Done: added 16+ (Jeune adulte) option in edit form select, case 16 in ageRatingLabel(), and v>=16 rose badge class in ageRatingBadgeClass()**
+- [x] Fix : Erreur d’analyse XML : erreur de syntaxe Emplacement : https://books.jerinn.com/opds/books/f1673f384757b6c1/META-INF/container.xml Numéro de ligne 1, Colonne 1 : **Done: added handleOPDSNotFound catch-all for /opds/** that returns XML 404 instead of HTML page**
+- [x] Après un redemarrage la session n’est pas conservé - **Done: catalog.SessionPersistence interface; SQLite migration v8 (sessions table); sqlite.Backend implements SaveSession/DeleteSession/LoadSessions/PruneExpiredSessions; server.sessionStore syncs to DB on create/delete and loads from DB at startup**
+- [x] L'url opds/books/ef5ad688a5c8a736/META-INF/container.xml fait une 404, tu dois faire une route special qui pointe vers l'epub décompresser temporairement - **Done: GET /opds/books/{id}/{filepath:.*} route; handleEPUBFile opens the EPUB ZIP, finds the inner file by name, streams it with proper Content-Type; registered before the /opds/ catch-all; path traversal prevented**
+- [ ] Dans le profil enfant spécifier l'age afin de pouvoir filtrer par la classification
+- [ ] Ajouter un filtre dans le catalogue par classification d'age
 
 ## Medium Priority
 - [x] Add EPUB upload endpoint (POST /api/upload) with file storage + instant catalog indexing - **Done: StoreBook on fs.Backend, handleUpload + handleDownload handlers**

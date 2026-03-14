@@ -284,6 +284,12 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/v2/wishlist", s.handleOPDS2Wishlist).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/recommendations", s.handleOPDS2Recommendations).Methods(http.MethodGet)
 
+	// EPUB internal file serving: some OPDS readers follow links into the EPUB
+	// archive (e.g. /opds/books/{id}/META-INF/container.xml).  This route opens
+	// the EPUB ZIP and streams the requested inner file.
+	// Must be registered after the more-specific /download route.
+	protected.HandleFunc("/opds/books/{id}/{filepath:.*}", s.handleEPUBFile).Methods(http.MethodGet)
+
 	// Catch-all for any unmatched /opds/** path – returns a proper XML 404
 	// instead of an HTML page so OPDS clients receive parseable XML.
 	protected.PathPrefix("/opds/").HandlerFunc(s.handleOPDSNotFound)
