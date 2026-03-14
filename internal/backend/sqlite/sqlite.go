@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 8
+const currentSchemaVersion = 9
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -90,6 +90,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 6, apply: migration6},
 	{version: 7, apply: migration7},
 	{version: 8, apply: migration8},
+	{version: 9, apply: migration9},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -1085,7 +1086,7 @@ func (b *Backend) countBooks(query string, args ...any) (int, error) {
 
 // Users returns all registered users sorted by name.
 func (b *Backend) Users() ([]catalog.User, error) {
-	rows, err := b.db.Query(`SELECT id, name, color, is_admin, COALESCE(is_child,0) FROM users ORDER BY name`)
+	rows, err := b.db.Query(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10) FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1094,7 +1095,7 @@ func (b *Backend) Users() ([]catalog.User, error) {
 	for rows.Next() {
 		var u catalog.User
 		var isAdmin, isChild int
-		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge); err != nil {
 			return nil, err
 		}
 		u.IsAdmin = isAdmin == 1
@@ -1108,8 +1109,8 @@ func (b *Backend) Users() ([]catalog.User, error) {
 func (b *Backend) UserByID(id string) (*catalog.User, error) {
 	var u catalog.User
 	var isAdmin, isChild int
-	err := b.db.QueryRow(`SELECT id, name, color, is_admin, COALESCE(is_child,0) FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild)
+	err := b.db.QueryRow(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10) FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %s", id)
 	}
@@ -1122,7 +1123,7 @@ func (b *Backend) UserByID(id string) (*catalog.User, error) {
 }
 
 // CreateUser creates a new user and returns it.
-func (b *Backend) CreateUser(name, color string, isAdmin, isChild bool) (*catalog.User, error) {
+func (b *Backend) CreateUser(name, color string, isAdmin, isChild bool, maxAge int) (*catalog.User, error) {
 	id, err := newID()
 	if err != nil {
 		return nil, fmt.Errorf("generate user id: %w", err)
@@ -1135,14 +1136,17 @@ func (b *Backend) CreateUser(name, color string, isAdmin, isChild bool) (*catalo
 	if isChild {
 		child = 1
 	}
+	if maxAge <= 0 {
+		maxAge = 10
+	}
 	_, err = b.db.Exec(
-		`INSERT INTO users (id, name, color, is_admin, is_child) VALUES (?, ?, ?, ?, ?)`,
-		id, name, color, admin, child,
+		`INSERT INTO users (id, name, color, is_admin, is_child, max_age) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, name, color, admin, child, maxAge,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
-	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild}, nil
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild, MaxAge: maxAge}, nil
 }
 
 // DeleteUser removes the user with the given ID.
@@ -1151,8 +1155,8 @@ func (b *Backend) DeleteUser(id string) error {
 	return err
 }
 
-// UpdateUser updates the name, color, admin and child status of an existing user.
-func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool) (*catalog.User, error) {
+// UpdateUser updates the name, color, admin, child status and max age of an existing user.
+func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool, maxAge int) (*catalog.User, error) {
 	admin := 0
 	if isAdmin {
 		admin = 1
@@ -1161,14 +1165,17 @@ func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool) (*ca
 	if isChild {
 		child = 1
 	}
+	if maxAge <= 0 {
+		maxAge = 10
+	}
 	_, err := b.db.Exec(
-		`UPDATE users SET name = ?, color = ?, is_admin = ?, is_child = ? WHERE id = ?`,
-		name, color, admin, child, id,
+		`UPDATE users SET name = ?, color = ?, is_admin = ?, is_child = ?, max_age = ? WHERE id = ?`,
+		name, color, admin, child, maxAge, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
-	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild}, nil
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild, MaxAge: maxAge}, nil
 }
 
 // ─── UserReadManager ─────────────────────────────────────────────────────────
@@ -1573,6 +1580,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expiry);
 `)
 	return err
+}
+
+// migration9 adds max_age to users for per-child-profile age filtering (version 8 → 9).
+func migration9(db *sql.DB) error {
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN max_age INTEGER NOT NULL DEFAULT 10`)
+	return nil
 }
 
 // SaveSession upserts a session token into the sessions table.

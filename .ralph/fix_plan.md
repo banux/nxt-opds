@@ -27,7 +27,7 @@
 - [x] Fix : Erreur d’analyse XML : erreur de syntaxe Emplacement : https://books.jerinn.com/opds/books/f1673f384757b6c1/META-INF/container.xml Numéro de ligne 1, Colonne 1 : **Done: added handleOPDSNotFound catch-all for /opds/** that returns XML 404 instead of HTML page**
 - [x] Après un redemarrage la session n’est pas conservé - **Done: catalog.SessionPersistence interface; SQLite migration v8 (sessions table); sqlite.Backend implements SaveSession/DeleteSession/LoadSessions/PruneExpiredSessions; server.sessionStore syncs to DB on create/delete and loads from DB at startup**
 - [x] L'url opds/books/ef5ad688a5c8a736/META-INF/container.xml fait une 404, tu dois faire une route special qui pointe vers l'epub décompresser temporairement - **Done: GET /opds/books/{id}/{filepath:.*} route; handleEPUBFile opens the EPUB ZIP, finds the inner file by name, streams it with proper Content-Type; registered before the /opds/ catch-all; path traversal prevented**
-- [ ] Dans le profil enfant spécifier l'age afin de pouvoir filtrer par la classification
+- [x] Dans le profil enfant spécifier l'age afin de pouvoir filtrer par la classification - **Done: MaxAge int field on catalog.User; CreateUser/UpdateUser accept maxAge; SQLite migration v9 adds max_age INTEGER DEFAULT 10 to users; maxAgeRatingForUser() uses u.MaxAge (fallback 10); API handlers pass maxAge in JSON; Vue admin form shows a max-age selector (3/6/10/12/16) when isChild is checked; Enfant badge shows age (e.g. "Enfant 10+"); child notice banner shows dynamic max age**
 - [ ] Ajouter un filtre dans le catalogue par classification d'age
 
 ## Medium Priority

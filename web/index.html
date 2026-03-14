@@ -451,7 +451,7 @@
         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
-        Profil enfant — les livres 12+ et 18+ sont masqués
+        Profil enfant — les livres {{ currentUser.maxAge ? (currentUser.maxAge + '+') : '12+' }} et au-delà sont masqués
       </div>
 
       <!-- Filter bar -->
@@ -1356,7 +1356,7 @@
                 </span>
                 <span v-if="u.isChild"
                       class="text-xs px-2 py-0.5 bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 rounded-full shrink-0">
-                  Enfant
+                  Enfant {{ u.maxAge ? u.maxAge + '+' : '' }}
                 </span>
                 <button @click="editAdminUser(u)" title="Modifier"
                   class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
@@ -1412,11 +1412,21 @@
               <label class="flex items-center gap-2 cursor-pointer select-none">
                 <input type="checkbox" v-model="adminUserForm.isChild"
                   class="w-4 h-4 accent-pink-600 rounded"/>
-                <span class="text-sm text-gray-700 dark:text-gray-300">
-                  Profil enfant
-                  <span class="text-gray-400 font-normal">(masque les livres 12+ et 18+)</span>
-                </span>
+                <span class="text-sm text-gray-700 dark:text-gray-300">Profil enfant</span>
               </label>
+
+              <!-- Max age selector (visible only for child profiles) -->
+              <div v-if="adminUserForm.isChild" class="flex items-center gap-3 ml-6">
+                <label class="text-sm text-gray-600 dark:text-gray-400 shrink-0">Âge maximum :</label>
+                <select v-model.number="adminUserForm.maxAge"
+                  class="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500">
+                  <option :value="3">3+ (Petite enfance)</option>
+                  <option :value="6">6+ (Enfants)</option>
+                  <option :value="10">10+ (Jeunesse)</option>
+                  <option :value="12">12+ (Adolescent)</option>
+                  <option :value="16">16+ (Jeune adulte)</option>
+                </select>
+              </div>
             </div>
 
             <div class="flex items-center justify-between mt-5">
@@ -3022,7 +3032,7 @@ createApp({
     const adminUsers        = ref([])
     const adminUsersLoading = ref(false)
     const adminEditingUserId = ref(null)
-    const adminUserForm     = ref({ name: '', color: '#3B82F6', isAdmin: false, isChild: false })
+    const adminUserForm     = ref({ name: '', color: '#3B82F6', isAdmin: false, isChild: false, maxAge: 10 })
     const adminUserFormSaving = ref(false)
 
     async function loadAdminUsers() {
@@ -3059,7 +3069,7 @@ createApp({
 
     function editAdminUser(u) {
       adminEditingUserId.value = u.id
-      adminUserForm.value = { name: u.name, color: u.color, isAdmin: u.isAdmin, isChild: u.isChild || false }
+      adminUserForm.value = { name: u.name, color: u.color, isAdmin: u.isAdmin, isChild: u.isChild || false, maxAge: u.maxAge || 10 }
     }
 
     async function deleteAdminUser(id) {
@@ -3077,7 +3087,7 @@ createApp({
 
     function resetAdminUserForm() {
       adminEditingUserId.value = null
-      adminUserForm.value = { name: '', color: '#3B82F6', isAdmin: false, isChild: false }
+      adminUserForm.value = { name: '', color: '#3B82F6', isAdmin: false, isChild: false, maxAge: 10 }
     }
 
     // ---- Recommendations ----

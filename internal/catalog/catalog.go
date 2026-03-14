@@ -165,6 +165,11 @@ type User struct {
 	// When true, the server will automatically apply a MaxAgeRating filter
 	// to hide adult/teen content from this user.
 	IsChild bool
+
+	// MaxAge is the maximum AgeRating shown to this user when IsChild is true.
+	// Allowed values mirror the AgeRating field: 3, 6, 10, 12, 16.
+	// A value of 0 is treated as 10 (default child restriction).
+	MaxAge int
 }
 
 // UserManager is an optional interface for catalog backends that support
@@ -180,14 +185,16 @@ type UserManager interface {
 	// CreateUser creates a new user with the given name and hex colour.
 	// If isAdmin is true the user has administrative privileges.
 	// If isChild is true the user is a child profile (age-restricted).
+	// maxAge is the maximum AgeRating for child profiles (0 = use default 10).
 	// Returns the newly created User.
-	CreateUser(name, color string, isAdmin, isChild bool) (*User, error)
+	CreateUser(name, color string, isAdmin, isChild bool, maxAge int) (*User, error)
 
 	// DeleteUser removes the user with the given ID.
 	DeleteUser(id string) error
 
-	// UpdateUser updates the name, color, admin and child status of an existing user.
-	UpdateUser(id, name, color string, isAdmin, isChild bool) (*User, error)
+	// UpdateUser updates the name, color, admin, child status and max age of an existing user.
+	// maxAge is the maximum AgeRating for child profiles (0 = use default 10).
+	UpdateUser(id, name, color string, isAdmin, isChild bool, maxAge int) (*User, error)
 }
 
 // UserReadManager is an optional interface for catalog backends that support

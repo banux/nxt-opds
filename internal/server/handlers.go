@@ -703,12 +703,9 @@ func currentUserID(r *http.Request) string {
 	return uid
 }
 
-// childMaxAgeRating is the maximum age_rating shown to child profiles.
-// Books with age_rating > childMaxAgeRating (but != 0) are hidden for child users.
-const childMaxAgeRating = 10
-
 // maxAgeRatingForUser returns the MaxAgeRating to apply for the current user.
 // Returns 0 (no filter) for non-child users or when multi-user is not available.
+// For child users, uses u.MaxAge (falls back to 10 if zero).
 func (s *Server) maxAgeRatingForUser(userID string) int {
 	if s.userManager == nil || userID == "" {
 		return 0
@@ -717,7 +714,10 @@ func (s *Server) maxAgeRatingForUser(userID string) int {
 	if err != nil || !u.IsChild {
 		return 0
 	}
-	return childMaxAgeRating
+	if u.MaxAge > 0 {
+		return u.MaxAge
+	}
+	return 10 // default child restriction
 }
 
 // parseSortParam maps the ?sort= query parameter to SortBy and SortOrder values.
@@ -1248,6 +1248,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
 		IsChild bool   `json:"isChild"`
+		MaxAge  int    `json:"maxAge"`
 	}
 	type configJSON struct {
 		OPDSToken   string    `json:"opdsToken"`
@@ -1266,7 +1267,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		uid := currentUserID(r)
 		if uid != "" {
 			if u, err := s.userManager.UserByID(uid); err == nil {
-				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild}
+				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild, MaxAge: u.MaxAge}
 			}
 		}
 	}
@@ -1298,6 +1299,7 @@ func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
 		"color":   u.Color,
 		"isAdmin": u.IsAdmin,
 		"isChild": u.IsChild,
+		"maxAge":  u.MaxAge,
 	})
 }
 
@@ -1318,10 +1320,11 @@ func (s *Server) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
 		IsChild bool   `json:"isChild"`
+		MaxAge  int    `json:"maxAge"`
 	}
 	result := make([]userJSON, 0, len(users))
 	for _, u := range users {
-		result = append(result, userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild})
+		result = append(result, userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild, MaxAge: u.MaxAge})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
@@ -1338,6 +1341,7 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
 		IsChild bool   `json:"isChild"`
+		MaxAge  int    `json:"maxAge"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -1350,7 +1354,7 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Color == "" {
 		req.Color = "#3B82F6"
 	}
-	u, err := s.userManager.CreateUser(req.Name, req.Color, req.IsAdmin, req.IsChild)
+	u, err := s.userManager.CreateUser(req.Name, req.Color, req.IsAdmin, req.IsChild, req.MaxAge)
 	if err != nil {
 		http.Error(w, "create user failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -1363,10 +1367,11 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 		"color":   u.Color,
 		"isAdmin": u.IsAdmin,
 		"isChild": u.IsChild,
+		"maxAge":  u.MaxAge,
 	})
 }
 
-// handleAPIUpdateUser updates an existing user's name, color, admin and child status.
+// handleAPIUpdateUser updates an existing user's name, color, admin, child status and max age.
 func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if s.userManager == nil {
 		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
@@ -1378,12 +1383,13 @@ func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Color   string `json:"color"`
 		IsAdmin bool   `json:"isAdmin"`
 		IsChild bool   `json:"isChild"`
+		MaxAge  int    `json:"maxAge"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	u, err := s.userManager.UpdateUser(id, req.Name, req.Color, req.IsAdmin, req.IsChild)
+	u, err := s.userManager.UpdateUser(id, req.Name, req.Color, req.IsAdmin, req.IsChild, req.MaxAge)
 	if err != nil {
 		http.Error(w, "update user failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -1395,6 +1401,7 @@ func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 		"color":   u.Color,
 		"isAdmin": u.IsAdmin,
 		"isChild": u.IsChild,
+		"maxAge":  u.MaxAge,
 	})
 }
 
