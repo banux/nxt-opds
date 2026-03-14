@@ -524,6 +524,11 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		if q.MaxAgeRating > 0 && bk.AgeRating > q.MaxAgeRating {
 			continue
 		}
+		if q.AgeRating == -1 && bk.AgeRating != 0 {
+			continue
+		} else if q.AgeRating > 0 && bk.AgeRating != q.AgeRating {
+			continue
+		}
 		if q.Query == "" {
 			matched = append(matched, bk)
 			continue

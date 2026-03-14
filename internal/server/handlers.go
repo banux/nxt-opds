@@ -740,7 +740,8 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 // handleAPIBooks serves the full book list as JSON for the web frontend.
 // Supports optional ?q= search query, ?series= series filter, ?author= author filter,
 // ?tag= tag filter, ?publisher= publisher filter, ?collection= collection filter,
-// ?unread=1 filter, ?sort= sort order, and standard ?offset=&limit= pagination.
+// ?unread=1 filter, ?age_rating= age classification filter, ?sort= sort order,
+// and standard ?offset=&limit= pagination.
 // When ?ids_only=1 is set, returns {"ids":["id1","id2",...]} for all matching books
 // (no pagination limit) — used by the frontend to build the full prev/next context.
 func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
@@ -752,6 +753,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	collectionFilter := r.URL.Query().Get("collection")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	idsOnly := r.URL.Query().Get("ids_only") == "1"
+	ageRatingFilter, _ := strconv.Atoi(r.URL.Query().Get("age_rating"))
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
 
@@ -773,6 +775,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			SortBy:       sortBy,
 			SortOrder:    sortOrder,
 			MaxAgeRating: maxAge,
+			AgeRating:    ageRatingFilter,
 		})
 		if err != nil {
 			http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -803,6 +806,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		SortBy:       sortBy,
 		SortOrder:    sortOrder,
 		MaxAgeRating: maxAge,
+		AgeRating:    ageRatingFilter,
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)

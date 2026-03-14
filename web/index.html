@@ -459,6 +459,7 @@
         <p class="text-sm text-gray-500 dark:text-gray-400">
           <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
           <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
+          <span v-else-if="ageRatingFilter !== 0">{{ total }} livre{{ total !== 1 ? 's' : '' }} dans cette classification</span>
           <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }} dans la bibliothèque</span>
         </p>
 
@@ -473,6 +474,22 @@
           </svg>
           Non lus seulement
         </button>
+
+        <!-- Age rating filter -->
+        <select v-model.number="ageRatingFilter" @change="page = 1; loadBooks()"
+          :class="ageRatingFilter !== 0
+            ? 'border-pink-500 text-pink-700 dark:text-pink-300 bg-pink-50 dark:bg-pink-900/20'
+            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800'"
+          class="text-xs border rounded-full px-3 py-1 focus:outline-none focus:ring-2 focus:ring-pink-500 cursor-pointer transition-colors">
+          <option :value="0">Tous les âges</option>
+          <option :value="-1">Non classifié</option>
+          <option :value="3">3+ Petite enfance</option>
+          <option :value="6">6+ Enfants</option>
+          <option :value="10">10+ Jeunesse</option>
+          <option :value="12">12+ Adolescent</option>
+          <option :value="16">16+ Jeune adulte</option>
+          <option :value="18">18+ Adulte</option>
+        </select>
 
         <!-- Tags management link -->
         <a @click="navigateTo('/tags')"
@@ -2097,11 +2114,12 @@ createApp({
     const books       = ref([])
     const total       = ref(0)
     const loading     = ref(false)
-    const page        = ref(1)
-    const PAGE_SIZE   = 48
-    const searchQuery = ref('')
-    const unreadOnly  = ref(false)
-    const sortOrder   = ref(localStorage.getItem('nxt-sort') || 'added_desc')
+    const page              = ref(1)
+    const PAGE_SIZE         = 48
+    const searchQuery       = ref('')
+    const unreadOnly        = ref(false)
+    const ageRatingFilter   = ref(0)   // 0 = all, -1 = unclassified, 3/6/10/12/16 = exact
+    const sortOrder         = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
     const totalPages = computed(() => Math.ceil(total.value / PAGE_SIZE))
@@ -2145,6 +2163,7 @@ createApp({
         })
         if (searchQuery.value.trim()) params.set('q', searchQuery.value.trim())
         if (unreadOnly.value) params.set('unread', '1')
+        if (ageRatingFilter.value !== 0) params.set('age_rating', ageRatingFilter.value)
         if (sortOrder.value) params.set('sort', sortOrder.value)
         const res = await apiFetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -2671,6 +2690,7 @@ createApp({
       const p = new URLSearchParams()
       if (searchQuery.value.trim()) p.set('q', searchQuery.value.trim())
       if (unreadOnly.value) p.set('unread', '1')
+      if (ageRatingFilter.value !== 0) p.set('age_rating', ageRatingFilter.value)
       if (sortOrder.value) p.set('sort', sortOrder.value)
       return p.toString()
     }
@@ -3382,7 +3402,7 @@ createApp({
 
     return {
       isDark, toggleDark,
-      books, total, loading, page, searchQuery, unreadOnly, sortOrder, totalPages, pageNumbers,
+      books, total, loading, page, searchQuery, unreadOnly, ageRatingFilter, sortOrder, totalPages, pageNumbers,
       loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
