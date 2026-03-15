@@ -57,8 +57,9 @@ type Server struct {
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
 	opts          Options
-	opdsToken     string    // token for OPDS route authentication
-	startedAt     time.Time // process start time, used by /api/ping for restart detection
+	opdsToken          string    // token for OPDS route authentication
+	startedAt          time.Time // process start time, used by /api/ping for restart detection
+	lastMaintenanceAt  time.Time // timestamp of the last successful catalog maintenance (refresh/index)
 }
 
 // New creates and configures a new Server with the given catalog backend and options.
@@ -73,7 +74,8 @@ func New(cat catalog.Catalog, opts Options) *Server {
 		sessions:  newSessionStore(),
 		opts:      opts,
 		opdsToken: opts.OPDSToken,
-		startedAt: time.Now(),
+		startedAt:         time.Now(),
+		lastMaintenanceAt: time.Now(),
 	}
 	if u, ok := cat.(catalog.Uploader); ok {
 		s.uploader = u
@@ -133,6 +135,12 @@ func New(cat catalog.Catalog, opts Options) *Server {
 // ServeHTTP implements http.Handler, delegating to the mux router.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+// RecordMaintenance records the current time as the last successful catalog
+// maintenance timestamp.  Call this after any background or manual refresh.
+func (s *Server) RecordMaintenance() {
+	s.lastMaintenanceAt = time.Now()
 }
 
 // registerRoutes sets up all endpoint routes.

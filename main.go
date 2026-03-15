@@ -59,6 +59,18 @@ func main() {
 	}
 	log.Printf("catalog loaded from %q", cfg.BooksDir)
 
+	opts := server.Options{
+		Password:        cfg.Password,
+		OPDSToken:       cfg.OPDSToken,
+		StaticFS:        web.FS,
+		AnthropicAPIKey: cfg.AnthropicAPIKey,
+		Version:         version,
+	}
+	if cfg.AnthropicAPIKey != "" {
+		log.Printf("AI assistant enabled (Anthropic API key configured)")
+	}
+	srv := server.New(cat, opts)
+
 	// Start background catalog refresh if the backend supports it and an
 	// interval is configured (> 0).
 	if r, ok := cat.(catalog.Refresher); ok && cfg.RefreshInterval > 0 {
@@ -71,6 +83,7 @@ func main() {
 					log.Printf("background catalog refresh error: %v", err)
 				} else {
 					log.Printf("catalog refreshed")
+					srv.RecordMaintenance()
 				}
 			}
 		}()
@@ -86,18 +99,6 @@ func main() {
 		log.Printf("nightly database backup enabled (dir: %s, keep: %d)", backupDir, keep)
 		go runNightlyBackup(bu, backupDir, keep)
 	}
-
-	opts := server.Options{
-		Password:        cfg.Password,
-		OPDSToken:       cfg.OPDSToken,
-		StaticFS:        web.FS,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		Version:         version,
-	}
-	if cfg.AnthropicAPIKey != "" {
-		log.Printf("AI assistant enabled (Anthropic API key configured)")
-	}
-	srv := server.New(cat, opts)
 
 	log.Printf("nxt-opds %s starting on %s", version, cfg.ListenAddr)
 	log.Printf("Web UI available at http://localhost%s/", cfg.ListenAddr)

@@ -327,7 +327,8 @@
             </svg>
           </button>
 
-          <button @click="doRefresh" :disabled="refreshing" title="Rafraîchir le catalogue"
+          <button @click="doRefresh" :disabled="refreshing"
+            :title="lastMaintenanceAt ? 'Dernier traitement : ' + formatMaintenanceDate(lastMaintenanceAt) + '\nRafraîchir le catalogue' : 'Rafraîchir le catalogue'"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">
             <svg class="w-5 h-5" :class="refreshing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -461,6 +462,9 @@
           <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
           <span v-else-if="ageRatingFilter !== 0">{{ total }} livre{{ total !== 1 ? 's' : '' }} dans cette classification</span>
           <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }} dans la bibliothèque</span>
+          <span v-if="lastMaintenanceAt" class="ml-2 text-xs text-gray-400 dark:text-gray-500">
+            · Mis à jour le {{ formatMaintenanceDate(lastMaintenanceAt) }}
+          </span>
         </p>
 
         <!-- Unread filter toggle -->
@@ -2943,6 +2947,29 @@ createApp({
       }
     }
 
+    // ---- Maintenance timestamp ----
+    const lastMaintenanceAt = ref(null) // Date object or null
+
+    async function fetchMaintenanceTime() {
+      try {
+        const res = await fetch('/api/ping')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.lastMaintenanceAt) {
+            lastMaintenanceAt.value = new Date(data.lastMaintenanceAt)
+          }
+        }
+      } catch { /* non-critical */ }
+    }
+
+    function formatMaintenanceDate(d) {
+      if (!d) return ''
+      return d.toLocaleString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      })
+    }
+
     // ---- Refresh catalog ----
     const refreshing = ref(false)
 
@@ -2952,6 +2979,7 @@ createApp({
         const res = await apiFetch('/api/refresh', { method: 'POST' })
         if (!res.ok) throw new Error('HTTP ' + res.status)
         await loadBooks()
+        await fetchMaintenanceTime()
         showToast('Catalogue mis à jour', 'success')
       } catch (e) {
         showToast('Échec de la mise à jour : ' + e.message, 'error')
@@ -3398,6 +3426,8 @@ createApp({
 
       // Check for updates in the background (non-blocking)
       checkForUpdate()
+      // Load last maintenance time
+      fetchMaintenanceTime()
     })
 
     return {
@@ -3423,6 +3453,7 @@ createApp({
       tagsSuggestions, tagsSuggestionsVisible, onTagsInput, hideTagsSuggestions, selectTag,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
+      lastMaintenanceAt, formatMaintenanceDate,
       refreshing, doRefresh,
       appVersion, latestVersion, updateAvailable, updateReleaseURL, updateReleaseNotes,
       showUpdateDialog, updating, updateError, updateApplied, restarting,

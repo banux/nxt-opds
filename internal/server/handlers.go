@@ -668,8 +668,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIPing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"ok":        true,
-		"startedAt": s.startedAt.UnixMilli(),
+		"ok":                true,
+		"startedAt":         s.startedAt.UnixMilli(),
+		"lastMaintenanceAt": s.lastMaintenanceAt.UnixMilli(),
 	})
 }
 
@@ -1931,6 +1932,7 @@ func (s *Server) handleAPIRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "refresh failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.lastMaintenanceAt = time.Now()
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
