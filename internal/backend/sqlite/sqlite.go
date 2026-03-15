@@ -283,6 +283,7 @@ func (b *Backend) Refresh() error {
 			// Log but don't abort; best-effort indexing.
 			continue
 		}
+		b.updateMaintenanceAt(bk.ID)
 	}
 
 	// Delete books whose files have been removed from disk.
@@ -329,13 +330,13 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 INSERT OR IGNORE INTO books
     (id, title, summary, language, publisher, published_at, updated_at, added_at,
      series, series_index, series_total, collection, collection_index, is_read, rating, age_rating, cover_url, thumbnail_url,
-     file_path, file_mime, file_size, last_maintenance_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     file_path, file_mime, file_size)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
 		pubAt, updAt, addedAt,
 		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating,
 		bk.CoverURL, bk.ThumbnailURL,
-		filePath, fileMIME, fileSize, time.Now().Unix(),
+		filePath, fileMIME, fileSize,
 	)
 	if err != nil {
 		return err
@@ -354,6 +355,12 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	}
 
 	return tx.Commit()
+}
+
+// updateMaintenanceAt sets last_maintenance_at to NOW for the given book ID.
+// It is called after a book has been fully parsed and its cover extracted.
+func (b *Backend) updateMaintenanceAt(id string) {
+	_, _ = b.db.Exec(`UPDATE books SET last_maintenance_at = ? WHERE id = ?`, time.Now().Unix(), id)
 }
 
 // CoverPath returns the filesystem path to the cached cover image for a book ID.
@@ -905,6 +912,7 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	if err := b.insertBook(bk); err != nil {
 		return nil, fmt.Errorf("index uploaded book: %w", err)
 	}
+	b.updateMaintenanceAt(bk.ID)
 	return &bk, nil
 }
 
@@ -1014,7 +1022,12 @@ func (r bookRow) toBook() catalog.Book {
 		ThumbnailURL: r.ThumbnailURL,
 		UpdatedAt:         time.Unix(r.UpdatedAt, 0),
 		AddedAt:           time.Unix(r.AddedAt, 0),
-		LastMaintenanceAt: time.Unix(r.LastMaintenanceAt, 0),
+		LastMaintenanceAt: func() time.Time {
+			if r.LastMaintenanceAt == 0 {
+				return time.Time{}
+			}
+			return time.Unix(r.LastMaintenanceAt, 0)
+		}(),
 		Files: []catalog.File{
 			{MIMEType: r.FileMIME, Path: r.FilePath, Size: r.FileSize},
 		},
