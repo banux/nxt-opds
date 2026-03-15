@@ -806,6 +806,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	if update.AgeRating != nil {
 		bk.AgeRating = *update.AgeRating
 	}
+	if update.LastMaintenanceAt != nil {
+		bk.LastMaintenanceAt = *update.LastMaintenanceAt
+	}
 	bk.UpdatedAt = time.Now()
 
 	// Persist to DB.
@@ -815,13 +818,18 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	maintenanceVal := int64(0)
+	if !bk.LastMaintenanceAt.IsZero() {
+		maintenanceVal = bk.LastMaintenanceAt.Unix()
+	}
+
 	_, err = tx.Exec(`
 UPDATE books SET
     title=?, summary=?, language=?, publisher=?,
-    updated_at=?, series=?, series_index=?, series_total=?, collection=?, collection_index=?, is_read=?, rating=?, age_rating=?
+    updated_at=?, series=?, series_index=?, series_total=?, collection=?, collection_index=?, is_read=?, rating=?, age_rating=?, last_maintenance_at=?
 WHERE id=?`,
 		bk.Title, bk.Summary, bk.Language, bk.Publisher,
-		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating,
+		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating, maintenanceVal,
 		id,
 	)
 	if err != nil {

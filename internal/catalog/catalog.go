@@ -301,6 +301,9 @@ type BookUpdate struct {
 	IsRead          *bool
 	Rating          *int
 	AgeRating       *int
+	// LastMaintenanceAt, if non-nil, sets the maintenance timestamp.
+	// Use a zero time.Time to clear it; use time.Now() to mark as "just processed".
+	LastMaintenanceAt *time.Time
 }
 
 // Updater is an optional interface for catalog backends that support book metadata editing.

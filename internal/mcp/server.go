@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/catalog"
 )
@@ -254,8 +255,9 @@ func (s *Server) toolsList() toolsListResult {
 					"series_total":     {Type: "string", Description: "Nombre total de livres dans la série"},
 					"collection":       {Type: "string", Description: "Nom de la collection éditoriale"},
 					"collection_index": {Type: "string", Description: "Numéro dans la collection"},
-					"is_read":          {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
-					"rating":           {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+					"is_read":              {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
+					"rating":               {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+					"last_maintenance_at":  {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour mettre à jour au moment actuel (maintenant)."},
 				},
 			},
 		},
@@ -532,6 +534,15 @@ func (s *Server) toolUpdateBook(args map[string]any) (any, *rpcError) {
 			v = 5
 		}
 		update.Rating = &v
+	}
+	if v, ok := numericArg(args, "last_maintenance_at"); ok {
+		var t time.Time
+		if v == -1 {
+			t = time.Now()
+		} else if v > 0 {
+			t = time.UnixMilli(int64(v))
+		}
+		update.LastMaintenanceAt = &t
 	}
 
 	// authors: array of strings
@@ -925,6 +936,9 @@ func formatBookDetail(b *catalog.Book) string {
 	}
 	if b.Summary != "" {
 		fmt.Fprintf(&sb, "\n**Résumé:**\n%s\n", b.Summary)
+	}
+	if !b.LastMaintenanceAt.IsZero() {
+		fmt.Fprintf(&sb, "**Indexé le:** %s\n", b.LastMaintenanceAt.Format("2006-01-02 15:04:05"))
 	}
 	if len(b.Files) > 0 {
 		sb.WriteString("\n**Fichiers:**\n")

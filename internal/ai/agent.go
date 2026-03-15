@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/catalog"
 )
@@ -172,8 +173,9 @@ func (a *Agent) toolDefs() []apiTool {
 					"series_total":     {Type: "string", Description: "Nombre total de livres dans la série"},
 					"collection":       {Type: "string", Description: "Nom de la collection éditoriale"},
 					"collection_index": {Type: "string", Description: "Numéro dans la collection"},
-					"is_read":          {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
-					"rating":           {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+					"is_read":             {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
+					"rating":              {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+					"last_maintenance_at": {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour la date actuelle."},
 				},
 			},
 		},
@@ -508,6 +510,15 @@ func (a *Agent) toolUpdateBook(args map[string]any) (string, bool) {
 			v = 5
 		}
 		upd.Rating = &v
+	}
+	if v, ok := numArg(args, "last_maintenance_at"); ok {
+		var t time.Time
+		if v == -1 {
+			t = time.Now()
+		} else if v > 0 {
+			t = time.UnixMilli(int64(v))
+		}
+		upd.LastMaintenanceAt = &t
 	}
 	if raw, ok := args["authors"]; ok {
 		if arr, ok := raw.([]any); ok {

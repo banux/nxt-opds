@@ -33,11 +33,12 @@ type metaOverride struct {
 	Series      *string  `json:"series"`
 	SeriesIndex *string  `json:"seriesIndex"`
 	SeriesTotal *string  `json:"seriesTotal"`
-	Collection      *string `json:"collection"`
-	CollectionIndex *string `json:"collectionIndex"`
-	IsRead          *bool   `json:"isRead"`
-	Rating          *int    `json:"rating"`
-	AgeRating       *int    `json:"ageRating"`
+	Collection      *string    `json:"collection"`
+	CollectionIndex *string    `json:"collectionIndex"`
+	IsRead          *bool      `json:"isRead"`
+	Rating          *int       `json:"rating"`
+	AgeRating       *int       `json:"ageRating"`
+	LastMaintenanceAt *int64   `json:"lastMaintenanceAt"` // Unix seconds, 0 = cleared
 }
 
 // Backend is a filesystem-based catalog backend.
@@ -160,6 +161,13 @@ func mergeOverride(bk catalog.Book, ov metaOverride) catalog.Book {
 	if ov.AgeRating != nil {
 		bk.AgeRating = *ov.AgeRating
 	}
+	if ov.LastMaintenanceAt != nil {
+		if *ov.LastMaintenanceAt == 0 {
+			bk.LastMaintenanceAt = time.Time{}
+		} else {
+			bk.LastMaintenanceAt = time.Unix(*ov.LastMaintenanceAt, 0)
+		}
+	}
 	return bk
 }
 
@@ -218,6 +226,13 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	if update.AgeRating != nil {
 		ov.AgeRating = update.AgeRating
+	}
+	if update.LastMaintenanceAt != nil {
+		ts := update.LastMaintenanceAt.Unix()
+		if update.LastMaintenanceAt.IsZero() {
+			ts = 0
+		}
+		ov.LastMaintenanceAt = &ts
 	}
 
 	b.overrides[id] = ov

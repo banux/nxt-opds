@@ -896,6 +896,8 @@ type bookUpdateRequest struct {
 	IsRead          *bool   `json:"isRead"`
 	Rating          *int    `json:"rating"`
 	AgeRating       *int    `json:"ageRating"`
+	// LastMaintenanceAt: Unix ms timestamp; -1 means "now".
+	LastMaintenanceAt *int64  `json:"lastMaintenanceAt"`
 }
 
 // handleAPIBook handles GET /api/books/{id} to fetch a single book as JSON.
@@ -988,21 +990,33 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		updateIsRead = nil // don't also write to global is_read
 	}
 
+	var maintenanceAt *time.Time
+	if req.LastMaintenanceAt != nil {
+		var t time.Time
+		if *req.LastMaintenanceAt == -1 {
+			t = time.Now()
+		} else if *req.LastMaintenanceAt > 0 {
+			t = time.UnixMilli(*req.LastMaintenanceAt)
+		}
+		maintenanceAt = &t
+	}
+
 	update := catalog.BookUpdate{
-		Title:           req.Title,
-		Authors:         req.Authors,
-		Tags:            req.Tags,
-		Summary:         req.Summary,
-		Publisher:       req.Publisher,
-		Language:        req.Language,
-		Series:          req.Series,
-		SeriesIndex:     req.SeriesIndex,
-		SeriesTotal:     req.SeriesTotal,
-		Collection:      req.Collection,
-		CollectionIndex: req.CollectionIndex,
-		IsRead:          updateIsRead,
-		Rating:          req.Rating,
-		AgeRating:       req.AgeRating,
+		Title:             req.Title,
+		Authors:           req.Authors,
+		Tags:              req.Tags,
+		Summary:           req.Summary,
+		Publisher:         req.Publisher,
+		Language:          req.Language,
+		Series:            req.Series,
+		SeriesIndex:       req.SeriesIndex,
+		SeriesTotal:       req.SeriesTotal,
+		Collection:        req.Collection,
+		CollectionIndex:   req.CollectionIndex,
+		IsRead:            updateIsRead,
+		Rating:            req.Rating,
+		AgeRating:         req.AgeRating,
+		LastMaintenanceAt: maintenanceAt,
 	}
 
 	bk, err := s.updater.UpdateBook(id, update)
