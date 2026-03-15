@@ -83,7 +83,6 @@ func main() {
 					log.Printf("background catalog refresh error: %v", err)
 				} else {
 					log.Printf("catalog refreshed")
-					srv.RecordMaintenance()
 				}
 			}
 		}()

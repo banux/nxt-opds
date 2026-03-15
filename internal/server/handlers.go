@@ -668,9 +668,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIPing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"ok":                true,
-		"startedAt":         s.startedAt.UnixMilli(),
-		"lastMaintenanceAt": s.lastMaintenanceAt.UnixMilli(),
+		"ok":        true,
+		"startedAt": s.startedAt.UnixMilli(),
 	})
 }
 
@@ -693,8 +692,9 @@ type bookJSON struct {
 	ReadColors      []string `json:"readColors"`   // hex colors of all users who have read it
 	Rating          int      `json:"rating"`
 	AgeRating       int      `json:"ageRating"`
-	DownloadURL string   `json:"downloadUrl"`
-	FileType    string   `json:"fileType,omitempty"` // MIME type of the primary file (e.g. "application/epub+zip")
+	DownloadURL       string `json:"downloadUrl"`
+	FileType          string `json:"fileType,omitempty"` // MIME type of the primary file (e.g. "application/epub+zip")
+	LastMaintenanceAt int64  `json:"lastMaintenanceAt,omitempty"` // Unix ms, when this book was last indexed
 }
 
 // currentUserID returns the user ID stored in the request context (set by authMiddleware
@@ -859,6 +859,12 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			AgeRating:       bk.AgeRating,
 			DownloadURL:     "/opds/books/" + bk.ID + "/download",
 			FileType:        fileType,
+			LastMaintenanceAt: func() int64 {
+				if !bk.LastMaintenanceAt.IsZero() {
+					return bk.LastMaintenanceAt.UnixMilli()
+				}
+				return 0
+			}(),
 		}
 		for _, a := range bk.Authors {
 			j.Authors = append(j.Authors, a.Name)
@@ -938,6 +944,12 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 				return bk.Files[0].MIMEType
 			}
 			return ""
+		}(),
+		LastMaintenanceAt: func() int64 {
+			if !bk.LastMaintenanceAt.IsZero() {
+				return bk.LastMaintenanceAt.UnixMilli()
+			}
+			return 0
 		}(),
 	}
 	for _, a := range bk.Authors {
@@ -1034,6 +1046,12 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 				return bk.Files[0].MIMEType
 			}
 			return ""
+		}(),
+		LastMaintenanceAt: func() int64 {
+			if !bk.LastMaintenanceAt.IsZero() {
+				return bk.LastMaintenanceAt.UnixMilli()
+			}
+			return 0
 		}(),
 	}
 	for _, a := range bk.Authors {
@@ -1932,7 +1950,6 @@ func (s *Server) handleAPIRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "refresh failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.lastMaintenanceAt = time.Now()
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }

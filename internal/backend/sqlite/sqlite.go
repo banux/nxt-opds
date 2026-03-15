@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 9
+const currentSchemaVersion = 10
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -91,6 +91,7 @@ var schemaMigrations = []schemaMigration{
 	{version: 7, apply: migration7},
 	{version: 8, apply: migration8},
 	{version: 9, apply: migration9},
+	{version: 10, apply: migration10},
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -328,13 +329,13 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 INSERT OR IGNORE INTO books
     (id, title, summary, language, publisher, published_at, updated_at, added_at,
      series, series_index, series_total, collection, collection_index, is_read, rating, age_rating, cover_url, thumbnail_url,
-     file_path, file_mime, file_size)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     file_path, file_mime, file_size, last_maintenance_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
 		pubAt, updAt, addedAt,
 		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating,
 		bk.CoverURL, bk.ThumbnailURL,
-		filePath, fileMIME, fileSize,
+		filePath, fileMIME, fileSize, time.Now().Unix(),
 	)
 	if err != nil {
 		return err
@@ -989,8 +990,9 @@ type bookRow struct {
 	FilePath     string
 	FileMIME     string
 	FileSize     int64
-	AuthorsJSON  *string // JSON array of {name,uri} objects, may be NULL
-	TagsJSON     *string // JSON array of strings, may be NULL
+	LastMaintenanceAt int64
+	AuthorsJSON       *string // JSON array of {name,uri} objects, may be NULL
+	TagsJSON          *string // JSON array of strings, may be NULL
 }
 
 func (r bookRow) toBook() catalog.Book {
@@ -1010,8 +1012,9 @@ func (r bookRow) toBook() catalog.Book {
 		AgeRating:       r.AgeRating,
 		CoverURL:     r.CoverURL,
 		ThumbnailURL: r.ThumbnailURL,
-		UpdatedAt:    time.Unix(r.UpdatedAt, 0),
-		AddedAt:      time.Unix(r.AddedAt, 0),
+		UpdatedAt:         time.Unix(r.UpdatedAt, 0),
+		AddedAt:           time.Unix(r.AddedAt, 0),
+		LastMaintenanceAt: time.Unix(r.LastMaintenanceAt, 0),
 		Files: []catalog.File{
 			{MIMEType: r.FileMIME, Path: r.FilePath, Size: r.FileSize},
 		},
@@ -1044,6 +1047,7 @@ const bookSelectColumns = `
     b.id, b.title, b.summary, b.language, b.publisher,
     b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.collection, b.collection_index, b.is_read, b.rating, b.age_rating,
     b.cover_url, b.thumbnail_url, b.file_path, b.file_mime, b.file_size,
+    COALESCE(b.last_maintenance_at, 0),
     (SELECT json_group_array(json_object('name',ba.author_name,'uri',ba.author_uri))
        FROM book_authors ba WHERE ba.book_id = b.id) AS authors_json,
     (SELECT json_group_array(bt.tag)
@@ -1066,6 +1070,7 @@ func (b *Backend) queryBooks(clause string, args ...any) ([]catalog.Book, error)
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
 			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
+			&r.LastMaintenanceAt,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {
 			return nil, err
@@ -1332,6 +1337,7 @@ func scanRecommendationRows(rows *sql.Rows, fromFirst bool) ([]catalog.Recommend
 			&r.Collection, &r.CollectionIndex,
 			&r.IsRead, &r.Rating, &r.AgeRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
+			&r.LastMaintenanceAt,
 			&r.AuthorsJSON, &r.TagsJSON,
 		); err != nil {
 			return nil, err
@@ -1592,6 +1598,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expiry);
 // migration9 adds max_age to users for per-child-profile age filtering (version 8 → 9).
 func migration9(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN max_age INTEGER NOT NULL DEFAULT 10`)
+	return nil
+}
+
+// migration10 adds last_maintenance_at to books for per-book indexing timestamp (version 9 → 10).
+func migration10(db *sql.DB) error {
+	_, _ = db.Exec(`ALTER TABLE books ADD COLUMN last_maintenance_at INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 

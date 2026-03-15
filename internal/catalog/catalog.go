@@ -76,6 +76,9 @@ type Book struct {
 	// 0 = non classifié, 3 = petite enfance, 6 = enfants, 10 = jeunesse,
 	// 12 = adolescent, 18 = adulte.
 	AgeRating int
+
+	// LastMaintenanceAt is when this book's metadata was last extracted/indexed.
+	LastMaintenanceAt time.Time
 }
 
 // Author represents a publication author.
