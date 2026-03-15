@@ -257,6 +257,7 @@ func (s *Server) toolsList() toolsListResult {
 					"collection_index": {Type: "string", Description: "Numéro dans la collection"},
 					"is_read":              {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
 					"rating":               {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+					"age_rating":           {Type: "integer", Description: "Classification d'âge : 0=non classifié, 3=3+, 6=6+, 10=10+, 12=12+, 16=16+, 18=18+"},
 					"last_maintenance_at":  {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour mettre à jour au moment actuel (maintenant)."},
 				},
 			},
@@ -534,6 +535,9 @@ func (s *Server) toolUpdateBook(args map[string]any) (any, *rpcError) {
 			v = 5
 		}
 		update.Rating = &v
+	}
+	if v, ok := numericArg(args, "age_rating"); ok {
+		update.AgeRating = &v
 	}
 	if v, ok := numericArg(args, "last_maintenance_at"); ok {
 		var t time.Time
@@ -933,6 +937,9 @@ func formatBookDetail(b *catalog.Book) string {
 	}
 	if b.Rating > 0 {
 		fmt.Fprintf(&sb, "**Note:** %s\n", stars(b.Rating))
+	}
+	if b.AgeRating > 0 {
+		fmt.Fprintf(&sb, "**Classification d'âge:** %d+\n", b.AgeRating)
 	}
 	if b.Summary != "" {
 		fmt.Fprintf(&sb, "\n**Résumé:**\n%s\n", b.Summary)

@@ -175,6 +175,7 @@ func (a *Agent) toolDefs() []apiTool {
 					"collection_index": {Type: "string", Description: "Numéro dans la collection"},
 					"is_read":             {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
 					"rating":              {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+					"age_rating":          {Type: "integer", Description: "Classification d'âge : 0=non classifié, 3=3+, 6=6+, 10=10+, 12=12+, 16=16+, 18=18+"},
 					"last_maintenance_at": {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour la date actuelle."},
 				},
 			},
@@ -510,6 +511,9 @@ func (a *Agent) toolUpdateBook(args map[string]any) (string, bool) {
 			v = 5
 		}
 		upd.Rating = &v
+	}
+	if v, ok := numArg(args, "age_rating"); ok {
+		upd.AgeRating = &v
 	}
 	if v, ok := numArg(args, "last_maintenance_at"); ok {
 		var t time.Time
