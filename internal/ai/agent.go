@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -200,6 +202,17 @@ func (a *Agent) toolDefs() []apiTool {
 				},
 			},
 		},
+		{
+			Name:        "fetch_url",
+			Description: "Récupère le contenu texte d'une URL (page web d'éditeur, Babelio, ActuSF, Wikipedia…). Utile pour rechercher le résumé officiel d'un livre. Retourne le texte brut de la page (HTML dépouillé), limité à 8000 caractères.",
+			InputSchema: toolInputSchema{
+				Type:     "object",
+				Required: []string{"url"},
+				Properties: map[string]toolPropSchema{
+					"url": {Type: "string", Description: "URL complète à récupérer (https://...)"},
+				},
+			},
+		},
 	}
 }
 
@@ -225,16 +238,45 @@ func (a *Agent) Chat(ctx context.Context, history []Message, userPrompt string) 
 		Content: []apiContent{{Type: "text", Text: userPrompt}},
 	})
 
-	systemPrompt := `Tu es un assistant bibliothécaire pour nxt-opds, une application de gestion de bibliothèque numérique personnelle. Tu aides l'utilisateur à trouver des livres, gérer ses lectures et modifier les métadonnées.
+	systemPrompt := `Tu es un assistant bibliothécaire pour nxt-opds, une application de gestion de bibliothèque numérique personnelle. Tu aides l'utilisateur à trouver des livres, gérer ses lectures, et enrichir les métadonnées du catalogue.
 
-Tu as accès aux outils suivants pour interagir avec le catalogue :
-- search_books : rechercher des livres
-- get_book : obtenir les détails d'un livre
+## Outils disponibles
+- search_books : rechercher des livres (résultats partiels, sans résumé complet)
+- get_book : obtenir les détails complets d'un livre (résumé, age_rating, tags…)
 - update_book : modifier les métadonnées d'un livre
 - list_authors : lister les auteurs
-- list_tags : lister les tags/genres
+- list_tags : lister tous les tags/genres existants
 
-Réponds toujours en français. Sois concis et utile. Quand tu affliches des livres, utilise un format lisible avec le titre, l'auteur et les informations pertinentes.`
+## Enrichissement des métadonnées
+
+Quand l'utilisateur demande d'enrichir, corriger ou maintenir des livres, applique ce processus :
+
+**1. Tags**
+- Charge list_tags une fois pour connaître le vocabulaire existant
+- Dédoublonne (garde la version capitalisée)
+- Capitalise chaque tag : "Science-Fiction", "Roman Graphique", etc.
+- Ajoute les tags pertinents manquants (genre, thèmes) — 5 à 10 tags au total
+
+**2. Résumé**
+- Utilise get_book pour vérifier le résumé existant (search_books ne le retourne pas)
+- Si absent ou trop court (≤ 50 caractères), indique que tu peux le rechercher sur Babelio/ActuSF/éditeur
+- Ne pas inventer de résumé
+
+**3. Classification d'âge (age_rating)**
+Utilise le champ entier age_rating dans update_book — jamais un tag texte :
+- 0 = non classifié, 3 = tout public, 6 = dès 6 ans, 10 = jeunesse
+- 12 = young adult / ado, 16 = adulte averti, 18 = adulte uniquement
+Si age_rating > 0 est déjà renseigné, ne pas le modifier.
+
+**4. Finalisation**
+- Fais un seul appel update_book par livre avec tous les champs modifiés
+- Inclus toujours last_maintenance_at: -1 pour enregistrer la date de maintenance
+- Résume les changements en une ligne par livre
+
+## Instructions générales
+- Réponds toujours en français
+- Toujours appeler get_book avant de modifier un livre (les données de search_books sont incomplètes)
+- Quand tu affiches des livres, utilise un format lisible avec titre, auteur et infos pertinentes`
 
 	// Agentic loop.
 	for i := 0; i < maxAgentIterations; i++ {
@@ -313,6 +355,8 @@ func (a *Agent) executeTool(name string, rawInput json.RawMessage) (string, bool
 		return a.toolListAuthors(args)
 	case "list_tags":
 		return a.toolListTags(args)
+	case "fetch_url":
+		return a.toolFetchURL(args)
 	default:
 		return "Outil inconnu: " + name, true
 	}
@@ -586,6 +630,59 @@ func (a *Agent) toolListTags(args map[string]any) (string, bool) {
 		fmt.Fprintf(&sb, "- %s\n", t)
 	}
 	return sb.String(), false
+}
+
+var (
+	reHTMLTags    = regexp.MustCompile(`<[^>]+>`)
+	reWhitespace  = regexp.MustCompile(`\s{2,}`)
+)
+
+func (a *Agent) toolFetchURL(args map[string]any) (string, bool) {
+	url, ok := args["url"].(string)
+	if !ok || url == "" {
+		return "Paramètre 'url' requis", true
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return "URL invalide : doit commencer par https://", true
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "Erreur création requête: " + err.Error(), true
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; nxt-opds-agent/1.0)")
+	req.Header.Set("Accept", "text/html,text/plain")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return "Erreur fetch: " + err.Error(), true
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Sprintf("HTTP %d pour %s", resp.StatusCode, url), true
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 200*1024))
+	if err != nil {
+		return "Erreur lecture: " + err.Error(), true
+	}
+
+	// Strip HTML and normalise whitespace.
+	text := reHTMLTags.ReplaceAllString(string(body), " ")
+	text = html.UnescapeString(text)
+	text = reWhitespace.ReplaceAllString(text, " ")
+	text = strings.TrimSpace(text)
+
+	const maxChars = 8000
+	if len([]rune(text)) > maxChars {
+		runes := []rune(text)
+		text = string(runes[:maxChars]) + "…"
+	}
+	return text, false
 }
 
 // ─── HTTP API call ─────────────────────────────────────────────────────────────
