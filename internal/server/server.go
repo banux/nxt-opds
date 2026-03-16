@@ -29,8 +29,12 @@ type Options struct {
 	StaticFS fs.FS
 
 	// AnthropicAPIKey is the Anthropic API key for the AI chat feature.
-	// If empty, the /api/ai/chat endpoint returns 503.
+	// If empty and AnthropicOAuthToken is also empty, the /api/ai/chat endpoint returns 503.
 	AnthropicAPIKey string
+
+	// AnthropicOAuthToken is an OAuth Bearer token for the Anthropic API.
+	// Takes precedence over AnthropicAPIKey when both are set.
+	AnthropicOAuthToken string
 
 	// Version is the current binary version (e.g. "v1.52.0" or "dev").
 	// Used by the update-check endpoint.
@@ -123,7 +127,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 
 	s.mcpServer = mcp.New(cat)
-	if opts.AnthropicAPIKey != "" {
+	if opts.AnthropicOAuthToken != "" {
+		s.aiAgent = ai.NewWithOAuth(opts.AnthropicOAuthToken, cat)
+	} else if opts.AnthropicAPIKey != "" {
 		s.aiAgent = ai.New(opts.AnthropicAPIKey, cat)
 	}
 	s.registerRoutes()

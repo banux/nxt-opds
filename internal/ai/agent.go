@@ -31,9 +31,10 @@ const (
 // Agent is an AI assistant backed by the Anthropic Claude API.
 // It can search and modify the book catalog through tool calls.
 type Agent struct {
-	apiKey   string
-	catalog  catalog.Catalog
-	updater  catalog.Updater
+	apiKey     string // set when using x-api-key authentication
+	oauthToken string // set when using OAuth Bearer token authentication
+	catalog    catalog.Catalog
+	updater    catalog.Updater
 	httpClient *http.Client
 }
 
@@ -41,6 +42,20 @@ type Agent struct {
 func New(apiKey string, cat catalog.Catalog) *Agent {
 	a := &Agent{
 		apiKey:     apiKey,
+		catalog:    cat,
+		httpClient: &http.Client{},
+	}
+	if u, ok := cat.(catalog.Updater); ok {
+		a.updater = u
+	}
+	return a
+}
+
+// NewWithOAuth creates a new Agent using an OAuth Bearer token for authentication.
+// This supports Claude.ai OAuth tokens as an alternative to API keys.
+func NewWithOAuth(oauthToken string, cat catalog.Catalog) *Agent {
+	a := &Agent{
+		oauthToken: oauthToken,
 		catalog:    cat,
 		httpClient: &http.Client{},
 	}
@@ -706,7 +721,11 @@ func (a *Agent) callAPI(ctx context.Context, messages []apiMessage, system strin
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", a.apiKey)
+	if a.oauthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+a.oauthToken)
+	} else {
+		req.Header.Set("x-api-key", a.apiKey)
+	}
 	req.Header.Set("anthropic-version", anthropicVersion)
 
 	resp, err := a.httpClient.Do(req)

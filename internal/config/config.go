@@ -71,8 +71,14 @@ type Config struct {
 
 	// AnthropicAPIKey is the API key for the Anthropic Claude AI service.
 	// Set via ANTHROPIC_API_KEY env var or anthropic_api_key config key.
-	// If empty, the AI chat endpoint (/api/ai/chat) is disabled.
+	// If empty and AnthropicOAuthToken is also empty, the AI chat endpoint is disabled.
 	AnthropicAPIKey string `yaml:"anthropic_api_key"`
+
+	// AnthropicOAuthToken is an OAuth Bearer token for the Anthropic Claude API.
+	// Use this as an alternative to AnthropicAPIKey when authenticating via OAuth
+	// (e.g. Claude.ai OAuth tokens). Takes precedence over AnthropicAPIKey when set.
+	// Set via ANTHROPIC_OAUTH_TOKEN env var or anthropic_oauth_token config key.
+	AnthropicOAuthToken string `yaml:"anthropic_oauth_token"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -133,6 +139,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
 		cfg.AnthropicAPIKey = v
+	}
+	if v := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); v != "" {
+		cfg.AnthropicOAuthToken = v
 	}
 
 	// If no explicit OPDS token but a password is set, derive a stable token

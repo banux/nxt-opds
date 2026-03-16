@@ -60,13 +60,16 @@ func main() {
 	log.Printf("catalog loaded from %q", cfg.BooksDir)
 
 	opts := server.Options{
-		Password:        cfg.Password,
-		OPDSToken:       cfg.OPDSToken,
-		StaticFS:        web.FS,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		Version:         version,
+		Password:            cfg.Password,
+		OPDSToken:           cfg.OPDSToken,
+		StaticFS:            web.FS,
+		AnthropicAPIKey:     cfg.AnthropicAPIKey,
+		AnthropicOAuthToken: cfg.AnthropicOAuthToken,
+		Version:             version,
 	}
-	if cfg.AnthropicAPIKey != "" {
+	if cfg.AnthropicOAuthToken != "" {
+		log.Printf("AI assistant enabled (Anthropic OAuth token configured)")
+	} else if cfg.AnthropicAPIKey != "" {
 		log.Printf("AI assistant enabled (Anthropic API key configured)")
 	}
 	srv := server.New(cat, opts)
