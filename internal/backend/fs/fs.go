@@ -541,7 +541,10 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		}
 		if q.AgeRating == -1 && bk.AgeRating != 0 {
 			continue
-		} else if q.AgeRating > 0 && bk.AgeRating != q.AgeRating {
+		} else if q.AgeRating > 0 && (bk.AgeRating <= 0 || bk.AgeRating > q.AgeRating) {
+			continue
+		}
+		if q.NotIndexed && !bk.LastMaintenanceAt.IsZero() {
 			continue
 		}
 		if q.Query == "" {

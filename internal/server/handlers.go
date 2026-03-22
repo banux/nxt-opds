@@ -753,6 +753,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	publisherFilter := r.URL.Query().Get("publisher")
 	collectionFilter := r.URL.Query().Get("collection")
 	unreadOnly := r.URL.Query().Get("unread") == "1"
+	notIndexed := r.URL.Query().Get("not_indexed") == "1"
 	idsOnly := r.URL.Query().Get("ids_only") == "1"
 	ageRatingFilter, _ := strconv.Atoi(r.URL.Query().Get("age_rating"))
 	sortBy, sortOrder := parseSortParam(r)
@@ -772,6 +773,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			Offset:       0,
 			Limit:        99999,
 			UnreadOnly:   unreadOnly,
+			NotIndexed:   notIndexed,
 			UserID:       userID,
 			SortBy:       sortBy,
 			SortOrder:    sortOrder,
@@ -803,6 +805,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		Offset:       offset,
 		Limit:        limit,
 		UnreadOnly:   unreadOnly,
+		NotIndexed:   notIndexed,
 		UserID:       userID,
 		SortBy:       sortBy,
 		SortOrder:    sortOrder,

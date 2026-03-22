@@ -460,6 +460,7 @@
         <p class="text-sm text-gray-500 dark:text-gray-400">
           <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
           <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
+          <span v-else-if="notIndexedOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non indexé{{ total !== 1 ? 's' : '' }}</span>
           <span v-else-if="ageRatingFilter !== 0">{{ total }} livre{{ total !== 1 ? 's' : '' }} dans cette classification</span>
           <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }} dans la bibliothèque</span>
         </p>
@@ -476,6 +477,18 @@
           Non lus seulement
         </button>
 
+        <!-- Not-indexed filter toggle -->
+        <button @click="toggleNotIndexedFilter"
+          :class="notIndexedOnly
+            ? 'bg-orange-500 text-white border-orange-500'
+            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-orange-500 hover:text-orange-500'"
+          class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Non indexés
+        </button>
+
         <!-- Age rating filter -->
         <select v-model.number="ageRatingFilter" @change="page = 1; loadBooks()"
           :class="ageRatingFilter !== 0
@@ -484,12 +497,12 @@
           class="text-xs border rounded-full px-3 py-1 focus:outline-none focus:ring-2 focus:ring-pink-500 cursor-pointer transition-colors">
           <option :value="0">Tous les âges</option>
           <option :value="-1">Non classifié</option>
-          <option :value="3">3+ Petite enfance</option>
-          <option :value="6">6+ Enfants</option>
-          <option :value="10">10+ Jeunesse</option>
-          <option :value="12">12+ Adolescent</option>
-          <option :value="16">16+ Jeune adulte</option>
-          <option :value="18">18+ Adulte</option>
+          <option :value="3">Jusqu'à 3+</option>
+          <option :value="6">Jusqu'à 6+</option>
+          <option :value="10">Jusqu'à 10+</option>
+          <option :value="12">Jusqu'à 12+</option>
+          <option :value="16">Jusqu'à 16+</option>
+          <option :value="18">Jusqu'à 18+</option>
         </select>
 
         <!-- Tags management link -->
@@ -2125,7 +2138,8 @@ createApp({
     const PAGE_SIZE         = 48
     const searchQuery       = ref('')
     const unreadOnly        = ref(false)
-    const ageRatingFilter   = ref(0)   // 0 = all, -1 = unclassified, 3/6/10/12/16 = exact
+    const notIndexedOnly    = ref(false)
+    const ageRatingFilter   = ref(0)   // 0 = all, -1 = unclassified, N > 0 = age_rating > 0 AND <= N
     const sortOrder         = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
@@ -2170,6 +2184,7 @@ createApp({
         })
         if (searchQuery.value.trim()) params.set('q', searchQuery.value.trim())
         if (unreadOnly.value) params.set('unread', '1')
+        if (notIndexedOnly.value) params.set('not_indexed', '1')
         if (ageRatingFilter.value !== 0) params.set('age_rating', ageRatingFilter.value)
         if (sortOrder.value) params.set('sort', sortOrder.value)
         const res = await apiFetch('/api/books?' + params)
@@ -2191,6 +2206,12 @@ createApp({
 
     function toggleUnreadFilter() {
       unreadOnly.value = !unreadOnly.value
+      page.value = 1
+      loadBooks()
+    }
+
+    function toggleNotIndexedFilter() {
+      notIndexedOnly.value = !notIndexedOnly.value
       page.value = 1
       loadBooks()
     }
@@ -2697,6 +2718,7 @@ createApp({
       const p = new URLSearchParams()
       if (searchQuery.value.trim()) p.set('q', searchQuery.value.trim())
       if (unreadOnly.value) p.set('unread', '1')
+      if (notIndexedOnly.value) p.set('not_indexed', '1')
       if (ageRatingFilter.value !== 0) p.set('age_rating', ageRatingFilter.value)
       if (sortOrder.value) p.set('sort', sortOrder.value)
       return p.toString()
@@ -3418,8 +3440,8 @@ createApp({
 
     return {
       isDark, toggleDark,
-      books, total, loading, page, searchQuery, unreadOnly, ageRatingFilter, sortOrder, totalPages, pageNumbers,
-      loadBooks, onSearchInput, toggleUnreadFilter, onSortChange, goPage, coverGradient,
+      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, sortOrder, totalPages, pageNumbers,
+      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
       onBookTouchStart, onBookTouchEnd,

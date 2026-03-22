@@ -219,6 +219,7 @@ func (s *Server) toolsList() toolsListResult {
 					"publisher":   {Type: "string", Description: "Filtre par nom d'éditeur exact"},
 					"collection":  {Type: "string", Description: "Filtre par collection éditoriale exacte"},
 					"unread_only": {Type: "boolean", Description: "Si vrai, retourne uniquement les livres non lus"},
+					"not_indexed":  {Type: "boolean", Description: "Si vrai, retourne uniquement les livres jamais traités par le libraire (last_maintenance_at = 0)"},
 					"sort":        {Type: "string", Description: "Tri : added_desc (défaut), added_asc, title_asc, title_desc", Enum: []string{"added_desc", "added_asc", "title_asc", "title_desc"}},
 					"limit":       {Type: "integer", Description: "Nombre maximum de résultats (défaut: 20, max: 100)"},
 					"offset":      {Type: "integer", Description: "Décalage pour la pagination (défaut: 0)"},
@@ -429,6 +430,9 @@ func (s *Server) toolSearchBooks(args map[string]any) (any, *rpcError) {
 	}
 	if v, ok := args["unread_only"].(bool); ok {
 		q.UnreadOnly = v
+	}
+	if v, ok := args["not_indexed"].(bool); ok {
+		q.NotIndexed = v
 	}
 	if v, ok := args["sort"].(string); ok {
 		switch v {

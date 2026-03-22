@@ -71,8 +71,8 @@ Si `age_rating > 0` est déjà renseigné, ne le modifie pas sauf si clairement 
 ## Mode batch (sans argument)
 
 1. Charge `list_tags` une fois pour le vocabulaire
-2. Récupère les livres en paginant avec `search_books` (limit: 20, sort: added_desc)
-3. Pour chaque lot, priorise dans l'ordre :
+2. **Priorité absolue : les livres jamais traités** — commence par `search_books(not_indexed: true, limit: 20, sort: added_desc)`
+3. Si aucun livre non indexé, bascule sur `search_books(limit: 20, sort: added_desc)` et priorise dans l'ordre :
    - Livres sans résumé (`summary` absent ou très court)
    - Livres avec `age_rating == 0`
    - Livres avec des tags non capitalisés

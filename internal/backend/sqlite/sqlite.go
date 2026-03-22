@@ -543,8 +543,11 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		// Show only unclassified books
 		extraClauses = append(extraClauses, "b.age_rating = 0")
 	} else if q.AgeRating > 0 {
-		extraClauses = append(extraClauses, "b.age_rating = ?")
+		extraClauses = append(extraClauses, "b.age_rating > 0 AND b.age_rating <= ?")
 		extraArgs = append(extraArgs, q.AgeRating)
+	}
+	if q.NotIndexed {
+		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")
 	}
 
 	extraWhere := ""
