@@ -352,7 +352,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
             </svg>
-            <span v-if="wishlistItems.length > 0"
+            <span v-if="wishlistHasNew"
               class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-500"></span>
           </button>
 
@@ -377,7 +377,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
             </svg>
-            <span v-if="wishlistItems.length > 0"
+            <span v-if="wishlistHasNew"
               class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-500"></span>
           </button>
 
@@ -387,7 +387,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
             </svg>
-            <span v-if="myRecommendations.length > 0"
+            <span v-if="recommendationsHasNew"
               class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-violet-500"></span>
           </button>
 
@@ -2623,11 +2623,11 @@ createApp({
       } else if (hash === '#/recommendations') {
         currentView.value = 'recommendations'
         window.scrollTo({ top: 0, behavior: 'instant' })
-        await loadRecommendations()
+        await loadRecommendations(true)
       } else if (hash === '#/wishlist') {
         currentView.value = 'wishlist'
         window.scrollTo({ top: 0, behavior: 'instant' })
-        await loadWishlist()
+        await loadWishlist(true)
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -3148,6 +3148,22 @@ createApp({
       adminUserForm.value = { name: '', color: '#3B82F6', isAdmin: false, isChild: false, maxAge: 10 }
     }
 
+    // ---- Seen tracking (localStorage) ----
+    const wishlistSeenCount         = ref(parseInt(localStorage.getItem('wishlist_seen_count') || '0', 10))
+    const recommendationsSeenCount  = ref(parseInt(localStorage.getItem('recommendations_seen_count') || '0', 10))
+    const wishlistHasNew            = computed(() => wishlistAllItems.value.length > wishlistSeenCount.value)
+    const recommendationsHasNew     = computed(() => myRecommendations.value.length > recommendationsSeenCount.value)
+
+    function markWishlistSeen() {
+      wishlistSeenCount.value = wishlistAllItems.value.length
+      localStorage.setItem('wishlist_seen_count', wishlistSeenCount.value)
+    }
+
+    function markRecommendationsSeen() {
+      recommendationsSeenCount.value = myRecommendations.value.length
+      localStorage.setItem('recommendations_seen_count', recommendationsSeenCount.value)
+    }
+
     // ---- Recommendations ----
     const myRecommendations    = ref([])
     const recommendationsLoading = ref(false)
@@ -3163,12 +3179,13 @@ createApp({
       return adminUsers.value.filter(u => u.id !== currentUser.value.id)
     })
 
-    async function loadRecommendations() {
+    async function loadRecommendations(markSeen) {
       if (!multiUser.value || !currentUser.value) return
       recommendationsLoading.value = true
       try {
         const res = await apiFetch('/api/recommendations')
         if (res.ok) myRecommendations.value = await res.json()
+        if (markSeen) markRecommendationsSeen()
       } catch(e) { /* non-blocking */ }
       finally { recommendationsLoading.value = false }
     }
@@ -3209,12 +3226,13 @@ createApp({
     const wishlistForm      = ref({ title: '', author: '', releaseDate: '', notes: '' })
     const wishlistSaving    = ref(false)
 
-    async function loadWishlist() {
+    async function loadWishlist(markSeen) {
       wishlistLoading.value = true
       try {
         // Fetch all items (all users); in multi-user mode the server joins user info
         const res = await apiFetch('/api/wishlist?all=1')
         if (res.ok) wishlistAllItems.value = await res.json()
+        if (markSeen) markWishlistSeen()
       } catch(e) { /* non-blocking */ }
       finally { wishlistLoading.value = false }
     }
@@ -3472,6 +3490,7 @@ createApp({
       multiUser, currentUser,
       adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
       loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
+      wishlistHasNew, recommendationsHasNew,
       myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,
       wishlistAllItems, wishlistItems, wishlistLoading, wishlistEditingId, wishlistForm, wishlistSaving,
