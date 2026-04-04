@@ -153,6 +153,14 @@ func (s *Server) registerRoutes() {
 	r.HandleFunc("/login", s.handleLoginPost).Methods(http.MethodPost)
 	r.HandleFunc("/logout", s.handleLogout).Methods(http.MethodPost, http.MethodGet)
 
+	// PWA assets must be publicly accessible for browser install flow
+	if s.opts.StaticFS != nil {
+		staticServer := http.FileServer(http.FS(s.opts.StaticFS))
+		r.Handle("/sw.js", staticServer).Methods(http.MethodGet)
+		r.Handle("/manifest.json", staticServer).Methods(http.MethodGet)
+		r.PathPrefix("/icons/").Handler(staticServer).Methods(http.MethodGet)
+	}
+
 	// All other routes are wrapped with the auth middleware.
 	protected := r.NewRoute().Subrouter()
 	protected.Use(auth)

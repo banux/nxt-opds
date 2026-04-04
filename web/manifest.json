@@ -1,0 +1,55 @@
+{
+  "name": "nxt-opds Bibliothèque",
+  "short_name": "Bibliothèque",
+  "description": "Votre bibliothèque personnelle de livres numériques",
+  "lang": "fr",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1e40af",
+  "theme_color": "#2563eb",
+  "categories": ["books", "education", "entertainment"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Bibliothèque",
+      "short_name": "Livres",
+      "description": "Voir tous les livres",
+      "url": "/#/",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Liste de souhaits",
+      "short_name": "Souhaits",
+      "description": "Voir la liste de souhaits",
+      "url": "/#/wishlist",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
