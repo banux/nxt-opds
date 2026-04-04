@@ -63,6 +63,9 @@
     #reader-container iframe {
       border: none !important;
     }
+    /* Hide scrollbar on filter pill row (mobile scroll) */
+    .pills-scroll::-webkit-scrollbar { display: none; }
+    .pills-scroll { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -308,19 +311,19 @@
       <!-- Actions (grid-only: OPDS, refresh, upload; always: dark mode, logout) -->
       <div class="flex items-center gap-2 shrink-0">
         <template v-if="currentView === 'grid'">
-          <!-- OPDS feed link (browser) -->
+          <!-- OPDS feed link (browser) — hidden on mobile, shown on sm+ -->
           <a href="/opds" target="_blank" title="Flux OPDS (navigateur)"
-             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+             class="hidden sm:flex p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M5 3a1 1 0 000 2c5.523 0 10 4.477 10 10a1 1 0 102 0C17 8.373 11.627 3 5 3z"/>
               <path d="M4 9a1 1 0 012 0c0 3.314 2.686 6 6 6a1 1 0 110 2A8 8 0 014 9zM3 15a2 2 0 114 0 2 2 0 01-4 0z"/>
             </svg>
           </a>
 
-          <!-- Copy OPDS reader URL (with token if configured) -->
+          <!-- Copy OPDS reader URL (with token if configured) — hidden on mobile -->
           <button @click="copyOPDSUrl"
             :title="opdsUrlCopied ? 'URL copiée !' : 'Copier l\'URL OPDS pour lecteur'"
-            class="p-2 rounded-lg transition-colors"
+            class="hidden sm:flex p-2 rounded-lg transition-colors"
             :class="opdsUrlCopied
               ? 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20'
               : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'">
@@ -447,7 +450,7 @@
   </header>
 
   <!-- Main content -->
-  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6" :class="currentView === 'reader' ? 'overflow-hidden' : ''">
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6" :class="currentView === 'reader' ? 'overflow-hidden' : ''">
 
     <!-- ===== GRID VIEW ===== -->
     <template v-if="currentView === 'grid'">
@@ -462,8 +465,28 @@
       </div>
 
       <!-- Filter bar -->
-      <div class="flex flex-wrap items-center gap-3 mb-4">
-        <p class="text-sm text-gray-500 dark:text-gray-400">
+      <div class="mb-4">
+        <!-- Count text + sort: always two-item row on mobile, inline on sm+ -->
+        <div class="flex items-center justify-between mb-2 sm:hidden">
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
+            <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
+            <span v-else-if="notIndexedOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non indexé{{ total !== 1 ? 's' : '' }}</span>
+            <span v-else-if="ageRatingFilter !== 0">{{ total }} livre{{ total !== 1 ? 's' : '' }} classifiés</span>
+            <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }}</span>
+          </p>
+          <select v-model="sortOrder" @change="onSortChange"
+            class="text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer">
+            <option value="added_desc">Récent</option>
+            <option value="added_asc">Ancien</option>
+            <option value="title_asc">A→Z</option>
+            <option value="title_desc">Z→A</option>
+          </select>
+        </div>
+
+        <!-- Pills row: scrollable on mobile, wraps on sm+ -->
+        <div class="pills-scroll flex overflow-x-auto sm:flex-wrap sm:items-center gap-3 pb-2 sm:pb-0 -mx-4 sm:mx-0 px-4 sm:px-0">
+        <p class="text-sm text-gray-500 dark:text-gray-400 shrink-0 hidden sm:block">
           <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
           <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
           <span v-else-if="notIndexedOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non indexé{{ total !== 1 ? 's' : '' }}</span>
@@ -476,11 +499,11 @@
           :class="unreadOnly
             ? 'bg-brand-600 text-white border-brand-600'
             : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-600 hover:text-brand-600'"
-          class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
+          class="flex shrink-0 items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
           </svg>
-          Non lus seulement
+          <span class="whitespace-nowrap">Non lus</span>
         </button>
 
         <!-- Not-indexed filter toggle -->
@@ -488,11 +511,11 @@
           :class="notIndexedOnly
             ? 'bg-orange-500 text-white border-orange-500'
             : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-orange-500 hover:text-orange-500'"
-          class="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
+          class="flex shrink-0 items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
-          Non indexés
+          <span class="whitespace-nowrap">Non indexés</span>
         </button>
 
         <!-- Age rating filter -->
@@ -500,7 +523,7 @@
           :class="ageRatingFilter !== 0
             ? 'border-pink-500 text-pink-700 dark:text-pink-300 bg-pink-50 dark:bg-pink-900/20'
             : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800'"
-          class="text-xs border rounded-full px-3 py-1 focus:outline-none focus:ring-2 focus:ring-pink-500 cursor-pointer transition-colors">
+          class="shrink-0 text-xs border rounded-full px-3 py-1 focus:outline-none focus:ring-2 focus:ring-pink-500 cursor-pointer transition-colors">
           <option :value="0">Tous les âges</option>
           <option :value="-1">Non classifié</option>
           <option :value="3">Jusqu'à 3+</option>
@@ -513,15 +536,15 @@
 
         <!-- Tags management link -->
         <a @click="navigateTo('/tags')"
-          class="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
+          class="flex shrink-0 items-center gap-1 px-3 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
           </svg>
-          Étiquettes
+          <span class="whitespace-nowrap">Étiquettes</span>
         </a>
 
-        <!-- Sort selector -->
-        <div class="ml-auto flex items-center gap-1.5">
+        <!-- Sort selector (hidden on mobile — shown in the row above) -->
+        <div class="hidden sm:flex ml-auto items-center gap-1.5 shrink-0">
           <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9M3 12h5m10 4l-4-4 4-4"/>
           </svg>
@@ -533,7 +556,8 @@
             <option value="title_desc">Titre Z→A</option>
           </select>
         </div>
-      </div>
+        </div><!-- end pills row -->
+      </div><!-- end filter bar -->
 
       <!-- Loading spinner -->
       <div v-if="loading" class="flex justify-center items-center py-24">
@@ -854,7 +878,8 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
               </svg>
-              {{ currentBook.isRead ? 'Marquer comme non lu' : 'Marquer comme lu' }}
+              <span class="hidden sm:inline">{{ currentBook.isRead ? 'Marquer comme non lu' : 'Marquer comme lu' }}</span>
+              <span class="sm:hidden">{{ currentBook.isRead ? 'Non lu' : 'Lu' }}</span>
             </button>
 
             <button @click="openEdit(currentBook)"
@@ -862,7 +887,7 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
               </svg>
-              Modifier les métadonnées
+              Modifier<span class="hidden sm:inline"> les métadonnées</span>
             </button>
 
             <!-- Recommend button (multi-user only) -->
@@ -876,7 +901,7 @@
 
             <!-- Delete button -->
             <button @click="deleteBook(currentBook)" :disabled="deleting"
-              class="flex items-center gap-2 px-4 py-2 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ml-auto">
+              class="flex items-center gap-2 px-4 py-2 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 sm:ml-auto">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
               </svg>
@@ -891,11 +916,16 @@
 
     <!-- ===== READER VIEW ===== -->
     <template v-else-if="currentView === 'reader'">
-      <div class="flex overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8 -mt-6" style="height: calc(100vh - 3.5rem);">
+      <div class="relative flex overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8 -mt-6" style="height: calc(100vh - 3.5rem);">
 
-        <!-- TOC panel -->
+        <!-- Mobile TOC backdrop -->
+        <div v-if="readerTocOpen" @click="readerTocOpen = false"
+          class="sm:hidden absolute inset-0 z-10 bg-black/40">
+        </div>
+
+        <!-- TOC panel — overlay on mobile, side panel on sm+ -->
         <aside v-show="readerTocOpen"
-          class="w-64 shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto flex flex-col">
+          class="absolute sm:relative inset-y-0 left-0 z-20 sm:z-auto w-64 shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto flex flex-col shadow-lg sm:shadow-none">
           <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
             <h2 class="font-semibold text-sm text-gray-700 dark:text-gray-300">Table des matières</h2>
           </div>
@@ -1330,7 +1360,7 @@
         <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
           {{ collectionBooks.length }} livre{{ collectionBooks.length !== 1 ? 's' : '' }}
         </p>
-        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
           <div v-for="book in collectionBooks" :key="book.id"
             @click="openBook(book.id, collectionBooks)"
             class="cursor-pointer group flex flex-col rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-white dark:bg-gray-800">
@@ -1491,10 +1521,10 @@
     <!-- ===== RECOMMENDATIONS PAGE ===== -->
     <template v-else-if="currentView === 'recommendations'">
       <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-        <div class="flex items-center justify-between mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Livres recommandés pour moi</h1>
           <button @click="navigateTo('/')"
-            class="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors">
+            class="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors self-start sm:self-auto">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
             </svg>
@@ -1548,10 +1578,10 @@
     <!-- ===== WISHLIST PAGE ===== -->
     <template v-else-if="currentView === 'wishlist'">
       <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-        <div class="flex items-center justify-between mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Liste de souhaits</h1>
           <button @click="openWishlistForm(null)"
-            class="flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+            class="flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors self-start sm:self-auto">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
             </svg>
@@ -1619,9 +1649,9 @@
   </main>
 
   <!-- ===== Wishlist Modal (add / edit) ===== -->
-  <div v-if="wishlistEditingId !== null" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div v-if="wishlistEditingId !== null" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="cancelWishlistEdit"></div>
-    <div class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 z-10">
+    <div class="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-lg w-full p-4 sm:p-6 z-10">
       <button @click="cancelWishlistEdit"
         class="absolute top-3 right-3 p-1.5 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1669,9 +1699,9 @@
   </div>
 
   <!-- ===== Upload Modal ===== -->
-  <div v-if="uploadDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="closeUpload">
+  <div v-if="uploadDialog" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4" @click.self="closeUpload">
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="closeUpload"></div>
-    <div class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6 z-10">
+    <div class="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full p-4 sm:p-6 z-10">
       <button @click="closeUpload"
         class="absolute top-3 right-3 p-1.5 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1748,9 +1778,9 @@
   </div>
 
   <!-- ===== Edit Metadata Modal ===== -->
-  <div v-if="editDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div v-if="editDialog" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
-    <div class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 z-10 overflow-y-auto max-h-[90vh]">
+    <div class="relative bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 z-10 overflow-y-auto max-h-[92vh] sm:max-h-[90vh]">
       <button @click="closeEdit"
         class="absolute top-3 right-3 p-1.5 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
