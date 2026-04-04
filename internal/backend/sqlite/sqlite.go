@@ -393,7 +393,9 @@ func (b *Backend) UpdateCover(id string, src io.ReadCloser, ext string) error {
 	}
 	out.Close()
 
-	coverURL := "/covers/" + id
+	// Append a version parameter so that browsers/service-workers treat the
+	// updated cover as a different resource and don't serve a stale cached copy.
+	coverURL := fmt.Sprintf("/covers/%s?v=%d", id, time.Now().UnixMilli())
 	_, err = b.db.Exec(
 		`UPDATE books SET cover_url=?, thumbnail_url=? WHERE id=?`,
 		coverURL, coverURL, id,

@@ -350,15 +350,19 @@ func (b *Backend) UpdateCover(id string, src io.ReadCloser, ext string) error {
 	}
 	out.Close()
 
+	// Append a version parameter so that browsers/service-workers treat the
+	// updated cover as a different resource and don't serve a stale cached copy.
+	coverURL := fmt.Sprintf("/covers/%s?v=%d", id, time.Now().UnixMilli())
+
 	// Update in-memory record so subsequent API responses reflect the new cover.
 	bk := b.byID[id]
-	bk.CoverURL = "/covers/" + id
-	bk.ThumbnailURL = "/covers/" + id
+	bk.CoverURL = coverURL
+	bk.ThumbnailURL = coverURL
 	// Mirror into the main slice (byID points into books slice, but update to be safe).
 	for i := range b.books {
 		if b.books[i].ID == id {
-			b.books[i].CoverURL = bk.CoverURL
-			b.books[i].ThumbnailURL = bk.ThumbnailURL
+			b.books[i].CoverURL = coverURL
+			b.books[i].ThumbnailURL = coverURL
 			break
 		}
 	}
