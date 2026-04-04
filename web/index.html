@@ -73,7 +73,7 @@
 
   <!-- Header -->
   <header class="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-30">
-    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 flex items-center gap-2 sm:gap-4">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 flex items-center gap-1 sm:gap-4 overflow-hidden">
 
       <!-- Book page: back button + title -->
       <template v-if="currentView === 'book'">
@@ -291,7 +291,7 @@
         </a>
 
         <!-- Search bar -->
-        <div class="flex-1 max-w-xl">
+        <div class="flex-1 min-w-0 max-w-xl">
           <div class="relative">
             <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
                  fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -410,10 +410,10 @@
           </button>
         </template>
 
-        <!-- AI Chat button (only when API key configured) -->
+        <!-- AI Chat button (only when API key configured) — hidden on mobile -->
         <button v-if="aiEnabled" @click="chatOpen = !chatOpen"
           :title="chatOpen ? 'Fermer l\'assistant IA' : 'Assistant IA'"
-          class="p-2 rounded-lg transition-colors"
+          class="hidden sm:flex p-2 rounded-lg transition-colors"
           :class="chatOpen
             ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20'
             : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'">
@@ -424,7 +424,7 @@
         </button>
 
         <button @click="toggleDark" title="Basculer le mode sombre"
-          class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          class="hidden sm:flex p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
           <svg v-if="isDark" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
