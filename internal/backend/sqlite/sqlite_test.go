@@ -4,9 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/catalog"
 	_ "modernc.org/sqlite"
@@ -356,6 +358,156 @@ func TestSQLiteBackend_UpdateBook(t *testing.T) {
 	}
 	if !bk.IsRead {
 		t.Error("after reopen IsRead should be true")
+	}
+}
+
+func TestSQLiteBackend_UploadedBooksNotMarkedAsIndexed(t *testing.T) {
+	dir := t.TempDir()
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	// Upload a book
+	epubContent := func() *bytes.Buffer {
+		// Create a minimal EPUB in memory
+		buf := new(bytes.Buffer)
+		w := zip.NewWriter(buf)
+		defer w.Close()
+
+		containerXML := `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+		contentOPF := `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Uploaded Book</dc:title>
+    <dc:creator>Test Author</dc:creator>
+    <dc:language>en</dc:language>
+  </metadata>
+</package>`
+
+		f, _ := w.Create("META-INF/container.xml")
+		f.Write([]byte(containerXML))
+		f, _ = w.Create("content.opf")
+		f.Write([]byte(contentOPF))
+
+		return buf
+	}()
+
+	uploaded, err := b.StoreBook("uploaded.epub", io.NopCloser(epubContent))
+	if err != nil {
+		t.Fatalf("StoreBook() error: %v", err)
+	}
+
+	t.Logf("Uploaded book: ID=%s, LastMaintenanceAt=%v, IsZero=%v", uploaded.ID, uploaded.LastMaintenanceAt, uploaded.LastMaintenanceAt.IsZero())
+
+	// Check that the uploaded book appears in NotIndexed filter
+	notIndexedBooks, total, err := b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search(NotIndexed) error: %v", err)
+	}
+
+	if total != 1 {
+		t.Errorf("expected 1 not-indexed book (uploaded book), got %d", total)
+	}
+	if len(notIndexedBooks) != 1 {
+		t.Errorf("expected 1 book in result, got %d", len(notIndexedBooks))
+	}
+	if notIndexedBooks[0].ID != uploaded.ID {
+		t.Errorf("expected uploaded book in results, got %s", notIndexedBooks[0].ID)
+	}
+}
+
+func TestSQLiteBackend_NotIndexedFilter(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "book1.epub"), "Book 1", "Author", "")
+	createMinimalEPUB(t, filepath.Join(dir, "book2.epub"), "Book 2", "Author", "")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	// After New(), Refresh() is called, so all books should be indexed
+	// Get all books first
+	allBooks, _, err := b.Search(catalog.SearchQuery{Limit: 50})
+	if err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	if len(allBooks) != 2 {
+		t.Errorf("expected 2 books total, got %d", len(allBooks))
+	}
+	t.Logf("All books: %v", len(allBooks))
+	for _, b := range allBooks {
+		t.Logf("  - %s: LastMaintenanceAt=%v (IsZero=%v)", b.Title, b.LastMaintenanceAt, b.LastMaintenanceAt.IsZero())
+	}
+
+	// All books should be indexed (not indexed count = 0)
+	notIndexedBooks, total, err := b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search(NotIndexed) error: %v", err)
+	}
+	t.Logf("NotIndexed books count: %d (total=%d)", len(notIndexedBooks), total)
+	if total != 0 {
+		t.Errorf("expected 0 not-indexed books (all should be indexed by Refresh), got %d", total)
+	}
+
+	// Manually create a book with zero lastMaintenanceAt
+	zeroBook := catalog.Book{
+		ID:       "test-zero",
+		Title:    "Zero Maintenance Book",
+		Language: "en",
+		Files: []catalog.File{
+			{Path: "/tmp/test.epub", MIMEType: "application/epub+zip", Size: 1000},
+		},
+	}
+	if err := b.insertBook(zeroBook); err != nil {
+		t.Fatalf("insertBook() error: %v", err)
+	}
+	// Don't call updateMaintenanceAt, so lastMaintenanceAt remains 0
+
+	// Now search for not indexed books
+	notIndexedBooks, total, err = b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search(NotIndexed) after insert error: %v", err)
+	}
+	t.Logf("NotIndexed books after insert: count=%d, total=%d", len(notIndexedBooks), total)
+	if total != 1 {
+		t.Errorf("expected 1 not-indexed book, got %d (total=%d)", len(notIndexedBooks), total)
+	}
+	if len(notIndexedBooks) != 1 {
+		t.Errorf("expected 1 book in result, got %d", len(notIndexedBooks))
+	}
+
+	// Mark the book as indexed
+	now := time.Now()
+	updated, err := b.UpdateBook("test-zero", catalog.BookUpdate{
+		LastMaintenanceAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("UpdateBook() error: %v", err)
+	}
+	if updated.LastMaintenanceAt.IsZero() {
+		t.Error("LastMaintenanceAt should not be zero after update")
+	}
+	t.Logf("Updated book: LastMaintenanceAt=%v", updated.LastMaintenanceAt)
+
+	// Now search for not indexed books again
+	notIndexedBooks, total, err = b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search(NotIndexed) after update error: %v", err)
+	}
+	t.Logf("NotIndexed books after update: count=%d, total=%d", len(notIndexedBooks), total)
+	if total != 0 {
+		t.Errorf("expected 0 not-indexed books after update, got %d (total=%d)", len(notIndexedBooks), total)
 	}
 }
 

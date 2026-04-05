@@ -925,7 +925,7 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	if err := b.insertBook(bk); err != nil {
 		return nil, fmt.Errorf("index uploaded book: %w", err)
 	}
-	b.updateMaintenanceAt(bk.ID)
+	// Don't mark as indexed yet - let the librarian skill process it
 	return &bk, nil
 }
 
