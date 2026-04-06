@@ -196,7 +196,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.30.0",
+			"version": "1.83.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
@@ -265,22 +265,22 @@ func (s *Server) toolsList() toolsListResult {
 		},
 		{
 			Name:        "list_authors",
-			Description: "Retourne la liste de tous les auteurs distincts présents dans le catalogue.",
+			Description: "Retourne la liste de tous les auteurs distincts présents dans le catalogue. Résultats paginés pour limiter le contexte.",
 			InputSchema: &jsonSchema{
 				Type: "object",
 				Properties: map[string]*jsonSchema{
-					"limit":  {Type: "integer", Description: "Nombre maximum de résultats (défaut: 200)"},
+					"limit":  {Type: "integer", Description: "Nombre maximum de résultats (défaut: 100, max: 500)"},
 					"offset": {Type: "integer", Description: "Décalage pour la pagination"},
 				},
 			},
 		},
 		{
 			Name:        "list_tags",
-			Description: "Retourne la liste de tous les tags/genres distincts présents dans le catalogue.",
+			Description: "Retourne la liste de tous les tags/genres distincts présents dans le catalogue. Résultats paginés pour limiter le contexte.",
 			InputSchema: &jsonSchema{
 				Type: "object",
 				Properties: map[string]*jsonSchema{
-					"limit":  {Type: "integer", Description: "Nombre maximum de résultats (défaut: 200)"},
+					"limit":  {Type: "integer", Description: "Nombre maximum de résultats (défaut: 50, max: 200)"},
 					"offset": {Type: "integer", Description: "Décalage pour la pagination"},
 				},
 			},
@@ -295,11 +295,11 @@ func (s *Server) toolsList() toolsListResult {
 		},
 		{
 			Name:        "list_publishers",
-			Description: "Retourne la liste de tous les éditeurs distincts présents dans le catalogue.",
+			Description: "Retourne la liste de tous les éditeurs distincts présents dans le catalogue. Résultats paginés pour limiter le contexte.",
 			InputSchema: &jsonSchema{
 				Type: "object",
 				Properties: map[string]*jsonSchema{
-					"limit":  {Type: "integer", Description: "Nombre maximum de résultats (défaut: 200)"},
+					"limit":  {Type: "integer", Description: "Nombre maximum de résultats (défaut: 100, max: 500)"},
 					"offset": {Type: "integer", Description: "Décalage pour la pagination"},
 				},
 			},
@@ -588,8 +588,11 @@ func (s *Server) toolUpdateBook(args map[string]any) (any, *rpcError) {
 }
 
 func (s *Server) toolListAuthors(args map[string]any) (any, *rpcError) {
-	limit := 200
+	limit := 100
 	if v, ok := numericArg(args, "limit"); ok && v > 0 {
+		if v > 500 {
+			v = 500
+		}
 		limit = v
 	}
 	offset := 0
@@ -603,16 +606,22 @@ func (s *Server) toolListAuthors(args map[string]any) (any, *rpcError) {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d auteur(s) au total :\n", total)
+	fmt.Fprintf(&sb, "%d auteur(s) au total (affichés: %d, offset: %d) :\n", total, len(authors), offset)
 	for _, a := range authors {
 		fmt.Fprintf(&sb, "- %s\n", a)
+	}
+	if total > offset+limit {
+		fmt.Fprintf(&sb, "\n(utilisez offset=%d pour la page suivante)\n", offset+limit)
 	}
 	return textResult(sb.String()), nil
 }
 
 func (s *Server) toolListTags(args map[string]any) (any, *rpcError) {
-	limit := 200
+	limit := 50
 	if v, ok := numericArg(args, "limit"); ok && v > 0 {
+		if v > 200 {
+			v = 200
+		}
 		limit = v
 	}
 	offset := 0
@@ -626,9 +635,12 @@ func (s *Server) toolListTags(args map[string]any) (any, *rpcError) {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d tag(s) au total :\n", total)
+	fmt.Fprintf(&sb, "%d tag(s) au total (affichés: %d, offset: %d) :\n", total, len(tags), offset)
 	for _, t := range tags {
 		fmt.Fprintf(&sb, "- %s\n", t)
+	}
+	if total > offset+limit {
+		fmt.Fprintf(&sb, "\n(utilisez offset=%d pour la page suivante)\n", offset+limit)
 	}
 	return textResult(sb.String()), nil
 }
@@ -652,8 +664,11 @@ func (s *Server) toolListSeries() (any, *rpcError) {
 }
 
 func (s *Server) toolListPublishers(args map[string]any) (any, *rpcError) {
-	limit := 200
+	limit := 100
 	if v, ok := numericArg(args, "limit"); ok && v > 0 {
+		if v > 500 {
+			v = 500
+		}
 		limit = v
 	}
 	offset := 0
@@ -667,9 +682,12 @@ func (s *Server) toolListPublishers(args map[string]any) (any, *rpcError) {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%d éditeur(s) au total :\n", total)
+	fmt.Fprintf(&sb, "%d éditeur(s) au total (affichés: %d, offset: %d) :\n", total, len(publishers), offset)
 	for _, p := range publishers {
 		fmt.Fprintf(&sb, "- %s\n", p)
+	}
+	if total > offset+limit {
+		fmt.Fprintf(&sb, "\n(utilisez offset=%d pour la page suivante)\n", offset+limit)
 	}
 	return textResult(sb.String()), nil
 }
@@ -946,7 +964,12 @@ func formatBookDetail(b *catalog.Book) string {
 		fmt.Fprintf(&sb, "**Classification d'âge:** %d+\n", b.AgeRating)
 	}
 	if b.Summary != "" {
-		fmt.Fprintf(&sb, "\n**Résumé:**\n%s\n", b.Summary)
+		summary := b.Summary
+		const maxSummaryLen = 600
+		if len(summary) > maxSummaryLen {
+			summary = summary[:maxSummaryLen] + "…"
+		}
+		fmt.Fprintf(&sb, "\n**Résumé:**\n%s\n", summary)
 	}
 	if !b.LastMaintenanceAt.IsZero() {
 		fmt.Fprintf(&sb, "**Indexé le:** %s\n", b.LastMaintenanceAt.Format("2006-01-02 15:04:05"))
