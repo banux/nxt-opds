@@ -30,27 +30,48 @@
   <style>
     [v-cloak] { display: none; }
     .book-cover {
-      aspect-ratio: 2/3;
+      /* aspect-ratio: 2/3 — not supported in old eink browsers; use padding-top hack instead */
       width: 100%;
       display: block;
       position: relative;
       overflow: hidden;
     }
+    .book-cover::before {
+      content: '';
+      display: block;
+      padding-top: 150%; /* 3/2 = 1.5 */
+    }
     .book-cover img {
       position: absolute;
-      inset: 0;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0; /* inset: 0 — not supported in old eink browsers */
       width: 100%;
       height: 100%;
+      -o-object-fit: cover;
       object-fit: cover;
     }
     .book-cover .cover-placeholder {
       position: absolute;
-      inset: 0;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0; /* inset: 0 — not supported in old eink browsers */
       width: 100%;
       height: 100%;
+      display: -webkit-box;
+      display: -ms-flexbox;
       display: flex;
+      -webkit-box-orient: vertical;
+      -webkit-box-direction: normal;
+      -ms-flex-direction: column;
       flex-direction: column;
+      -webkit-box-align: center;
+      -ms-flex-align: center;
       align-items: center;
+      -webkit-box-pack: center;
+      -ms-flex-pack: center;
       justify-content: center;
       padding: 0.75rem;
     }
@@ -66,6 +87,30 @@
     /* Hide scrollbar on filter pill row (mobile scroll) */
     .pills-scroll::-webkit-scrollbar { display: none; }
     .pills-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+    /* Aspect-ratio 2:3 container without aspect-ratio CSS (for old eink browsers) */
+    .cover-aspect {
+      width: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+    .cover-aspect::before {
+      content: '';
+      display: block;
+      padding-top: 150%; /* 3/2 ratio */
+    }
+    .cover-aspect > * {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    .cover-aspect img {
+      -o-object-fit: cover;
+      object-fit: cover;
+    }
   </style>
 </head>
 <body class="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -1364,10 +1409,10 @@
           <div v-for="book in collectionBooks" :key="book.id"
             @click="openBook(book.id, collectionBooks)"
             class="cursor-pointer group flex flex-col rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 bg-white dark:bg-gray-800">
-            <div class="relative aspect-[2/3] overflow-hidden bg-gray-100 dark:bg-gray-700">
+            <div class="cover-aspect bg-gray-100 dark:bg-gray-700">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
-                   class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
-              <div v-else class="absolute inset-0 flex items-end p-2" :style="coverGradient(book)">
+                   class="group-hover:scale-105 transition-transform duration-300"/>
+              <div v-else class="flex items-end p-2" :style="coverGradient(book)">
                 <span class="text-white text-xs font-bold line-clamp-3 leading-tight drop-shadow">{{ book.title }}</span>
               </div>
             </div>
@@ -1552,9 +1597,9 @@
             @click="openBook(rec.bookId)">
             <!-- Mini cover -->
             <div class="w-14 shrink-0">
-              <div class="aspect-[2/3] rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
-                <img v-if="rec.coverUrl" :src="rec.coverUrl" :alt="rec.bookTitle" class="w-full h-full object-cover"/>
-                <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+              <div class="cover-aspect rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
+                <img v-if="rec.coverUrl" :src="rec.coverUrl" :alt="rec.bookTitle"/>
+                <div v-else class="flex items-center justify-center text-gray-400 dark:text-gray-500">
                   <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
                   </svg>
