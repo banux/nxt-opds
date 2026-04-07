@@ -846,7 +846,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		j := bookJSON{
 			ID:              bk.ID,
 			Title:           bk.Title,
-			CoverURL:        bk.CoverURL,
+			CoverURL:        withToken(bk.CoverURL, s.opdsToken),
 			Tags:            bk.Tags,
 			Language:        bk.Language,
 			Publisher:       bk.Publisher,
@@ -929,7 +929,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 	j := bookJSON{
 		ID:              bk.ID,
 		Title:           bk.Title,
-		CoverURL:        bk.CoverURL,
+		CoverURL:        withToken(bk.CoverURL, s.opdsToken),
 		Tags:            bk.Tags,
 		Language:        bk.Language,
 		Publisher:       bk.Publisher,
@@ -1043,7 +1043,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	j := bookJSON{
 		ID:              bk.ID,
 		Title:           bk.Title,
-		CoverURL:        bk.CoverURL,
+		CoverURL:        withToken(bk.CoverURL, s.opdsToken),
 		Tags:            bk.Tags,
 		Language:        bk.Language,
 		Publisher:       bk.Publisher,
@@ -1620,7 +1620,7 @@ func (s *Server) handleAPIRecommendations(w http.ResponseWriter, r *http.Request
 		result = append(result, recJSON{
 			BookID:    rec.Book.ID,
 			BookTitle: rec.Book.Title,
-			CoverURL:  rec.Book.CoverURL,
+			CoverURL:  withToken(rec.Book.CoverURL, s.opdsToken),
 			FromName:  rec.FromUser.Name,
 			FromColor: rec.FromUser.Color,
 			Message:   rec.Message,

@@ -654,7 +654,6 @@
               :src="book.coverUrl"
               :alt="book.title"
               class="group-hover:scale-105 transition-transform duration-200"
-              loading="lazy"
               @error="book.coverUrl = ''"
             />
             <div v-else class="cover-placeholder"
@@ -1090,7 +1089,7 @@
                  :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
-                   loading="lazy" @error="book.coverUrl = ''" />
+                   @error="book.coverUrl = ''" />
               <div v-else class="cover-placeholder" :style="{ background: coverGradient(book.id) }">
                 <svg class="w-10 h-10 text-white/60 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -1166,7 +1165,7 @@
                  :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
-                   loading="lazy" @error="book.coverUrl = ''" />
+                   @error="book.coverUrl = ''" />
               <div v-else class="cover-placeholder" :style="{ background: coverGradient(book.id) }">
                 <svg class="w-10 h-10 text-white/60 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -1236,7 +1235,7 @@
                  :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
-                   loading="lazy" @error="book.coverUrl = ''" />
+                   @error="book.coverUrl = ''" />
               <div v-else class="cover-placeholder" :style="{ background: coverGradient(book.id) }">
                 <svg class="w-10 h-10 text-white/60 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -1354,7 +1353,7 @@
                  :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
               <img v-if="book.coverUrl" :src="book.coverUrl" :alt="book.title"
                    class="group-hover:scale-105 transition-transform duration-200"
-                   loading="lazy" @error="book.coverUrl = ''" />
+                   @error="book.coverUrl = ''" />
               <div v-else class="cover-placeholder" :style="{ background: coverGradient(book.id) }">
                 <svg class="w-10 h-10 text-white/60 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
