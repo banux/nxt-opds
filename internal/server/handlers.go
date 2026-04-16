@@ -663,6 +663,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
+// handleSW serves sw.js with the current version injected into CACHE_NAME so
+// that each release gets its own cache namespace and old caches are evicted.
+func (s *Server) handleSW(w http.ResponseWriter, r *http.Request) {
+	if s.opts.StaticFS == nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := s.opts.StaticFS.Open("sw.js")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	version := s.opts.Version
+	if version == "" {
+		version = "dev"
+	}
+	content := strings.ReplaceAll(string(data), "nxt-opds-v1", "nxt-opds-"+version)
+	w.Header().Set("Content-Type", "application/javascript")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	_, _ = w.Write([]byte(content))
+}
+
 // handleAPIPing returns the server startup timestamp in Unix milliseconds.
 // Used by the frontend to detect when the server has been restarted.
 func (s *Server) handleAPIPing(w http.ResponseWriter, r *http.Request) {

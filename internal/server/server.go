@@ -153,7 +153,7 @@ func (s *Server) registerRoutes() {
 	// PWA assets must be publicly accessible for browser install flow
 	if s.opts.StaticFS != nil {
 		staticServer := http.FileServer(http.FS(s.opts.StaticFS))
-		r.Handle("/sw.js", staticServer).Methods(http.MethodGet)
+		r.HandleFunc("/sw.js", s.handleSW).Methods(http.MethodGet)
 		r.Handle("/manifest.json", staticServer).Methods(http.MethodGet)
 		r.PathPrefix("/icons/").Handler(staticServer).Methods(http.MethodGet)
 	}
