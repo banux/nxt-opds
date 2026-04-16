@@ -48,3 +48,8 @@ target/
 
 nxt-opds
 books
+
+# Local config and data files
+config.json
+models/
+vectors.db
