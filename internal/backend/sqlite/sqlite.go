@@ -541,12 +541,21 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		extraClauses = append(extraClauses, "(b.age_rating = 0 OR b.age_rating <= ?)")
 		extraArgs = append(extraArgs, q.MaxAgeRating)
 	}
-	if q.AgeRating == -1 {
-		// Show only unclassified books
-		extraClauses = append(extraClauses, "b.age_rating = 0")
-	} else if q.AgeRating > 0 {
-		extraClauses = append(extraClauses, "b.age_rating > 0 AND b.age_rating <= ?")
-		extraArgs = append(extraArgs, q.AgeRating)
+	if len(q.AgeRatings) > 0 {
+		dbVals := make([]int, 0, len(q.AgeRatings))
+		for _, v := range q.AgeRatings {
+			if v == -1 {
+				dbVals = append(dbVals, 0) // unclassified → age_rating = 0
+			} else {
+				dbVals = append(dbVals, v)
+			}
+		}
+		placeholders := strings.Repeat("?,", len(dbVals))
+		placeholders = placeholders[:len(placeholders)-1]
+		extraClauses = append(extraClauses, "b.age_rating IN ("+placeholders+")")
+		for _, v := range dbVals {
+			extraArgs = append(extraArgs, v)
+		}
 	}
 	if q.NotIndexed {
 		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")

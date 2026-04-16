@@ -123,12 +123,11 @@ type SearchQuery struct {
 	// 0 means no age filter is applied.
 	MaxAgeRating int
 
-	// AgeRating filters by age classification.
-	// -1 means show only unclassified books (age_rating = 0).
-	// Any positive value N shows books with age_rating > 0 AND age_rating <= N
-	// (e.g. selecting 12 also shows 3+, 6+, 10+).
-	// 0 means no filter is applied.
-	AgeRating int
+	// AgeRatings filters by age classification (multiple selection).
+	// -1 means unclassified books (age_rating = 0 in DB).
+	// Positive values match exactly (e.g. [3, 6] shows only 3+ and 6+ books).
+	// Empty slice means no filter is applied.
+	AgeRatings []int
 
 	// NotIndexed restricts results to books that have never been processed
 	// (LastMaintenanceAt is zero / last_maintenance_at = 0).

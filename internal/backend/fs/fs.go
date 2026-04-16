@@ -543,10 +543,22 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		if q.MaxAgeRating > 0 && bk.AgeRating > q.MaxAgeRating {
 			continue
 		}
-		if q.AgeRating == -1 && bk.AgeRating != 0 {
-			continue
-		} else if q.AgeRating > 0 && (bk.AgeRating <= 0 || bk.AgeRating > q.AgeRating) {
-			continue
+		if len(q.AgeRatings) > 0 {
+			dbVal := bk.AgeRating
+			matched := false
+			for _, v := range q.AgeRatings {
+				want := v
+				if v == -1 {
+					want = 0
+				}
+				if dbVal == want {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if q.NotIndexed && !bk.LastMaintenanceAt.IsZero() {
 			continue

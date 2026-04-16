@@ -755,7 +755,14 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 	unreadOnly := r.URL.Query().Get("unread") == "1"
 	notIndexed := r.URL.Query().Get("not_indexed") == "1"
 	idsOnly := r.URL.Query().Get("ids_only") == "1"
-	ageRatingFilter, _ := strconv.Atoi(r.URL.Query().Get("age_rating"))
+	var ageRatingFilters []int
+	if raw := r.URL.Query().Get("age_rating"); raw != "" {
+		for _, s := range strings.Split(raw, ",") {
+			if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+				ageRatingFilters = append(ageRatingFilters, v)
+			}
+		}
+	}
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
 
@@ -778,7 +785,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			SortBy:       sortBy,
 			SortOrder:    sortOrder,
 			MaxAgeRating: maxAge,
-			AgeRating:    ageRatingFilter,
+			AgeRatings:   ageRatingFilters,
 		})
 		if err != nil {
 			http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -810,7 +817,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		SortBy:       sortBy,
 		SortOrder:    sortOrder,
 		MaxAgeRating: maxAge,
-		AgeRating:    ageRatingFilter,
+		AgeRatings:   ageRatingFilters,
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
