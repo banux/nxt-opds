@@ -2177,7 +2177,7 @@
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted, nextTick } = Vue
+const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue
 
 createApp({
   setup() {
@@ -2238,8 +2238,8 @@ createApp({
       return res
     }
 
-    async function loadBooks() {
-      loading.value = true
+    async function loadBooks(silent = false) {
+      if (!silent) loading.value = true
       try {
         const params = new URLSearchParams({
           limit:  PAGE_SIZE,
@@ -3528,6 +3528,26 @@ createApp({
 
       // Check for updates in the background (non-blocking)
       checkForUpdate()
+
+      // Background auto-refresh every 60 s (silent, only on grid view)
+      const bgRefreshInterval = setInterval(() => {
+        if (currentView.value === 'grid' && !document.hidden) {
+          loadBooks(true)
+        }
+      }, 60_000)
+
+      // Refresh immediately when the tab becomes visible again
+      const onVisibilityChange = () => {
+        if (!document.hidden && currentView.value === 'grid') {
+          loadBooks(true)
+        }
+      }
+      document.addEventListener('visibilitychange', onVisibilityChange)
+
+      onUnmounted(() => {
+        clearInterval(bgRefreshInterval)
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+      })
     })
 
     return {
