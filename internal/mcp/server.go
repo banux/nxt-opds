@@ -31,6 +31,7 @@ const protocolVersion = "2024-11-05"
 type Server struct {
 	cat             catalog.Catalog
 	updater         catalog.Updater
+	coverUpdater    catalog.CoverUpdater
 	seriesLister    catalog.SeriesLister
 	uploader        catalog.Uploader
 	wishlistManager catalog.WishlistManager
@@ -43,6 +44,9 @@ func New(cat catalog.Catalog) *Server {
 	s := &Server{cat: cat}
 	if u, ok := cat.(catalog.Updater); ok {
 		s.updater = u
+	}
+	if cu, ok := cat.(catalog.CoverUpdater); ok {
+		s.coverUpdater = cu
 	}
 	if sl, ok := cat.(catalog.SeriesLister); ok {
 		s.seriesLister = sl
@@ -353,6 +357,19 @@ func (s *Server) toolsList() toolsListResult {
 			},
 		},
 		{
+			Name:        "update_cover",
+			Description: "Remplace la couverture d'un livre par une image encodée en base64.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"id", "content", "ext"},
+				Properties: map[string]*jsonSchema{
+					"id":      {Type: "string", Description: "Identifiant unique du livre"},
+					"content": {Type: "string", Description: "Contenu de l'image encodé en base64"},
+					"ext":     {Type: "string", Description: "Extension du fichier image (jpg, jpeg, png, webp)", Enum: []string{"jpg", "jpeg", "png", "webp"}},
+				},
+			},
+		},
+		{
 			Name:        "list_recommendations",
 			Description: "Retourne la liste des recommandations de livres entre utilisateurs. Si to_user_id est fourni, filtre les recommandations destinées à cet utilisateur.",
 			InputSchema: &jsonSchema{
@@ -395,6 +412,8 @@ func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
 		return s.toolAddWishlistItem(p.Arguments)
 	case "delete_wishlist_item":
 		return s.toolDeleteWishlistItem(p.Arguments)
+	case "update_cover":
+		return s.toolUpdateCover(p.Arguments)
 	case "list_recommendations":
 		return s.toolListRecommendations(p.Arguments)
 	default:
@@ -842,6 +861,37 @@ func (s *Server) toolListRecommendations(args map[string]any) (any, *rpcError) {
 		fmt.Fprintf(&sb, "   Date: %s\n\n", rec.CreatedAt.Format("2006-01-02"))
 	}
 	return textResult(sb.String()), nil
+}
+
+func (s *Server) toolUpdateCover(args map[string]any) (any, *rpcError) {
+	if s.coverUpdater == nil {
+		return errorResult("Le backend ne supporte pas la mise à jour de couverture"), nil
+	}
+	id, ok := args["id"].(string)
+	if !ok || id == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'id' requis"}
+	}
+	encoded, ok := args["content"].(string)
+	if !ok || encoded == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'content' requis (base64)"}
+	}
+	ext, ok := args["ext"].(string)
+	if !ok || ext == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'ext' requis (jpg, jpeg, png, webp)"}
+	}
+
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		data, err = base64.URLEncoding.DecodeString(encoded)
+		if err != nil {
+			return errorResult("Contenu base64 invalide : " + err.Error()), nil
+		}
+	}
+
+	if err := s.coverUpdater.UpdateCover(id, io.NopCloser(bytes.NewReader(data)), "."+strings.TrimPrefix(ext, ".")); err != nil {
+		return errorResult("Erreur lors de la mise à jour de la couverture : " + err.Error()), nil
+	}
+	return textResult("Couverture mise à jour avec succès."), nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
