@@ -13,7 +13,7 @@ import (
 // Returns JSON: {"response": "..."}
 func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if s.aiAgent == nil {
-		http.Error(w, `{"error":"AI non configuré (ANTHROPIC_API_KEY manquant)"}`, http.StatusServiceUnavailable)
+		http.Error(w, `{"error":"AI non configuré (OLLAMA_URL manquant)"}`, http.StatusServiceUnavailable)
 		return
 	}
 

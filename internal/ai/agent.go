@@ -1,6 +1,6 @@
 // Package ai provides an AI-powered assistant for the nxt-opds catalog.
 //
-// It uses the Anthropic Messages API with tool use to give Claude access
+// It uses the Ollama Chat API with tool use to give the local LLM access
 // to catalog operations (search, read, update) and runs an agentic loop
 // until the model produces a final text response.
 package ai
@@ -21,41 +21,34 @@ import (
 )
 
 const (
-	anthropicAPIURL    = "https://api.anthropic.com/v1/messages"
-	anthropicVersion   = "2023-06-01"
-	defaultModel       = "claude-sonnet-4-6"
-	defaultMaxTokens   = 4096
+	defaultOllamaURL   = "http://localhost:11434"
+	defaultModel       = "glm5.1:cloud"
 	maxAgentIterations = 10
 )
 
-// Agent is an AI assistant backed by the Anthropic Claude API.
+// Agent is an AI assistant backed by a local Ollama instance.
 // It can search and modify the book catalog through tool calls.
 type Agent struct {
-	apiKey     string // set when using x-api-key authentication
-	oauthToken string // set when using OAuth Bearer token authentication
+	ollamaURL  string
+	model      string
 	catalog    catalog.Catalog
 	updater    catalog.Updater
 	httpClient *http.Client
 }
 
-// New creates a new Agent using the given API key and catalog.
-func New(apiKey string, cat catalog.Catalog) *Agent {
-	a := &Agent{
-		apiKey:     apiKey,
-		catalog:    cat,
-		httpClient: &http.Client{},
+// New creates a new Agent using the given Ollama URL, model and catalog.
+// If ollamaURL is empty, http://localhost:11434 is used.
+// If model is empty, qwen2.5:7b is used.
+func New(ollamaURL, model string, cat catalog.Catalog) *Agent {
+	if ollamaURL == "" {
+		ollamaURL = defaultOllamaURL
 	}
-	if u, ok := cat.(catalog.Updater); ok {
-		a.updater = u
+	if model == "" {
+		model = defaultModel
 	}
-	return a
-}
-
-// NewWithOAuth creates a new Agent using an OAuth Bearer token for authentication.
-// This supports Claude.ai OAuth tokens as an alternative to API keys.
-func NewWithOAuth(oauthToken string, cat catalog.Catalog) *Agent {
 	a := &Agent{
-		oauthToken: oauthToken,
+		ollamaURL:  ollamaURL,
+		model:      model,
 		catalog:    cat,
 		httpClient: &http.Client{},
 	}
@@ -71,160 +64,172 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// ─── Anthropic API types ───────────────────────────────────────────────────────
+// ─── Ollama API types ──────────────────────────────────────────────────────────
 
-type apiRequest struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	System    string       `json:"system"`
-	Tools     []apiTool    `json:"tools,omitempty"`
-	Messages  []apiMessage `json:"messages"`
+type ollamaRequest struct {
+	Model    string          `json:"model"`
+	Messages []ollamaMessage `json:"messages"`
+	Tools    []ollamaTool    `json:"tools,omitempty"`
+	Stream   bool            `json:"stream"`
 }
 
-type apiMessage struct {
-	Role    string       `json:"role"`
-	Content []apiContent `json:"content"`
+type ollamaMessage struct {
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 }
 
-type apiContent struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
+type ollamaToolCall struct {
+	Function ollamaToolCallFunction `json:"function"`
 }
 
-type apiTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema toolInputSchema `json:"input_schema"`
+type ollamaToolCallFunction struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+type ollamaTool struct {
+	Type     string             `json:"type"`
+	Function ollamaToolFunction `json:"function"`
+}
+
+type ollamaToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  toolInputSchema `json:"parameters"`
 }
 
 type toolInputSchema struct {
-	Type       string                      `json:"type"`
-	Properties map[string]toolPropSchema   `json:"properties,omitempty"`
-	Required   []string                    `json:"required,omitempty"`
+	Type       string                    `json:"type"`
+	Properties map[string]toolPropSchema `json:"properties,omitempty"`
+	Required   []string                  `json:"required,omitempty"`
 }
 
 type toolPropSchema struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
+	Type        string          `json:"type"`
+	Description string          `json:"description,omitempty"`
+	Enum        []string        `json:"enum,omitempty"`
 	Items       *toolPropSchema `json:"items,omitempty"`
 }
 
-type apiResponse struct {
-	ID         string       `json:"id"`
-	Type       string       `json:"type"`
-	Role       string       `json:"role"`
-	Content    []apiContent `json:"content"`
-	Model      string       `json:"model"`
-	StopReason string       `json:"stop_reason"`
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
-	Error *struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
+type ollamaResponse struct {
+	Model      string        `json:"model"`
+	Message    ollamaMessage `json:"message"`
+	Done       bool          `json:"done"`
+	DoneReason string        `json:"done_reason"`
+	Error      string        `json:"error,omitempty"`
 }
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
 
-func (a *Agent) toolDefs() []apiTool {
-	return []apiTool{
+func (a *Agent) toolDefs() []ollamaTool {
+	return []ollamaTool{
 		{
-			Name:        "search_books",
-			Description: "Recherche des livres dans le catalogue avec des filtres optionnels. Retourne une liste de livres correspondant aux critères.",
-			InputSchema: toolInputSchema{
-				Type: "object",
-				Properties: map[string]toolPropSchema{
-					"query":       {Type: "string", Description: "Texte de recherche (titre, auteur, description)"},
-					"author":      {Type: "string", Description: "Filtre par nom d'auteur (correspondance partielle)"},
-					"tag":         {Type: "string", Description: "Filtre par tag/genre"},
-					"series":      {Type: "string", Description: "Filtre par nom de série"},
-					"publisher":   {Type: "string", Description: "Filtre par éditeur"},
-					"collection":  {Type: "string", Description: "Filtre par collection éditoriale"},
-					"unread_only": {Type: "boolean", Description: "Uniquement les livres non lus"},
-					"sort": {
-						Type:        "string",
-						Description: "Tri des résultats",
-						Enum:        []string{"added_desc", "added_asc", "title_asc", "title_desc"},
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        "search_books",
+				Description: "Recherche des livres dans le catalogue avec des filtres optionnels. Retourne une liste de livres correspondant aux critères.",
+				Parameters: toolInputSchema{
+					Type: "object",
+					Properties: map[string]toolPropSchema{
+						"query":       {Type: "string", Description: "Texte de recherche (titre, auteur, description)"},
+						"author":      {Type: "string", Description: "Filtre par nom d'auteur (correspondance partielle)"},
+						"tag":         {Type: "string", Description: "Filtre par tag/genre"},
+						"series":      {Type: "string", Description: "Filtre par nom de série"},
+						"publisher":   {Type: "string", Description: "Filtre par éditeur"},
+						"collection":  {Type: "string", Description: "Filtre par collection éditoriale"},
+						"unread_only": {Type: "boolean", Description: "Uniquement les livres non lus"},
+						"sort": {
+							Type:        "string",
+							Description: "Tri des résultats",
+							Enum:        []string{"added_desc", "added_asc", "title_asc", "title_desc"},
+						},
+						"limit":  {Type: "integer", Description: "Nombre de résultats (défaut: 20, max: 50)"},
+						"offset": {Type: "integer", Description: "Décalage pour la pagination"},
 					},
-					"limit":  {Type: "integer", Description: "Nombre de résultats (défaut: 20, max: 50)"},
-					"offset": {Type: "integer", Description: "Décalage pour la pagination"},
 				},
 			},
 		},
 		{
-			Name:        "get_book",
-			Description: "Récupère les détails complets d'un livre par son identifiant.",
-			InputSchema: toolInputSchema{
-				Type:     "object",
-				Required: []string{"id"},
-				Properties: map[string]toolPropSchema{
-					"id": {Type: "string", Description: "Identifiant unique du livre"},
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        "get_book",
+				Description: "Récupère les détails complets d'un livre par son identifiant.",
+				Parameters: toolInputSchema{
+					Type:     "object",
+					Required: []string{"id"},
+					Properties: map[string]toolPropSchema{
+						"id": {Type: "string", Description: "Identifiant unique du livre"},
+					},
 				},
 			},
 		},
 		{
-			Name:        "update_book",
-			Description: "Modifie les métadonnées d'un livre. Seuls les champs fournis sont mis à jour.",
-			InputSchema: toolInputSchema{
-				Type:     "object",
-				Required: []string{"id"},
-				Properties: map[string]toolPropSchema{
-					"id":               {Type: "string", Description: "Identifiant unique du livre"},
-					"title":            {Type: "string", Description: "Nouveau titre"},
-					"authors":          {Type: "array", Description: "Liste des auteurs", Items: &toolPropSchema{Type: "string"}},
-					"tags":             {Type: "array", Description: "Liste des tags/genres", Items: &toolPropSchema{Type: "string"}},
-					"summary":          {Type: "string", Description: "Résumé du livre"},
-					"publisher":        {Type: "string", Description: "Éditeur"},
-					"language":         {Type: "string", Description: "Code de langue BCP 47 (ex: fr, en)"},
-					"series":           {Type: "string", Description: "Nom de la série"},
-					"series_index":     {Type: "string", Description: "Numéro dans la série"},
-					"series_total":     {Type: "string", Description: "Nombre total de livres dans la série"},
-					"collection":       {Type: "string", Description: "Nom de la collection éditoriale"},
-					"collection_index": {Type: "string", Description: "Numéro dans la collection"},
-					"is_read":             {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
-					"rating":              {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
-					"age_rating":          {Type: "integer", Description: "Classification d'âge : 0=non classifié, 3=3+, 6=6+, 10=10+, 12=12+, 16=16+, 18=18+"},
-					"last_maintenance_at": {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour la date actuelle."},
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        "update_book",
+				Description: "Modifie les métadonnées d'un livre. Seuls les champs fournis sont mis à jour.",
+				Parameters: toolInputSchema{
+					Type:     "object",
+					Required: []string{"id"},
+					Properties: map[string]toolPropSchema{
+						"id":               {Type: "string", Description: "Identifiant unique du livre"},
+						"title":            {Type: "string", Description: "Nouveau titre"},
+						"authors":          {Type: "array", Description: "Liste des auteurs", Items: &toolPropSchema{Type: "string"}},
+						"tags":             {Type: "array", Description: "Liste des tags/genres", Items: &toolPropSchema{Type: "string"}},
+						"summary":          {Type: "string", Description: "Résumé du livre"},
+						"publisher":        {Type: "string", Description: "Éditeur"},
+						"language":         {Type: "string", Description: "Code de langue BCP 47 (ex: fr, en)"},
+						"series":           {Type: "string", Description: "Nom de la série"},
+						"series_index":     {Type: "string", Description: "Numéro dans la série"},
+						"series_total":     {Type: "string", Description: "Nombre total de livres dans la série"},
+						"collection":       {Type: "string", Description: "Nom de la collection éditoriale"},
+						"collection_index": {Type: "string", Description: "Numéro dans la collection"},
+						"is_read":             {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
+						"rating":              {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
+						"age_rating":          {Type: "integer", Description: "Classification d'âge : 0=non classifié, 3=3+, 6=6+, 10=10+, 12=12+, 16=16+, 18=18+"},
+						"last_maintenance_at": {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour la date actuelle."},
+					},
 				},
 			},
 		},
 		{
-			Name:        "list_authors",
-			Description: "Retourne la liste de tous les auteurs présents dans le catalogue.",
-			InputSchema: toolInputSchema{
-				Type: "object",
-				Properties: map[string]toolPropSchema{
-					"limit": {Type: "integer", Description: "Nombre max de résultats (défaut: 100)"},
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        "list_authors",
+				Description: "Retourne la liste de tous les auteurs présents dans le catalogue.",
+				Parameters: toolInputSchema{
+					Type: "object",
+					Properties: map[string]toolPropSchema{
+						"limit": {Type: "integer", Description: "Nombre max de résultats (défaut: 100)"},
+					},
 				},
 			},
 		},
 		{
-			Name:        "list_tags",
-			Description: "Retourne la liste de tous les tags/genres présents dans le catalogue.",
-			InputSchema: toolInputSchema{
-				Type: "object",
-				Properties: map[string]toolPropSchema{
-					"limit": {Type: "integer", Description: "Nombre max de résultats (défaut: 100)"},
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        "list_tags",
+				Description: "Retourne la liste de tous les tags/genres présents dans le catalogue.",
+				Parameters: toolInputSchema{
+					Type: "object",
+					Properties: map[string]toolPropSchema{
+						"limit": {Type: "integer", Description: "Nombre max de résultats (défaut: 100)"},
+					},
 				},
 			},
 		},
 		{
-			Name:        "fetch_url",
-			Description: "Récupère le contenu texte d'une URL (page web d'éditeur, Babelio, ActuSF, Wikipedia…). Utile pour rechercher le résumé officiel d'un livre. Retourne le texte brut de la page (HTML dépouillé), limité à 8000 caractères.",
-			InputSchema: toolInputSchema{
-				Type:     "object",
-				Required: []string{"url"},
-				Properties: map[string]toolPropSchema{
-					"url": {Type: "string", Description: "URL complète à récupérer (https://...)"},
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        "fetch_url",
+				Description: "Récupère le contenu texte d'une URL (page web d'éditeur, Babelio, ActuSF, Wikipedia…). Utile pour rechercher le résumé officiel d'un livre. Retourne le texte brut de la page (HTML dépouillé), limité à 8000 caractères.",
+				Parameters: toolInputSchema{
+					Type:     "object",
+					Required: []string{"url"},
+					Properties: map[string]toolPropSchema{
+						"url": {Type: "string", Description: "URL complète à récupérer (https://...)"},
+					},
 				},
 			},
 		},
@@ -234,25 +239,8 @@ func (a *Agent) toolDefs() []apiTool {
 // ─── Chat ──────────────────────────────────────────────────────────────────────
 
 // Chat sends a user prompt and runs the agentic loop, returning the final
-// text response from Claude.
+// text response from the model.
 func (a *Agent) Chat(ctx context.Context, history []Message, userPrompt string) (string, error) {
-	// Build the message history.
-	messages := make([]apiMessage, 0, len(history)+1)
-	for _, m := range history {
-		role := m.Role
-		if role != "user" && role != "assistant" {
-			role = "user"
-		}
-		messages = append(messages, apiMessage{
-			Role:    role,
-			Content: []apiContent{{Type: "text", Text: m.Content}},
-		})
-	}
-	messages = append(messages, apiMessage{
-		Role:    "user",
-		Content: []apiContent{{Type: "text", Text: userPrompt}},
-	})
-
 	systemPrompt := `Tu es un assistant bibliothécaire pour nxt-opds, une application de gestion de bibliothèque numérique personnelle. Tu aides l'utilisateur à trouver des livres, gérer ses lectures, et enrichir les métadonnées du catalogue.
 
 ## Outils disponibles
@@ -293,62 +281,45 @@ Si age_rating > 0 est déjà renseigné, ne pas le modifier.
 - Toujours appeler get_book avant de modifier un livre (les données de search_books sont incomplètes)
 - Quand tu affiches des livres, utilise un format lisible avec titre, auteur et infos pertinentes`
 
+	// Build messages array starting with the system prompt.
+	messages := make([]ollamaMessage, 0, len(history)+2)
+	messages = append(messages, ollamaMessage{Role: "system", Content: systemPrompt})
+
+	for _, m := range history {
+		role := m.Role
+		if role != "user" && role != "assistant" {
+			role = "user"
+		}
+		messages = append(messages, ollamaMessage{Role: role, Content: m.Content})
+	}
+	messages = append(messages, ollamaMessage{Role: "user", Content: userPrompt})
+
 	// Agentic loop.
 	for i := 0; i < maxAgentIterations; i++ {
-		resp, err := a.callAPI(ctx, messages, systemPrompt)
+		resp, err := a.callAPI(ctx, messages)
 		if err != nil {
 			return "", err
 		}
 
-		// Append assistant response to messages.
-		messages = append(messages, apiMessage{
-			Role:    "assistant",
-			Content: resp.Content,
-		})
+		// Append assistant response (may include tool_calls).
+		messages = append(messages, resp.Message)
 
-		// If done, extract and return text.
-		if resp.StopReason == "end_turn" || resp.StopReason == "stop_sequence" {
-			return extractText(resp.Content), nil
+		// If no tool calls, we have the final response.
+		if len(resp.Message.ToolCalls) == 0 {
+			return resp.Message.Content, nil
 		}
 
-		// If tool use requested, execute tools and add results.
-		if resp.StopReason == "tool_use" {
-			toolResults := make([]apiContent, 0)
-			for _, c := range resp.Content {
-				if c.Type == "tool_use" {
-					result, isErr := a.executeTool(c.Name, c.Input)
-					toolResults = append(toolResults, apiContent{
-						Type:      "tool_result",
-						ToolUseID: c.ID,
-						Content:   result,
-						IsError:   isErr,
-					})
-				}
-			}
-			if len(toolResults) > 0 {
-				messages = append(messages, apiMessage{
-					Role:    "user",
-					Content: toolResults,
-				})
-			}
-			continue
+		// Execute each tool and append results.
+		for _, tc := range resp.Message.ToolCalls {
+			result, _ := a.executeTool(tc.Function.Name, tc.Function.Arguments)
+			messages = append(messages, ollamaMessage{
+				Role:    "tool",
+				Content: result,
+			})
 		}
-
-		// Unknown stop reason – return whatever text we have.
-		return extractText(resp.Content), nil
 	}
 
 	return "Désolé, la conversation a atteint la limite d'itérations.", nil
-}
-
-func extractText(content []apiContent) string {
-	var parts []string
-	for _, c := range content {
-		if c.Type == "text" && c.Text != "" {
-			parts = append(parts, c.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
 }
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -648,8 +619,8 @@ func (a *Agent) toolListTags(args map[string]any) (string, bool) {
 }
 
 var (
-	reHTMLTags    = regexp.MustCompile(`<[^>]+>`)
-	reWhitespace  = regexp.MustCompile(`\s{2,}`)
+	reHTMLTags   = regexp.MustCompile(`<[^>]+>`)
+	reWhitespace = regexp.MustCompile(`\s{2,}`)
 )
 
 func (a *Agent) toolFetchURL(args map[string]any) (string, bool) {
@@ -702,13 +673,12 @@ func (a *Agent) toolFetchURL(args map[string]any) (string, bool) {
 
 // ─── HTTP API call ─────────────────────────────────────────────────────────────
 
-func (a *Agent) callAPI(ctx context.Context, messages []apiMessage, system string) (*apiResponse, error) {
-	reqBody := apiRequest{
-		Model:     defaultModel,
-		MaxTokens: defaultMaxTokens,
-		System:    system,
-		Tools:     a.toolDefs(),
-		Messages:  messages,
+func (a *Agent) callAPI(ctx context.Context, messages []ollamaMessage) (*ollamaResponse, error) {
+	reqBody := ollamaRequest{
+		Model:    a.model,
+		Messages: messages,
+		Tools:    a.toolDefs(),
+		Stream:   false,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -716,17 +686,12 @@ func (a *Agent) callAPI(ctx context.Context, messages []apiMessage, system strin
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPIURL, bytes.NewReader(body))
+	url := strings.TrimRight(a.ollamaURL, "/") + "/api/chat"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if a.oauthToken != "" {
-		req.Header.Set("Authorization", "Bearer "+a.oauthToken)
-	} else {
-		req.Header.Set("x-api-key", a.apiKey)
-	}
-	req.Header.Set("anthropic-version", anthropicVersion)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -739,16 +704,16 @@ func (a *Agent) callAPI(ctx context.Context, messages []apiMessage, system strin
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	var apiResp apiResponse
+	var apiResp ollamaResponse
 	if err := json.Unmarshal(respBytes, &apiResp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	if apiResp.Error != nil {
-		return nil, fmt.Errorf("API error %s: %s", apiResp.Error.Type, apiResp.Error.Message)
+	if apiResp.Error != "" {
+		return nil, fmt.Errorf("Ollama error: %s", apiResp.Error)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned HTTP %d: %s", resp.StatusCode, string(respBytes))
+		return nil, fmt.Errorf("Ollama returned HTTP %d: %s", resp.StatusCode, string(respBytes))
 	}
 
 	return &apiResp, nil

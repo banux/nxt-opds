@@ -69,16 +69,15 @@ type Config struct {
 	// Set explicitly via OPDS_TOKEN env var or opds_token config key.
 	OPDSToken string `yaml:"opds_token"`
 
-	// AnthropicAPIKey is the API key for the Anthropic Claude AI service.
-	// Set via ANTHROPIC_API_KEY env var or anthropic_api_key config key.
-	// If empty and AnthropicOAuthToken is also empty, the AI chat endpoint is disabled.
-	AnthropicAPIKey string `yaml:"anthropic_api_key"`
+	// OllamaURL is the base URL of the Ollama instance used for the AI chat feature.
+	// Defaults to http://localhost:11434.
+	// Set via OLLAMA_URL env var or ollama_url config key.
+	OllamaURL string `yaml:"ollama_url"`
 
-	// AnthropicOAuthToken is an OAuth Bearer token for the Anthropic Claude API.
-	// Use this as an alternative to AnthropicAPIKey when authenticating via OAuth
-	// (e.g. Claude.ai OAuth tokens). Takes precedence over AnthropicAPIKey when set.
-	// Set via ANTHROPIC_OAUTH_TOKEN env var or anthropic_oauth_token config key.
-	AnthropicOAuthToken string `yaml:"anthropic_oauth_token"`
+	// OllamaModel is the Ollama model name to use for the AI chat feature.
+	// Defaults to qwen2.5:7b.
+	// Set via OLLAMA_MODEL env var or ollama_model config key.
+	OllamaModel string `yaml:"ollama_model"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -137,11 +136,11 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv("OPDS_TOKEN"); v != "" {
 		cfg.OPDSToken = v
 	}
-	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
-		cfg.AnthropicAPIKey = v
+	if v := os.Getenv("OLLAMA_URL"); v != "" {
+		cfg.OllamaURL = v
 	}
-	if v := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); v != "" {
-		cfg.AnthropicOAuthToken = v
+	if v := os.Getenv("OLLAMA_MODEL"); v != "" {
+		cfg.OllamaModel = v
 	}
 
 	// If no explicit OPDS token but a password is set, derive a stable token

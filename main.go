@@ -60,17 +60,19 @@ func main() {
 	log.Printf("catalog loaded from %q", cfg.BooksDir)
 
 	opts := server.Options{
-		Password:            cfg.Password,
-		OPDSToken:           cfg.OPDSToken,
-		StaticFS:            web.FS,
-		AnthropicAPIKey:     cfg.AnthropicAPIKey,
-		AnthropicOAuthToken: cfg.AnthropicOAuthToken,
-		Version:             version,
+		Password:    cfg.Password,
+		OPDSToken:   cfg.OPDSToken,
+		StaticFS:    web.FS,
+		OllamaURL:   cfg.OllamaURL,
+		OllamaModel: cfg.OllamaModel,
+		Version:     version,
 	}
-	if cfg.AnthropicOAuthToken != "" {
-		log.Printf("AI assistant enabled (Anthropic OAuth token configured)")
-	} else if cfg.AnthropicAPIKey != "" {
-		log.Printf("AI assistant enabled (Anthropic API key configured)")
+	if cfg.OllamaURL != "" {
+		model := cfg.OllamaModel
+		if model == "" {
+			model = "glm5.1:cloud"
+		}
+		log.Printf("AI assistant enabled (Ollama: %s, model: %s)", cfg.OllamaURL, model)
 	}
 	srv := server.New(cat, opts)
 
