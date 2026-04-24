@@ -2868,3 +2868,151 @@ func (s *Server) handleAPIRestart(w http.ResponseWriter, r *http.Request) {
 	// Replace this process with a fresh copy of the binary.
 	_ = syscall.Exec(exePath, os.Args, os.Environ())
 }
+
+// statsLabelJSON is the JSON shape for a (label,count) aggregate row.
+type statsLabelJSON struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// statsMonthJSON is the JSON shape for a (month,count) aggregate row.
+type statsMonthJSON struct {
+	Month string `json:"month"`
+	Count int    `json:"count"`
+}
+
+// statsUserJSON groups a user's per-user stats; nil fields mean "not available".
+type statsUserJSON struct {
+	UserID             string           `json:"userId"`
+	UserName           string           `json:"userName,omitempty"`
+	UserColor          string           `json:"userColor,omitempty"`
+	TotalBooks         int              `json:"totalBooks"`
+	BooksRead          int              `json:"booksRead"`
+	BooksReadThisYear  int              `json:"booksReadThisYear"`
+	AverageRating      float64          `json:"averageRating"`
+	RatedBooks         int              `json:"ratedBooks"`
+	RatingDistribution []int            `json:"ratingDistribution"`
+	TopAuthors         []statsLabelJSON `json:"topAuthors"`
+	TopTags            []statsLabelJSON `json:"topTags"`
+	TopSeries          []statsLabelJSON `json:"topSeries"`
+	ByLanguage         []statsLabelJSON `json:"byLanguage"`
+	ByMonth            []statsMonthJSON `json:"byMonth"`
+}
+
+// statsResponseJSON is the payload returned by GET /api/stats.
+type statsResponseJSON struct {
+	MultiUser bool            `json:"multiUser"`
+	Users     []statsUserJSON `json:"users"`
+}
+
+// handleAPIStats returns aggregated reading statistics for the current user.
+// Admin users in multi-user mode get stats for every user plus a global "whole library" row.
+// GET /api/stats
+func (s *Server) handleAPIStats(w http.ResponseWriter, r *http.Request) {
+	if s.readStats == nil {
+		http.Error(w, "stats not supported", http.StatusNotImplemented)
+		return
+	}
+
+	resp := statsResponseJSON{MultiUser: s.userManager != nil}
+
+	// Single-user mode: return one global stats row.
+	if s.userManager == nil {
+		rs, err := s.readStats.ReadStats("")
+		if err != nil {
+			http.Error(w, "stats query failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp.Users = []statsUserJSON{toStatsUserJSON(rs, "Bibliothèque", "")}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Multi-user: determine the caller's privileges.
+	uid := currentUserID(r)
+	if uid == "" {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	me, err := s.userManager.UserByID(uid)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	// Non-admins only see their own stats.
+	if !me.IsAdmin {
+		rs, err := s.readStats.ReadStats(me.ID)
+		if err != nil {
+			http.Error(w, "stats query failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		j := toStatsUserJSON(rs, me.Name, me.Color)
+		j.UserID = me.ID
+		resp.Users = []statsUserJSON{j}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Admins get a row per user, followed by a global row.
+	users, err := s.userManager.Users()
+	if err != nil {
+		http.Error(w, "users query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for _, u := range users {
+		rs, err := s.readStats.ReadStats(u.ID)
+		if err != nil {
+			http.Error(w, "stats query failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		j := toStatsUserJSON(rs, u.Name, u.Color)
+		j.UserID = u.ID
+		resp.Users = append(resp.Users, j)
+	}
+	if global, err := s.readStats.ReadStats(""); err == nil {
+		resp.Users = append(resp.Users, toStatsUserJSON(global, "Tous utilisateurs", ""))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// toStatsUserJSON converts a catalog.ReadStats to the API-level statsUserJSON.
+func toStatsUserJSON(rs *catalog.ReadStats, name, color string) statsUserJSON {
+	if rs == nil {
+		return statsUserJSON{UserName: name, UserColor: color}
+	}
+	j := statsUserJSON{
+		UserName:          name,
+		UserColor:         color,
+		TotalBooks:        rs.TotalBooks,
+		BooksRead:         rs.BooksRead,
+		BooksReadThisYear: rs.BooksReadThisYear,
+		AverageRating:     rs.AverageRating,
+		RatedBooks:        rs.RatedBooks,
+	}
+	j.RatingDistribution = make([]int, 5)
+	for i, n := range rs.RatingDistribution {
+		j.RatingDistribution[i] = n
+	}
+	j.TopAuthors = toLabelJSON(rs.TopAuthors)
+	j.TopTags = toLabelJSON(rs.TopTags)
+	j.TopSeries = toLabelJSON(rs.TopSeries)
+	j.ByLanguage = toLabelJSON(rs.ByLanguage)
+	j.ByMonth = make([]statsMonthJSON, 0, len(rs.ByMonth))
+	for _, m := range rs.ByMonth {
+		j.ByMonth = append(j.ByMonth, statsMonthJSON{Month: m.Month, Count: m.Count})
+	}
+	return j
+}
+
+func toLabelJSON(rows []catalog.LabelCount) []statsLabelJSON {
+	out := make([]statsLabelJSON, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, statsLabelJSON{Label: r.Label, Count: r.Count})
+	}
+	return out
+}

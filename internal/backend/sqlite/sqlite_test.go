@@ -730,3 +730,111 @@ func TestBackup_PrunesOldFiles(t *testing.T) {
 		t.Errorf("expected %d backups after pruning, got %d", keep, count)
 	}
 }
+
+// TestReadStats_PerUser verifies that ReadStats aggregates per-user read-status
+// correctly: count of books read, top authors/tags, and rating distribution.
+func TestReadStats_PerUser(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Alpha", "Jane Doe", "SF")
+	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Beta", "Jane Doe", "SF")
+	createMinimalEPUB(t, filepath.Join(dir, "c.epub"), "Gamma", "John Roe", "Roman")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	// Create a user and mark two books as read.
+	u, err := b.CreateUser("Alice", "#ff00ff", false, false, 0)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	books, _, _ := b.AllBooks(0, 10)
+	if len(books) < 3 {
+		t.Fatalf("expected ≥3 books, got %d", len(books))
+	}
+	if err := b.SetUserRead(u.ID, books[0].ID, true); err != nil {
+		t.Fatalf("SetUserRead: %v", err)
+	}
+	if err := b.SetUserRead(u.ID, books[1].ID, true); err != nil {
+		t.Fatalf("SetUserRead: %v", err)
+	}
+	// Rate one of the read books.
+	rating := 4
+	if _, err := b.UpdateBook(books[0].ID, catalog.BookUpdate{Rating: &rating}); err != nil {
+		t.Fatalf("UpdateBook rating: %v", err)
+	}
+
+	stats, err := b.ReadStats(u.ID)
+	if err != nil {
+		t.Fatalf("ReadStats: %v", err)
+	}
+	if stats.TotalBooks != 3 {
+		t.Errorf("TotalBooks: got %d, want 3", stats.TotalBooks)
+	}
+	if stats.BooksRead != 2 {
+		t.Errorf("BooksRead: got %d, want 2", stats.BooksRead)
+	}
+	if stats.BooksReadThisYear != 2 {
+		t.Errorf("BooksReadThisYear: got %d, want 2 (timestamps stored on write)", stats.BooksReadThisYear)
+	}
+	if stats.RatedBooks != 1 {
+		t.Errorf("RatedBooks: got %d, want 1", stats.RatedBooks)
+	}
+	if stats.AverageRating != 4 {
+		t.Errorf("AverageRating: got %v, want 4", stats.AverageRating)
+	}
+	if stats.RatingDistribution[3] != 1 {
+		t.Errorf("RatingDistribution[3]: got %d, want 1", stats.RatingDistribution[3])
+	}
+	// Both read books have the same author + tag, so it should be rank #1 with count 2.
+	if len(stats.TopAuthors) == 0 || stats.TopAuthors[0].Label != "Jane Doe" || stats.TopAuthors[0].Count != 2 {
+		t.Errorf("TopAuthors[0]: got %+v, want {Jane Doe 2}", stats.TopAuthors)
+	}
+	if len(stats.TopTags) == 0 || stats.TopTags[0].Label != "SF" || stats.TopTags[0].Count != 2 {
+		t.Errorf("TopTags[0]: got %+v, want {SF 2}", stats.TopTags)
+	}
+	if len(stats.ByMonth) != 12 {
+		t.Errorf("ByMonth len: got %d, want 12", len(stats.ByMonth))
+	}
+	// Last entry is the current month → should contain the 2 books we just marked.
+	if n := stats.ByMonth[len(stats.ByMonth)-1].Count; n != 2 {
+		t.Errorf("ByMonth[current]: got %d, want 2", n)
+	}
+}
+
+// TestReadStats_NoUserID returns global stats (any reader) when userID is empty.
+func TestReadStats_NoUserID(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Alpha", "Jane Doe", "SF")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	u1, _ := b.CreateUser("A", "#ff0000", false, false, 0)
+	u2, _ := b.CreateUser("B", "#00ff00", false, false, 0)
+
+	books, _, _ := b.AllBooks(0, 10)
+	if len(books) == 0 {
+		t.Fatal("no books")
+	}
+	_ = b.SetUserRead(u1.ID, books[0].ID, true)
+	_ = b.SetUserRead(u2.ID, books[0].ID, true)
+
+	stats, err := b.ReadStats("")
+	if err != nil {
+		t.Fatalf("ReadStats: %v", err)
+	}
+	if stats.TotalBooks != 1 {
+		t.Errorf("TotalBooks: got %d, want 1", stats.TotalBooks)
+	}
+	// 1 distinct book read across 2 users = 1.
+	if stats.BooksRead != 1 {
+		t.Errorf("BooksRead (global): got %d, want 1", stats.BooksRead)
+	}
+}

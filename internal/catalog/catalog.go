@@ -227,6 +227,72 @@ type UserReadManager interface {
 	BookReadColors(bookIDs []string) (map[string][]string, error)
 }
 
+// LabelCount is a generic "label with associated count" row used for stats aggregates.
+type LabelCount struct {
+	Label string
+	Count int
+}
+
+// MonthCount is a "year-month with count" row used for time-series stats.
+type MonthCount struct {
+	// Month is the ISO-style year-month key in YYYY-MM form (e.g. "2026-04").
+	Month string
+	Count int
+}
+
+// ReadStats aggregates reading statistics for a single user.
+type ReadStats struct {
+	// UserID is the user these stats belong to (empty = whole library / single-user mode).
+	UserID string
+
+	// TotalBooks is the total number of books in the library at query time.
+	TotalBooks int
+
+	// BooksRead is the number of books the user has marked as read.
+	BooksRead int
+
+	// BooksReadThisYear is the number of books marked read in the current calendar year.
+	// Only meaningful when the backend stores read timestamps; otherwise 0.
+	BooksReadThisYear int
+
+	// AverageRating is the average star rating the user has given (0 if no rated book).
+	// Ratings of 0 (unrated) are excluded from the average.
+	AverageRating float64
+
+	// RatedBooks is the number of books with a rating > 0 among those read by the user.
+	RatedBooks int
+
+	// TopAuthors is the top authors by number of books read, sorted desc (max 10).
+	TopAuthors []LabelCount
+
+	// TopTags is the top tags by number of books read, sorted desc (max 10).
+	TopTags []LabelCount
+
+	// TopSeries is the top series by number of books read, sorted desc (max 10).
+	TopSeries []LabelCount
+
+	// ByLanguage groups books read by BCP 47 language tag, sorted desc.
+	ByLanguage []LabelCount
+
+	// ByMonth groups books read by the calendar month they were marked read.
+	// Covers the past 12 months, oldest first.  Empty when the backend does not
+	// store read timestamps or no books have been read in that window.
+	ByMonth []MonthCount
+
+	// RatingDistribution counts how many books the user has rated 1★…5★.
+	// Index 0 = 1 star, index 4 = 5 stars.
+	RatingDistribution [5]int
+}
+
+// ReadStatsProvider is an optional interface for catalog backends that can
+// compute aggregate reading statistics for a given user (or the whole library
+// when userID is empty).
+type ReadStatsProvider interface {
+	// ReadStats returns aggregated statistics for the supplied userID.
+	// When userID is empty, stats aggregate across every user / all read books.
+	ReadStats(userID string) (*ReadStats, error)
+}
+
 // Catalog is the interface that backend implementations must satisfy.
 // A Catalog provides read-only access to the book collection.
 type Catalog interface {

@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 10
+const currentSchemaVersion = 11
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -92,6 +92,15 @@ var schemaMigrations = []schemaMigration{
 	{version: 8, apply: migration8},
 	{version: 9, apply: migration9},
 	{version: 10, apply: migration10},
+	{version: 11, apply: migration11},
+}
+
+// migration11 adds the read_at timestamp column to user_read_status so reading
+// statistics can be aggregated over time (version 10 → 11).
+// Existing rows get read_at = 0, which the stats layer treats as "unknown".
+func migration11(db *sql.DB) error {
+	_, _ = db.Exec(`ALTER TABLE user_read_status ADD COLUMN read_at INTEGER NOT NULL DEFAULT 0`)
+	return nil
 }
 
 // migration1 sets up the initial schema (version 0 → 1).
@@ -1228,11 +1237,19 @@ func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool, maxA
 // ─── UserReadManager ─────────────────────────────────────────────────────────
 
 // SetUserRead marks (isRead=true) or clears (isRead=false) a book as read for a user.
+// When marking as read, the current timestamp is recorded in read_at; existing
+// rows keep their original read_at on a no-op update so reading history is preserved.
 func (b *Backend) SetUserRead(userID, bookID string, isRead bool) error {
 	if isRead {
+		now := time.Now().Unix()
 		_, err := b.db.Exec(`
-INSERT INTO user_read_status (user_id, book_id, is_read) VALUES (?, ?, 1)
-ON CONFLICT(user_id, book_id) DO UPDATE SET is_read = 1`, userID, bookID)
+INSERT INTO user_read_status (user_id, book_id, is_read, read_at) VALUES (?, ?, 1, ?)
+ON CONFLICT(user_id, book_id) DO UPDATE SET
+    is_read = 1,
+    read_at = CASE WHEN user_read_status.is_read = 1 AND user_read_status.read_at > 0
+                   THEN user_read_status.read_at
+                   ELSE excluded.read_at END`,
+			userID, bookID, now)
 		return err
 	}
 	_, err := b.db.Exec(
@@ -1697,4 +1714,186 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ─── ReadStatsProvider ───────────────────────────────────────────────────────
+
+// ReadStats computes aggregate reading statistics for a user.
+// When userID is empty, stats cover the whole library (any reader counts).
+// Implements catalog.ReadStatsProvider.
+func (b *Backend) ReadStats(userID string) (*catalog.ReadStats, error) {
+	stats := &catalog.ReadStats{UserID: userID}
+
+	// Total books in the library.
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM books`).Scan(&stats.TotalBooks); err != nil {
+		return nil, fmt.Errorf("count books: %w", err)
+	}
+
+	// readJoin is the JOIN fragment used by every aggregate below.
+	// When userID is empty we aggregate over every reader.
+	readJoin := `JOIN user_read_status urs ON urs.book_id = b.id AND urs.is_read = 1`
+	var userFilter string
+	args := []any{}
+	if userID != "" {
+		userFilter = ` AND urs.user_id = ?`
+		args = []any{userID}
+	}
+
+	// Books read count.
+	row := b.db.QueryRow(`SELECT COUNT(DISTINCT b.id) FROM books b `+readJoin+` WHERE 1=1`+userFilter, args...)
+	if err := row.Scan(&stats.BooksRead); err != nil {
+		return nil, fmt.Errorf("count books read: %w", err)
+	}
+
+	// Books read this year (uses read_at; rows with read_at=0 are excluded).
+	yearStart := time.Date(time.Now().Year(), 1, 1, 0, 0, 0, 0, time.Local).Unix()
+	thisYearArgs := append([]any{yearStart}, args...)
+	if err := b.db.QueryRow(`
+SELECT COUNT(DISTINCT b.id) FROM books b
+`+readJoin+`
+WHERE urs.read_at >= ?`+userFilter, thisYearArgs...).Scan(&stats.BooksReadThisYear); err != nil {
+		return nil, fmt.Errorf("count this year: %w", err)
+	}
+
+	// Average rating (only books rated ≥ 1 among the ones marked read).
+	var avg sql.NullFloat64
+	if err := b.db.QueryRow(`
+SELECT AVG(b.rating), COUNT(*) FROM books b
+`+readJoin+`
+WHERE b.rating > 0`+userFilter, args...).Scan(&avg, &stats.RatedBooks); err != nil {
+		return nil, fmt.Errorf("avg rating: %w", err)
+	}
+	if avg.Valid {
+		stats.AverageRating = avg.Float64
+	}
+
+	// Rating distribution 1..5.
+	ratingRows, err := b.db.Query(`
+SELECT b.rating, COUNT(*) FROM books b
+`+readJoin+`
+WHERE b.rating BETWEEN 1 AND 5`+userFilter+`
+GROUP BY b.rating`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("rating dist: %w", err)
+	}
+	for ratingRows.Next() {
+		var r, n int
+		if err := ratingRows.Scan(&r, &n); err != nil {
+			ratingRows.Close()
+			return nil, err
+		}
+		if r >= 1 && r <= 5 {
+			stats.RatingDistribution[r-1] = n
+		}
+	}
+	ratingRows.Close()
+
+	// Top 10 authors.
+	if stats.TopAuthors, err = b.labelCounts(`
+SELECT ba.author_name AS label, COUNT(DISTINCT b.id) AS n
+FROM books b
+`+readJoin+`
+JOIN book_authors ba ON ba.book_id = b.id
+WHERE ba.author_name != ''`+userFilter+`
+GROUP BY ba.author_name
+ORDER BY n DESC, ba.author_name ASC
+LIMIT 10`, args...); err != nil {
+		return nil, fmt.Errorf("top authors: %w", err)
+	}
+
+	// Top 10 tags.
+	if stats.TopTags, err = b.labelCounts(`
+SELECT bt.tag AS label, COUNT(DISTINCT b.id) AS n
+FROM books b
+`+readJoin+`
+JOIN book_tags bt ON bt.book_id = b.id
+WHERE bt.tag != ''`+userFilter+`
+GROUP BY bt.tag
+ORDER BY n DESC, bt.tag ASC
+LIMIT 10`, args...); err != nil {
+		return nil, fmt.Errorf("top tags: %w", err)
+	}
+
+	// Top 10 series.
+	if stats.TopSeries, err = b.labelCounts(`
+SELECT b.series AS label, COUNT(DISTINCT b.id) AS n
+FROM books b
+`+readJoin+`
+WHERE b.series != ''`+userFilter+`
+GROUP BY b.series
+ORDER BY n DESC, b.series ASC
+LIMIT 10`, args...); err != nil {
+		return nil, fmt.Errorf("top series: %w", err)
+	}
+
+	// By language.
+	if stats.ByLanguage, err = b.labelCounts(`
+SELECT COALESCE(NULLIF(b.language, ''), 'inconnu') AS label, COUNT(DISTINCT b.id) AS n
+FROM books b
+`+readJoin+`
+WHERE 1=1`+userFilter+`
+GROUP BY label
+ORDER BY n DESC, label ASC`, args...); err != nil {
+		return nil, fmt.Errorf("by language: %w", err)
+	}
+
+	// Books read by month, last 12 months, oldest first.
+	// Only includes rows with read_at > 0.
+	twelveMonthsAgo := time.Date(time.Now().Year(), time.Now().Month()-11, 1, 0, 0, 0, 0, time.Local).Unix()
+	byMonthArgs := append([]any{twelveMonthsAgo}, args...)
+	monthRows, err := b.db.Query(`
+SELECT strftime('%Y-%m', datetime(urs.read_at, 'unixepoch', 'localtime')) AS m,
+       COUNT(DISTINCT b.id) AS n
+FROM books b
+`+readJoin+`
+WHERE urs.read_at >= ?`+userFilter+`
+GROUP BY m
+ORDER BY m ASC`, byMonthArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("by month: %w", err)
+	}
+	byMonth := map[string]int{}
+	for monthRows.Next() {
+		var m string
+		var n int
+		if err := monthRows.Scan(&m, &n); err != nil {
+			monthRows.Close()
+			return nil, err
+		}
+		byMonth[m] = n
+	}
+	monthRows.Close()
+
+	// Fill in every month from twelveMonthsAgo through current month so the
+	// frontend can render a continuous bar chart even for months with 0 reads.
+	now := time.Now()
+	for i := 11; i >= 0; i-- {
+		d := time.Date(now.Year(), now.Month()-time.Month(i), 1, 0, 0, 0, 0, time.Local)
+		key := d.Format("2006-01")
+		stats.ByMonth = append(stats.ByMonth, catalog.MonthCount{
+			Month: key,
+			Count: byMonth[key],
+		})
+	}
+
+	return stats, nil
+}
+
+// labelCounts runs a query whose rows are (label TEXT, count INT) and returns
+// the results as a slice of LabelCount.
+func (b *Backend) labelCounts(query string, args ...any) ([]catalog.LabelCount, error) {
+	rows, err := b.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []catalog.LabelCount
+	for rows.Next() {
+		var lc catalog.LabelCount
+		if err := rows.Scan(&lc.Label, &lc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, lc)
+	}
+	return out, rows.Err()
 }

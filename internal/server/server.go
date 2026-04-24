@@ -56,6 +56,7 @@ type Server struct {
 	userReadManager catalog.UserReadManager // optional; nil if backend doesn't support per-user read
 	recommender     catalog.Recommender     // optional; nil if backend doesn't support recommendations
 	wishlistManager catalog.WishlistManager // optional; nil if backend doesn't support wishlists
+	readStats       catalog.ReadStatsProvider // optional; nil if backend doesn't expose reading statistics
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
@@ -113,6 +114,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if wm, ok := cat.(catalog.WishlistManager); ok {
 		s.wishlistManager = wm
+	}
+	if rs, ok := cat.(catalog.ReadStatsProvider); ok {
+		s.readStats = rs
 	}
 	// If the catalog backend supports session persistence, wire it up and load
 	// any sessions that survived the previous process run.
@@ -259,6 +263,8 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/recommendations", s.handleAPIRecommendations).Methods(http.MethodGet)
 
 	// API: wishlist management
+	protected.HandleFunc("/api/stats", s.handleAPIStats).Methods(http.MethodGet)
+
 	protected.HandleFunc("/api/wishlist", s.handleAPIWishlist).Methods(http.MethodGet)
 	protected.HandleFunc("/api/wishlist", s.handleAPIAddWishlistItem).Methods(http.MethodPost)
 	protected.HandleFunc("/api/wishlist/{id}", s.handleAPIUpdateWishlistItem).Methods(http.MethodPatch)

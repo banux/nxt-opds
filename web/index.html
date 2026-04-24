@@ -291,6 +291,21 @@
         <div class="flex-1 sm:hidden"></div>
       </template>
 
+      <!-- Stats page: back button + title -->
+      <template v-else-if="currentView === 'stats'">
+        <button @click="navigateTo('/')"
+          class="flex items-center gap-1.5 shrink-0 text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:inline">Bibliothèque</span>
+        </button>
+        <span class="font-semibold text-base truncate flex-1 min-w-0 text-gray-900 dark:text-gray-100">
+          Statistiques de lecture
+        </span>
+        <div class="flex-1 sm:hidden"></div>
+      </template>
+
       <!-- Reader page: back button + title + controls -->
       <template v-else-if="currentView === 'reader'">
         <button @click="closeReader()"
@@ -410,6 +425,13 @@
               class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-500"></span>
           </button>
 
+          <button v-if="!(multiUser && currentUser)" @click="navigateTo('/stats')" title="Statistiques de lecture"
+            class="hidden sm:flex p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 14l4-4 4 4 5-5"/>
+            </svg>
+          </button>
+
           <button @click="uploadDialog = true" title="Téléverser un livre"
             class="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -443,6 +465,14 @@
             </svg>
             <span v-if="recommendationsHasNew"
               class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-violet-500"></span>
+          </button>
+
+          <!-- Stats button (multi-user) -->
+          <button @click="navigateTo('/stats')" title="Statistiques de lecture"
+            class="hidden sm:flex p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 14l4-4 4 4 5-5"/>
+            </svg>
           </button>
 
           <button v-if="currentUser.isAdmin" @click="navigateTo('/admin')" title="Administration des utilisateurs"
@@ -1685,6 +1715,170 @@
       </div>
     </template><!-- end wishlist view -->
 
+    <!-- ===== STATS PAGE ===== -->
+    <template v-else-if="currentView === 'stats'">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 py-6">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Statistiques de lecture</h1>
+
+        <div v-if="statsLoading" class="flex justify-center items-center py-24">
+          <svg class="w-10 h-10 text-brand-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </div>
+
+        <div v-else-if="statsError" class="text-center py-24 text-gray-400 dark:text-gray-500">
+          {{ statsError }}
+        </div>
+
+        <div v-else-if="statsUsers.length === 0" class="text-center py-24 text-gray-400 dark:text-gray-500">
+          Aucune statistique disponible.
+        </div>
+
+        <div v-else>
+          <!-- User tabs (hidden in single-user mode) -->
+          <div v-if="statsUsers.length > 1" class="mb-6 flex flex-wrap gap-2">
+            <button v-for="(u, i) in statsUsers" :key="u.userId || u.userName"
+              @click="statsActiveIndex = i"
+              :class="statsActiveIndex === i
+                ? 'bg-brand-600 text-white'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 dark:border-gray-700 transition-colors">
+              <span v-if="u.userColor" class="w-3 h-3 rounded-full shrink-0 border border-white/50"
+                :style="{ background: u.userColor }"></span>
+              {{ u.userName }}
+            </button>
+          </div>
+
+          <!-- Stats content for active user -->
+          <div v-if="activeStats">
+            <!-- Headline counters -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Lus</div>
+                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{{ activeStats.booksRead }}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">sur {{ activeStats.totalBooks }} livres</div>
+              </div>
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Cette année</div>
+                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{{ activeStats.booksReadThisYear }}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">livres lus en {{ new Date().getFullYear() }}</div>
+              </div>
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Couverture</div>
+                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{{ statsReadPercent }}%</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">de la bibliothèque</div>
+              </div>
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Note moyenne</div>
+                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                  {{ activeStats.ratedBooks > 0 ? activeStats.averageRating.toFixed(1) : '—' }}
+                  <span v-if="activeStats.ratedBooks > 0" class="text-amber-500 text-lg">★</span>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ activeStats.ratedBooks }} livres notés</div>
+              </div>
+            </div>
+
+            <!-- Monthly bar chart -->
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 mb-6">
+              <h2 class="font-semibold text-gray-900 dark:text-gray-100 mb-3">Lecture sur les 12 derniers mois</h2>
+              <div v-if="statsMonthlyMax === 0" class="text-sm text-gray-400 dark:text-gray-500 py-6 text-center">
+                Aucune lecture enregistrée sur cette période.
+              </div>
+              <div v-else class="flex items-end gap-1 h-32 sm:h-40">
+                <div v-for="m in activeStats.byMonth" :key="m.month"
+                  class="flex-1 flex flex-col items-center justify-end gap-1 group relative">
+                  <div class="text-xs font-medium text-gray-600 dark:text-gray-400"
+                    :class="m.count === 0 ? 'opacity-0' : ''">{{ m.count }}</div>
+                  <div class="w-full rounded-t bg-brand-500 dark:bg-brand-400 transition-all"
+                    :style="{ height: (m.count > 0 ? (m.count / statsMonthlyMax * 100) : 0) + '%', minHeight: m.count > 0 ? '4px' : '0' }">
+                  </div>
+                  <div class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ formatMonthLabel(m.month) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Rating distribution -->
+            <div v-if="activeStats.ratedBooks > 0"
+              class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 mb-6">
+              <h2 class="font-semibold text-gray-900 dark:text-gray-100 mb-3">Répartition des notes</h2>
+              <div class="space-y-1.5">
+                <div v-for="(n, i) in [4, 3, 2, 1, 0]" :key="n" class="flex items-center gap-3 text-sm">
+                  <div class="flex items-center gap-0.5 w-20 shrink-0 text-amber-500">
+                    <svg v-for="s in (n + 1)" :key="s" class="w-4 h-4 fill-current" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118L2.075 10.1c-.783-.57-.38-1.81.588-1.81h4.915a1 1 0 00.95-.69l1.519-4.674z"/>
+                    </svg>
+                  </div>
+                  <div class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div class="h-full bg-amber-500 transition-all"
+                      :style="{ width: (activeStats.ratingDistribution[n] / Math.max(...activeStats.ratingDistribution) * 100 || 0) + '%' }">
+                    </div>
+                  </div>
+                  <div class="w-10 text-right text-gray-500 dark:text-gray-400 text-xs tabular-nums">
+                    {{ activeStats.ratingDistribution[n] }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Top lists grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <h2 class="font-semibold text-gray-900 dark:text-gray-100 mb-3">Top auteurs</h2>
+                <div v-if="activeStats.topAuthors.length === 0" class="text-sm text-gray-400">Aucun auteur.</div>
+                <ul v-else class="space-y-2">
+                  <li v-for="(a, i) in activeStats.topAuthors" :key="a.label"
+                    class="flex items-center gap-3 text-sm">
+                    <span class="w-5 text-right text-gray-400 dark:text-gray-500 tabular-nums">{{ i + 1 }}.</span>
+                    <a :href="'#/authors/' + encodeURIComponent(a.label)"
+                      class="flex-1 truncate text-gray-800 dark:text-gray-200 hover:text-brand-600 hover:underline">{{ a.label }}</a>
+                    <span class="shrink-0 text-xs font-semibold bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded px-1.5 py-0.5 tabular-nums">{{ a.count }}</span>
+                  </li>
+                </ul>
+              </div>
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <h2 class="font-semibold text-gray-900 dark:text-gray-100 mb-3">Top étiquettes</h2>
+                <div v-if="activeStats.topTags.length === 0" class="text-sm text-gray-400">Aucune étiquette.</div>
+                <ul v-else class="space-y-2">
+                  <li v-for="(t, i) in activeStats.topTags" :key="t.label"
+                    class="flex items-center gap-3 text-sm">
+                    <span class="w-5 text-right text-gray-400 dark:text-gray-500 tabular-nums">{{ i + 1 }}.</span>
+                    <a :href="'#/tags/' + encodeURIComponent(t.label)"
+                      class="flex-1 truncate text-gray-800 dark:text-gray-200 hover:text-brand-600 hover:underline">{{ t.label }}</a>
+                    <span class="shrink-0 text-xs font-semibold bg-purple-50 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded px-1.5 py-0.5 tabular-nums">{{ t.count }}</span>
+                  </li>
+                </ul>
+              </div>
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <h2 class="font-semibold text-gray-900 dark:text-gray-100 mb-3">Top séries</h2>
+                <div v-if="activeStats.topSeries.length === 0" class="text-sm text-gray-400">Aucune série.</div>
+                <ul v-else class="space-y-2">
+                  <li v-for="(s, i) in activeStats.topSeries" :key="s.label"
+                    class="flex items-center gap-3 text-sm">
+                    <span class="w-5 text-right text-gray-400 dark:text-gray-500 tabular-nums">{{ i + 1 }}.</span>
+                    <a :href="'#/series/' + encodeURIComponent(s.label)"
+                      class="flex-1 truncate text-gray-800 dark:text-gray-200 hover:text-brand-600 hover:underline">{{ s.label }}</a>
+                    <span class="shrink-0 text-xs font-semibold bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded px-1.5 py-0.5 tabular-nums">{{ s.count }}</span>
+                  </li>
+                </ul>
+              </div>
+              <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <h2 class="font-semibold text-gray-900 dark:text-gray-100 mb-3">Par langue</h2>
+                <div v-if="activeStats.byLanguage.length === 0" class="text-sm text-gray-400">Aucune langue renseignée.</div>
+                <ul v-else class="space-y-2">
+                  <li v-for="l in activeStats.byLanguage" :key="l.label"
+                    class="flex items-center gap-3 text-sm">
+                    <span class="flex-1 truncate text-gray-800 dark:text-gray-200">{{ l.label }}</span>
+                    <span class="shrink-0 text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded px-1.5 py-0.5 tabular-nums">{{ l.count }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template><!-- end stats view -->
+
   </main>
 
   <!-- Footer -->
@@ -2489,7 +2683,7 @@ createApp({
     }
 
     // ---- Hash-based routing ----
-    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin' | 'recommendations' | 'reader'
+    const currentView = ref('grid')  // 'grid' | 'book' | 'series' | 'author' | 'tag' | 'tags-manage' | 'collection' | 'publisher' | 'admin' | 'recommendations' | 'stats' | 'reader'
     const currentBook = ref(null)
     const bookLoading = ref(false)
     const currentSeries = ref('')
@@ -2702,6 +2896,10 @@ createApp({
         currentView.value = 'wishlist'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadWishlist(true)
+      } else if (hash === '#/stats') {
+        currentView.value = 'stats'
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadStats()
       } else {
         currentView.value = 'grid'
         currentBook.value = null
@@ -3367,6 +3565,66 @@ createApp({
       }
     }
 
+    // ---- Stats page ----
+    const statsLoading = ref(false)
+    const statsError = ref('')
+    const statsUsers = ref([])  // array of statsUserJSON rows from server
+    const statsActiveIndex = ref(0)
+
+    async function loadStats() {
+      statsLoading.value = true
+      statsError.value = ''
+      statsUsers.value = []
+      try {
+        const res = await apiFetch('/api/stats')
+        if (res.status === 501) {
+          statsError.value = 'Les statistiques ne sont pas disponibles avec le backend actuel.'
+          return
+        }
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        const data = await res.json()
+        statsUsers.value = data.users || []
+        // Default: current user if multi-user, otherwise first row.
+        let idx = 0
+        if (currentUser.value && currentUser.value.id) {
+          const mine = statsUsers.value.findIndex(function(u) { return u.userId === currentUser.value.id })
+          if (mine >= 0) idx = mine
+        }
+        statsActiveIndex.value = idx
+      } catch(e) {
+        statsError.value = 'Erreur : ' + (e.message || e)
+      } finally {
+        statsLoading.value = false
+      }
+    }
+
+    const activeStats = computed(function() {
+      return statsUsers.value[statsActiveIndex.value] || null
+    })
+
+    const statsReadPercent = computed(function() {
+      const s = activeStats.value
+      if (!s || !s.totalBooks) return 0
+      return Math.round(s.booksRead * 100 / s.totalBooks)
+    })
+
+    const statsMonthlyMax = computed(function() {
+      const s = activeStats.value
+      if (!s || !s.byMonth) return 0
+      let max = 0
+      for (const m of s.byMonth) if (m.count > max) max = m.count
+      return max
+    })
+
+    // Format "2026-04" → "avr." (short French month abbreviation)
+    function formatMonthLabel(ym) {
+      if (!ym || ym.length < 7) return ym
+      const year = parseInt(ym.slice(0, 4), 10)
+      const month = parseInt(ym.slice(5, 7), 10) - 1
+      const months = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
+      return months[month] || ym
+    }
+
     // ---- Read banner helpers ----
     function showReadBanner(book) {
       return book.isRead || (book.readColors && book.readColors.length > 0)
@@ -3589,6 +3847,8 @@ createApp({
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,
       wishlistAllItems, wishlistItems, wishlistLoading, wishlistEditingId, wishlistForm, wishlistSaving,
       loadWishlist, openWishlistForm, cancelWishlistEdit, saveWishlistItem, deleteWishlistItem,
+      statsLoading, statsError, statsUsers, statsActiveIndex, activeStats,
+      statsReadPercent, statsMonthlyMax, loadStats, formatMonthLabel,
       showReadBanner, readBannerStyle,
       toast, formatBytes,
       readerBook, readerLoading, readerError, readerTocOpen, readerToc, readerProgress, readerFontSize,
