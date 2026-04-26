@@ -12,6 +12,8 @@ A lightweight personal eBook library server written in Go, with an OPDS catalog 
 - **Editable metadata** — title, authors, tags, series, collection, publisher, language, age rating, cover
 - **Age classification** — multi-select filter chips (?, 3+, 6+, 10+, 12+, 16+, 18+); per-child-profile max-age enforcement
 - **Multi-user support** — per-user read status, child profiles, user-coloured read banners
+- **To-read pile** — personal ordered reading queue, exposed in OPDS feeds and the MCP server
+- **Reading statistics** — per-user dashboard (totals, ratings, top authors/tags/series, 12-month chart)
 - **Wishlist** — personal reading wish list, exposed in OPDS feeds
 - **Recommendations** — send a book recommendation to another user
 - **Integrated EPUB reader** with prev/next book navigation and swipe/keyboard support
@@ -112,17 +114,23 @@ nxt-opds exposes a [Model Context Protocol](https://modelcontextprotocol.io) end
 
 | Tool              | Description                                    |
 |-------------------|------------------------------------------------|
-| `search_books`    | Search the catalog with filters                |
-| `get_book`        | Get full metadata for a book                   |
-| `update_book`     | Update book metadata (tags, summary, age rating, etc.) |
-| `upload_book`     | Upload an EPUB file                            |
-| `update_cover`    | Replace a book's cover image                   |
-| `list_tags`       | List all tags in the catalog                   |
-| `list_authors`    | List all authors                               |
-| `list_series`     | List all series                                |
-| `list_publishers` | List all publishers                            |
-| `list_wishlist`   | List wishlist items                            |
-| `list_recommendations` | List pending recommendations             |
+| `search_books`         | Search the catalog with filters (incl. `not_indexed`)            |
+| `get_book`             | Get full metadata for a book                                     |
+| `update_book`          | Update book metadata (tags, summary, age rating, last indexed, etc.) |
+| `upload_book`          | Upload an EPUB file (base64-encoded)                             |
+| `update_cover`         | Replace a book's cover image                                     |
+| `list_tags`            | List all tags in the catalog (default 50, max 200)               |
+| `list_authors`         | List all authors (default 100, max 500)                          |
+| `list_series`          | List all series                                                  |
+| `list_publishers`      | List all publishers (default 100, max 500)                       |
+| `list_wishlist`        | List wishlist items                                              |
+| `add_wishlist_item`    | Add an entry to the wishlist                                     |
+| `delete_wishlist_item` | Remove a wishlist entry                                          |
+| `list_recommendations` | List pending recommendations                                     |
+| `list_to_read`         | List the current user's ordered to-read pile                     |
+| `add_to_read`          | Append a book to the to-read pile                                |
+| `remove_to_read`       | Remove a book from the to-read pile                              |
+| `reorder_to_read`      | Reorder the to-read pile by book IDs                             |
 
 Authentication uses the same OPDS bearer token (`?token=<value>` or `Authorization: Bearer` header).
 
@@ -155,6 +163,7 @@ Authentication uses the same OPDS bearer token (`?token=<value>` or `Authorizati
 | `GET /opds/publishers`             | Publisher navigation feed      |
 | `GET /opds/publishers/{publisher}` | Books by publisher             |
 | `GET /opds/unread`                 | Unread books feed              |
+| `GET /opds/to-read`                | To-read pile feed (per user)   |
 | `GET /opds/wishlist`               | Wishlist feed                  |
 | `GET /opds/recommendations`        | Recommendations feed           |
 
@@ -184,6 +193,11 @@ Same paths under `/opds/v2` (JSON format).
 | `POST /api/wishlist`                        | Add wishlist item                  |
 | `PATCH /api/wishlist/{id}`                  | Update wishlist item               |
 | `DELETE /api/wishlist/{id}`                 | Remove wishlist item               |
+| `GET /api/to-read`                          | Current user's to-read pile        |
+| `POST /api/to-read`                         | Add a book to the to-read pile     |
+| `PUT /api/to-read/reorder`                  | Reorder the to-read pile           |
+| `DELETE /api/to-read/{bookId}`              | Remove a book from the to-read pile |
+| `GET /api/stats`                            | Reading statistics (per user)      |
 | `GET /api/users`                            | List users (admin)                 |
 | `POST /api/users`                           | Create a user (admin)              |
 | `PATCH /api/users/{id}`                     | Update a user (admin)              |
