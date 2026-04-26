@@ -457,6 +457,16 @@
               class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-500"></span>
           </button>
 
+          <!-- To-read pile button -->
+          <button @click="navigateTo('/to-read')" title="Pile à lire"
+            class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 12h14M5 16h10"/>
+            </svg>
+            <span v-if="toReadList.length > 0"
+              class="absolute top-0.5 right-0.5 min-w-[1rem] h-4 px-1 rounded-full bg-amber-500 text-[10px] font-bold text-white flex items-center justify-center">{{ toReadList.length }}</span>
+          </button>
+
           <!-- Recommendations bell -->
           <button @click="navigateTo('/recommendations')" title="Mes recommandations"
             class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
@@ -966,6 +976,20 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
               </svg>
               Recommander
+            </button>
+
+            <!-- To-read list toggle (multi-user mode) -->
+            <button v-if="multiUser && currentUser" @click="toggleToReadCurrent"
+              :disabled="toReadToggling"
+              :class="isCurrentInToRead
+                ? 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40'
+                : 'border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20'"
+              class="flex items-center gap-2 px-4 py-2 border text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 12h14M5 16h10"/>
+              </svg>
+              <span class="hidden sm:inline">{{ isCurrentInToRead ? 'Retirer de la pile' : 'Ajouter à la pile à lire' }}</span>
+              <span class="sm:hidden">{{ isCurrentInToRead ? 'Retirer' : 'Pile' }}</span>
             </button>
 
             <!-- Delete button -->
@@ -1643,6 +1667,81 @@
         </div>
       </div>
     </template><!-- end recommendations view -->
+
+    <!-- ===== TO-READ LIST PAGE ===== -->
+    <template v-else-if="currentView === 'toread'">
+      <div class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Pile à lire</h1>
+          <p v-if="toReadList.length > 0" class="text-sm text-gray-500 dark:text-gray-400 self-start sm:self-auto">
+            {{ toReadList.length }} livre{{ toReadList.length > 1 ? 's' : '' }} en attente
+          </p>
+        </div>
+
+        <div v-if="toReadLoading" class="flex justify-center items-center py-24">
+          <svg class="w-10 h-10 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </div>
+
+        <div v-else-if="toReadList.length === 0" class="text-center py-24 text-gray-400 dark:text-gray-500">
+          <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 12h14M5 16h10"/>
+          </svg>
+          Votre pile à lire est vide. Ajoutez des livres depuis leur page de détail.
+        </div>
+
+        <div v-else class="space-y-3">
+          <div v-for="(item, idx) in toReadList" :key="item.bookId"
+            class="flex gap-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <!-- Mini cover (clickable) -->
+            <div class="w-14 shrink-0 cursor-pointer" @click="openBook(item.bookId)">
+              <div class="cover-aspect rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
+                <img v-if="item.coverUrl" :src="item.coverUrl" :alt="item.title"/>
+                <div v-else class="flex items-center justify-center text-gray-400 dark:text-gray-500">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <!-- Info -->
+            <div class="flex-1 min-w-0 cursor-pointer" @click="openBook(item.bookId)">
+              <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-bold mr-2">{{ idx + 1 }}</span>
+              <span class="font-semibold text-gray-900 dark:text-gray-100">{{ item.title }}</span>
+              <p v-if="item.authors && item.authors.length" class="text-sm text-gray-600 dark:text-gray-400 mt-0.5 ml-8">
+                {{ item.authors.join(', ') }}
+              </p>
+              <p v-if="item.series" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5 ml-8">
+                {{ item.series }}<span v-if="item.seriesIndex"> – #{{ item.seriesIndex }}</span>
+              </p>
+            </div>
+            <!-- Reorder + remove buttons -->
+            <div class="flex items-center gap-1 shrink-0">
+              <button @click="moveToReadUp(idx)" :disabled="idx === 0 || toReadSaving" title="Monter"
+                class="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
+                </svg>
+              </button>
+              <button @click="moveToReadDown(idx)" :disabled="idx === toReadList.length - 1 || toReadSaving" title="Descendre"
+                class="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </button>
+              <button @click="removeFromToRead(item.bookId)" title="Retirer"
+                class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template><!-- end to-read view -->
 
     <!-- ===== WISHLIST PAGE ===== -->
     <template v-else-if="currentView === 'wishlist'">
@@ -2896,6 +2995,10 @@ createApp({
         currentView.value = 'wishlist'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadWishlist(true)
+      } else if (hash === '#/to-read') {
+        currentView.value = 'toread'
+        window.scrollTo({ top: 0, behavior: 'instant' })
+        await loadToReadList()
       } else if (hash === '#/stats') {
         currentView.value = 'stats'
         window.scrollTo({ top: 0, behavior: 'instant' })
@@ -3018,6 +3121,10 @@ createApp({
         // Update books grid list in place
         const idx = books.value.findIndex(b => b.id === updated.id)
         if (idx !== -1) books.value[idx] = updated
+        // Server auto-removes read books from the to-read list — keep UI in sync.
+        if (newIsRead) {
+          toReadList.value = toReadList.value.filter(it => it.bookId !== updated.id)
+        }
         showToast(newIsRead ? 'Marqué comme lu' : 'Marqué comme non lu', 'success')
       } catch (e) {
         showToast('Erreur : ' + e.message, 'error')
@@ -3565,6 +3672,107 @@ createApp({
       }
     }
 
+    // ---- To-read list ----
+    const toReadList     = ref([])     // array of toReadItemJSON
+    const toReadLoading  = ref(false)
+    const toReadSaving   = ref(false)
+    const toReadToggling = ref(false)
+
+    // True when the currently displayed book is in the user's to-read list.
+    const isCurrentInToRead = computed(() => {
+      if (!currentBook.value) return false
+      return toReadList.value.some(it => it.bookId === currentBook.value.id)
+    })
+
+    async function loadToReadList() {
+      if (!multiUser.value || !currentUser.value) return
+      toReadLoading.value = true
+      try {
+        const res = await apiFetch('/api/to-read')
+        if (res.status === 501 || res.status === 401) {
+          toReadList.value = []
+          return
+        }
+        if (res.ok) toReadList.value = await res.json()
+      } catch(e) { /* non-blocking */ }
+      finally { toReadLoading.value = false }
+    }
+
+    async function toggleToReadCurrent() {
+      if (!currentBook.value || toReadToggling.value) return
+      toReadToggling.value = true
+      const bookId = currentBook.value.id
+      const wasIn = isCurrentInToRead.value
+      try {
+        let res
+        if (wasIn) {
+          res = await apiFetch('/api/to-read/' + bookId, { method: 'DELETE' })
+        } else {
+          res = await apiFetch('/api/to-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bookId: bookId }),
+          })
+        }
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        await loadToReadList()
+        showToast(wasIn ? 'Retiré de la pile à lire' : 'Ajouté à la pile à lire', 'success')
+      } catch(e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        toReadToggling.value = false
+      }
+    }
+
+    async function removeFromToRead(bookId) {
+      try {
+        const res = await apiFetch('/api/to-read/' + bookId, { method: 'DELETE' })
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        toReadList.value = toReadList.value.filter(it => it.bookId !== bookId)
+      } catch(e) {
+        showToast('Erreur : ' + e.message, 'error')
+      }
+    }
+
+    async function persistToReadOrder() {
+      if (toReadSaving.value) return
+      toReadSaving.value = true
+      try {
+        const res = await apiFetch('/api/to-read/reorder', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookIds: toReadList.value.map(it => it.bookId) }),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+      } catch(e) {
+        showToast('Erreur : ' + e.message, 'error')
+        // Reload to recover canonical order on failure.
+        await loadToReadList()
+      } finally {
+        toReadSaving.value = false
+      }
+    }
+
+    function moveToReadUp(idx) {
+      if (idx <= 0 || idx >= toReadList.value.length) return
+      const arr = toReadList.value.slice()
+      const tmp = arr[idx - 1]
+      arr[idx - 1] = arr[idx]
+      arr[idx] = tmp
+      toReadList.value = arr
+      persistToReadOrder()
+    }
+
+    function moveToReadDown(idx) {
+      if (idx < 0 || idx >= toReadList.value.length - 1) return
+      const arr = toReadList.value.slice()
+      const tmp = arr[idx + 1]
+      arr[idx + 1] = arr[idx]
+      arr[idx] = tmp
+      toReadList.value = arr
+      persistToReadOrder()
+    }
+
     // ---- Stats page ----
     const statsLoading = ref(false)
     const statsError = ref('')
@@ -3778,6 +3986,7 @@ createApp({
           appVersion.value = cfg.version || 'dev'
           if (cfg.multiUser && cfg.currentUser) {
             loadRecommendations()
+            loadToReadList()
           }
           // Load wishlist for badge count (works in both single-user and multi-user mode)
           loadWishlist()
@@ -3847,6 +4056,8 @@ createApp({
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,
       wishlistAllItems, wishlistItems, wishlistLoading, wishlistEditingId, wishlistForm, wishlistSaving,
       loadWishlist, openWishlistForm, cancelWishlistEdit, saveWishlistItem, deleteWishlistItem,
+      toReadList, toReadLoading, toReadSaving, toReadToggling, isCurrentInToRead,
+      loadToReadList, toggleToReadCurrent, removeFromToRead, moveToReadUp, moveToReadDown,
       statsLoading, statsError, statsUsers, statsActiveIndex, activeStats,
       statsReadPercent, statsMonthlyMax, loadStats, formatMonthLabel,
       showReadBanner, readBannerStyle,

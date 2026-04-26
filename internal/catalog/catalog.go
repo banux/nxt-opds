@@ -536,6 +536,45 @@ type SessionPersistence interface {
 	PruneExpiredSessions() error
 }
 
+// ToReadItem represents an entry in a user's ordered "to-read" pile.
+type ToReadItem struct {
+	// UserID is the ID of the user who owns this list entry.
+	UserID string
+
+	// Book is the book on the list (fully populated).
+	Book Book
+
+	// Position is the 0-based ordering of this entry inside the user's list.
+	// Lower values appear first.
+	Position int
+
+	// AddedAt is when this entry was added to the to-read pile.
+	AddedAt time.Time
+}
+
+// ToReadManager is an optional interface for catalog backends that support
+// per-user ordered to-read lists.  Books are added to the bottom of the list
+// and can be re-ordered.  When a book is marked as read for the user, the
+// catalog implementation should remove it from that user's to-read list.
+type ToReadManager interface {
+	// ToReadList returns the user's ordered to-read list.
+	ToReadList(userID string) ([]ToReadItem, error)
+
+	// AddToReadList appends bookID to the bottom of userID's to-read list.
+	// If the book is already in the list this is a no-op (returns nil).
+	AddToReadList(userID, bookID string) error
+
+	// RemoveFromToReadList removes bookID from userID's to-read list.
+	// If the book is not in the list this is a no-op (returns nil).
+	RemoveFromToReadList(userID, bookID string) error
+
+	// ReorderToReadList replaces the user's to-read list with bookIDs in the
+	// supplied order.  bookIDs not currently on the user's list are ignored;
+	// existing entries missing from bookIDs are left at the end in their
+	// previous relative order.
+	ReorderToReadList(userID string, bookIDs []string) error
+}
+
 // Recommender is an optional interface for catalog backends that support
 // per-user book recommendations.
 type Recommender interface {

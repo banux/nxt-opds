@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 11
+const currentSchemaVersion = 12
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -93,6 +93,23 @@ var schemaMigrations = []schemaMigration{
 	{version: 9, apply: migration9},
 	{version: 10, apply: migration10},
 	{version: 11, apply: migration11},
+	{version: 12, apply: migration12},
+}
+
+// migration12 adds the to_read_list table for per-user ordered to-read piles
+// (version 11 → 12).
+func migration12(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS to_read_list (
+    user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    book_id  TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, book_id)
+);
+CREATE INDEX IF NOT EXISTS idx_to_read_user_pos ON to_read_list(user_id, position);
+`)
+	return err
 }
 
 // migration11 adds the read_at timestamp column to user_read_status so reading
@@ -1239,6 +1256,7 @@ func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool, maxA
 // SetUserRead marks (isRead=true) or clears (isRead=false) a book as read for a user.
 // When marking as read, the current timestamp is recorded in read_at; existing
 // rows keep their original read_at on a no-op update so reading history is preserved.
+// Marking a book as read also removes it from the user's to-read list (best-effort).
 func (b *Backend) SetUserRead(userID, bookID string, isRead bool) error {
 	if isRead {
 		now := time.Now().Unix()
@@ -1250,7 +1268,12 @@ ON CONFLICT(user_id, book_id) DO UPDATE SET
                    THEN user_read_status.read_at
                    ELSE excluded.read_at END`,
 			userID, bookID, now)
-		return err
+		if err != nil {
+			return err
+		}
+		// Best-effort: remove the book from the user's to-read list.
+		_, _ = b.db.Exec(`DELETE FROM to_read_list WHERE user_id = ? AND book_id = ?`, userID, bookID)
+		return nil
 	}
 	_, err := b.db.Exec(
 		`DELETE FROM user_read_status WHERE user_id = ? AND book_id = ?`,
@@ -1877,6 +1900,147 @@ ORDER BY m ASC`, byMonthArgs...)
 	}
 
 	return stats, nil
+}
+
+// ─── ToReadManager ───────────────────────────────────────────────────────────
+
+// ToReadList returns the user's ordered to-read list, oldest position first.
+// Implements catalog.ToReadManager.
+func (b *Backend) ToReadList(userID string) ([]catalog.ToReadItem, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	rows, err := b.db.Query(`
+SELECT trl.position, trl.added_at,`+bookSelectColumns+`
+FROM to_read_list trl
+JOIN books b ON b.id = trl.book_id
+WHERE trl.user_id = ?
+ORDER BY trl.position ASC, trl.added_at ASC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query to-read list: %w", err)
+	}
+	defer rows.Close()
+	var out []catalog.ToReadItem
+	for rows.Next() {
+		var pos int
+		var addedAt int64
+		var r bookRow
+		if err := rows.Scan(
+			&pos, &addedAt,
+			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating,
+			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
+			&r.LastMaintenanceAt,
+			&r.AuthorsJSON, &r.TagsJSON,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, catalog.ToReadItem{
+			UserID:   userID,
+			Book:     r.toBook(),
+			Position: pos,
+			AddedAt:  time.Unix(addedAt, 0),
+		})
+	}
+	return out, rows.Err()
+}
+
+// AddToReadList appends bookID to the bottom of userID's to-read list.
+// If the book is already in the list, this is a no-op.
+// Implements catalog.ToReadManager.
+func (b *Backend) AddToReadList(userID, bookID string) error {
+	if userID == "" || bookID == "" {
+		return fmt.Errorf("userID and bookID are required")
+	}
+	// Find the next position (one past the current max).
+	var nextPos int
+	row := b.db.QueryRow(`SELECT COALESCE(MAX(position), -1) + 1 FROM to_read_list WHERE user_id = ?`, userID)
+	if err := row.Scan(&nextPos); err != nil {
+		return fmt.Errorf("compute next position: %w", err)
+	}
+	_, err := b.db.Exec(`
+INSERT INTO to_read_list (user_id, book_id, position, added_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(user_id, book_id) DO NOTHING`,
+		userID, bookID, nextPos, time.Now().Unix())
+	return err
+}
+
+// RemoveFromToReadList removes bookID from userID's to-read list.
+// Implements catalog.ToReadManager.
+func (b *Backend) RemoveFromToReadList(userID, bookID string) error {
+	if userID == "" || bookID == "" {
+		return fmt.Errorf("userID and bookID are required")
+	}
+	_, err := b.db.Exec(
+		`DELETE FROM to_read_list WHERE user_id = ? AND book_id = ?`,
+		userID, bookID,
+	)
+	return err
+}
+
+// ReorderToReadList replaces the user's to-read list ordering with bookIDs.
+// Books not currently on the list are ignored. Books on the list but missing
+// from bookIDs are appended in their previous relative order.
+// Implements catalog.ToReadManager.
+func (b *Backend) ReorderToReadList(userID string, bookIDs []string) error {
+	if userID == "" {
+		return fmt.Errorf("userID is required")
+	}
+	tx, err := b.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Load existing entries (ordered).
+	rows, err := tx.Query(
+		`SELECT book_id FROM to_read_list WHERE user_id = ? ORDER BY position ASC, added_at ASC`,
+		userID)
+	if err != nil {
+		return err
+	}
+	existing := map[string]bool{}
+	var existingOrder []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[id] = true
+		existingOrder = append(existingOrder, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Build the final ordering: requested IDs first (only those that exist),
+	// then any leftover entries in their previous relative order.
+	requested := map[string]bool{}
+	var finalOrder []string
+	for _, id := range bookIDs {
+		if existing[id] && !requested[id] {
+			finalOrder = append(finalOrder, id)
+			requested[id] = true
+		}
+	}
+	for _, id := range existingOrder {
+		if !requested[id] {
+			finalOrder = append(finalOrder, id)
+		}
+	}
+
+	for i, id := range finalOrder {
+		if _, err := tx.Exec(
+			`UPDATE to_read_list SET position = ? WHERE user_id = ? AND book_id = ?`,
+			i, userID, id,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // labelCounts runs a query whose rows are (label TEXT, count INT) and returns

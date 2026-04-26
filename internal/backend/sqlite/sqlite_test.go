@@ -838,3 +838,146 @@ func TestReadStats_NoUserID(t *testing.T) {
 		t.Errorf("BooksRead (global): got %d, want 1", stats.BooksRead)
 	}
 }
+
+// TestToReadList_AddListRemove verifies basic add/list/remove on the to-read list.
+func TestToReadList_AddListRemove(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Alpha", "Jane Doe", "SF")
+	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Beta", "Jane Doe", "SF")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	u, err := b.CreateUser("Reader", "#ff00ff", false, false, 0)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	books, _, _ := b.AllBooks(0, 10)
+	if len(books) < 2 {
+		t.Fatalf("expected ≥2 books, got %d", len(books))
+	}
+
+	// Empty list initially.
+	items, err := b.ToReadList(u.ID)
+	if err != nil {
+		t.Fatalf("ToReadList: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected empty list, got %d items", len(items))
+	}
+
+	// Add two books.
+	if err := b.AddToReadList(u.ID, books[0].ID); err != nil {
+		t.Fatalf("AddToReadList[0]: %v", err)
+	}
+	if err := b.AddToReadList(u.ID, books[1].ID); err != nil {
+		t.Fatalf("AddToReadList[1]: %v", err)
+	}
+
+	// Adding the same book again is a no-op.
+	if err := b.AddToReadList(u.ID, books[0].ID); err != nil {
+		t.Fatalf("AddToReadList duplicate: %v", err)
+	}
+
+	items, err = b.ToReadList(u.ID)
+	if err != nil {
+		t.Fatalf("ToReadList: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Book.ID != books[0].ID {
+		t.Errorf("position 0: got %q, want %q", items[0].Book.ID, books[0].ID)
+	}
+	if items[1].Book.ID != books[1].ID {
+		t.Errorf("position 1: got %q, want %q", items[1].Book.ID, books[1].ID)
+	}
+
+	// Remove the first book.
+	if err := b.RemoveFromToReadList(u.ID, books[0].ID); err != nil {
+		t.Fatalf("RemoveFromToReadList: %v", err)
+	}
+	items, _ = b.ToReadList(u.ID)
+	if len(items) != 1 || items[0].Book.ID != books[1].ID {
+		t.Errorf("after remove: got %+v, want only books[1]", items)
+	}
+}
+
+// TestToReadList_Reorder verifies that ReorderToReadList swaps positions
+// and that books missing from the request are appended at the end.
+func TestToReadList_Reorder(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Alpha", "Author", "Tag")
+	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Beta", "Author", "Tag")
+	createMinimalEPUB(t, filepath.Join(dir, "c.epub"), "Gamma", "Author", "Tag")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	u, _ := b.CreateUser("Reader", "#ff0000", false, false, 0)
+	books, _, _ := b.AllBooks(0, 10)
+	if len(books) < 3 {
+		t.Fatalf("expected ≥3 books, got %d", len(books))
+	}
+
+	for _, bk := range books {
+		if err := b.AddToReadList(u.ID, bk.ID); err != nil {
+			t.Fatalf("AddToReadList: %v", err)
+		}
+	}
+
+	// Reverse the order, omitting the third book (it should land at the end).
+	if err := b.ReorderToReadList(u.ID, []string{books[1].ID, books[0].ID}); err != nil {
+		t.Fatalf("ReorderToReadList: %v", err)
+	}
+	items, _ := b.ToReadList(u.ID)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	if items[0].Book.ID != books[1].ID {
+		t.Errorf("position 0: got %q, want %q", items[0].Book.ID, books[1].ID)
+	}
+	if items[1].Book.ID != books[0].ID {
+		t.Errorf("position 1: got %q, want %q", items[1].Book.ID, books[0].ID)
+	}
+	if items[2].Book.ID != books[2].ID {
+		t.Errorf("position 2 (leftover): got %q, want %q", items[2].Book.ID, books[2].ID)
+	}
+}
+
+// TestToReadList_RemovedOnRead verifies that marking a book as read
+// automatically removes it from the user's to-read list.
+func TestToReadList_RemovedOnRead(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Alpha", "Author", "Tag")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	u, _ := b.CreateUser("Reader", "#ff0000", false, false, 0)
+	books, _, _ := b.AllBooks(0, 10)
+	if len(books) == 0 {
+		t.Fatal("no books")
+	}
+	if err := b.AddToReadList(u.ID, books[0].ID); err != nil {
+		t.Fatalf("AddToReadList: %v", err)
+	}
+
+	// Mark as read → should remove from the to-read list.
+	if err := b.SetUserRead(u.ID, books[0].ID, true); err != nil {
+		t.Fatalf("SetUserRead: %v", err)
+	}
+	items, _ := b.ToReadList(u.ID)
+	if len(items) != 0 {
+		t.Errorf("expected empty list after read, got %d items", len(items))
+	}
+}

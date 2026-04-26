@@ -56,6 +56,7 @@ type Server struct {
 	userReadManager catalog.UserReadManager // optional; nil if backend doesn't support per-user read
 	recommender     catalog.Recommender     // optional; nil if backend doesn't support recommendations
 	wishlistManager catalog.WishlistManager // optional; nil if backend doesn't support wishlists
+	toReadManager   catalog.ToReadManager   // optional; nil if backend doesn't support to-read lists
 	readStats       catalog.ReadStatsProvider // optional; nil if backend doesn't expose reading statistics
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
@@ -114,6 +115,9 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	if wm, ok := cat.(catalog.WishlistManager); ok {
 		s.wishlistManager = wm
+	}
+	if trm, ok := cat.(catalog.ToReadManager); ok {
+		s.toReadManager = trm
 	}
 	if rs, ok := cat.(catalog.ReadStatsProvider); ok {
 		s.readStats = rs
@@ -203,6 +207,9 @@ func (s *Server) registerRoutes() {
 	// Recommendations feed
 	protected.HandleFunc("/opds/recommendations", s.handleOPDSRecommendations).Methods(http.MethodGet)
 
+	// To-read list feed (OPDS v1)
+	protected.HandleFunc("/opds/to-read", s.handleOPDSToRead).Methods(http.MethodGet)
+
 	// OpenSearch description document
 	protected.HandleFunc("/opds/opensearch.xml", s.handleOpenSearch).Methods(http.MethodGet)
 
@@ -270,6 +277,12 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/wishlist/{id}", s.handleAPIUpdateWishlistItem).Methods(http.MethodPatch)
 	protected.HandleFunc("/api/wishlist/{id}", s.handleAPIDeleteWishlistItem).Methods(http.MethodDelete)
 
+	// API: per-user to-read list
+	protected.HandleFunc("/api/to-read", s.handleAPIToRead).Methods(http.MethodGet)
+	protected.HandleFunc("/api/to-read", s.handleAPIAddToRead).Methods(http.MethodPost)
+	protected.HandleFunc("/api/to-read/reorder", s.handleAPIReorderToRead).Methods(http.MethodPut)
+	protected.HandleFunc("/api/to-read/{bookId}", s.handleAPIRemoveToRead).Methods(http.MethodDelete)
+
 	// API: trigger a manual catalog refresh (enabled when backend supports it)
 	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)
 
@@ -300,6 +313,7 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/v2/unread", s.handleOPDS2Unread).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/wishlist", s.handleOPDS2Wishlist).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/recommendations", s.handleOPDS2Recommendations).Methods(http.MethodGet)
+	protected.HandleFunc("/opds/v2/to-read", s.handleOPDS2ToRead).Methods(http.MethodGet)
 
 	// EPUB internal file serving: some OPDS readers follow links into the EPUB
 	// archive (e.g. /opds/books/{id}/META-INF/container.xml).  This route opens

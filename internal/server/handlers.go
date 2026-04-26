@@ -234,6 +234,18 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if s.toReadManager != nil {
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:to-read",
+			Title:   opds.Text{Value: "Pile à lire"},
+			Updated: opds.AtomDate{Time: now},
+			Content: &opds.Content{Type: "text", Value: "Livres à lire prochainement"},
+			Links: []opds.Link{
+				{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/to-read", tok), Type: opds.MIMEAcquisitionFeed},
+			},
+		})
+	}
+
 	writeOPDS(w, http.StatusOK, feed)
 }
 
@@ -1797,6 +1809,196 @@ func (s *Server) handleAPIDeleteWishlistItem(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ─── To-Read List ────────────────────────────────────────────────────────────
+
+// toReadItemJSON is the JSON representation of a ToReadItem for the frontend.
+type toReadItemJSON struct {
+	BookID      string   `json:"bookId"`
+	Title       string   `json:"title"`
+	Authors     []string `json:"authors,omitempty"`
+	CoverURL    string   `json:"coverUrl,omitempty"`
+	Series      string   `json:"series,omitempty"`
+	SeriesIndex string   `json:"seriesIndex,omitempty"`
+	Position    int      `json:"position"`
+	AddedAt     int64    `json:"addedAt"`
+}
+
+// handleAPIToRead returns the current user's ordered to-read list.
+// GET /api/to-read
+func (s *Server) handleAPIToRead(w http.ResponseWriter, r *http.Request) {
+	if s.toReadManager == nil {
+		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	items, err := s.toReadManager.ToReadList(userID)
+	if err != nil {
+		http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	result := make([]toReadItemJSON, 0, len(items))
+	for _, it := range items {
+		j := toReadItemJSON{
+			BookID:      it.Book.ID,
+			Title:       it.Book.Title,
+			CoverURL:    withToken(it.Book.CoverURL, s.opdsToken),
+			Series:      it.Book.Series,
+			SeriesIndex: it.Book.SeriesIndex,
+			Position:    it.Position,
+			AddedAt:     it.AddedAt.Unix(),
+		}
+		for _, a := range it.Book.Authors {
+			j.Authors = append(j.Authors, a.Name)
+		}
+		result = append(result, j)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// handleAPIAddToRead adds a book to the current user's to-read list.
+// POST /api/to-read   Body: {"bookId":"…"}
+func (s *Server) handleAPIAddToRead(w http.ResponseWriter, r *http.Request) {
+	if s.toReadManager == nil {
+		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		BookID string `json:"bookId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BookID == "" {
+		http.Error(w, "invalid request: bookId required", http.StatusBadRequest)
+		return
+	}
+	if err := s.toReadManager.AddToReadList(userID, req.BookID); err != nil {
+		http.Error(w, "add failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPIRemoveToRead removes a book from the current user's to-read list.
+// DELETE /api/to-read/{bookId}
+func (s *Server) handleAPIRemoveToRead(w http.ResponseWriter, r *http.Request) {
+	if s.toReadManager == nil {
+		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	bookID := mux.Vars(r)["bookId"]
+	if err := s.toReadManager.RemoveFromToReadList(userID, bookID); err != nil {
+		http.Error(w, "remove failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPIReorderToRead replaces the user's to-read list ordering.
+// PUT /api/to-read/reorder   Body: {"bookIds":["id1","id2",…]}
+func (s *Server) handleAPIReorderToRead(w http.ResponseWriter, r *http.Request) {
+	if s.toReadManager == nil {
+		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		BookIDs []string `json:"bookIds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if err := s.toReadManager.ReorderToReadList(userID, req.BookIDs); err != nil {
+		http.Error(w, "reorder failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleOPDSToRead serves the OPDS 1.x acquisition feed of the current user's
+// to-read list, in user-defined order.
+// GET /opds/to-read
+func (s *Server) handleOPDSToRead(w http.ResponseWriter, r *http.Request) {
+	if s.toReadManager == nil {
+		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	tok := r.URL.Query().Get("token")
+	items, err := s.toReadManager.ToReadList(userID)
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+	feed := opds.NewAcquisitionFeed(
+		"urn:nxt-opds:to-read",
+		fmt.Sprintf("Pile à lire (%d)", len(items)),
+	)
+	feed.Author = &opds.Author{Name: "nxt-opds"}
+	feed.AddLink(opds.RelSelf, withToken("/opds/to-read", tok), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
+	for _, it := range items {
+		feed.AddEntry(bookToEntry(it.Book, tok))
+	}
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// handleOPDS2ToRead serves the OPDS 2.0 acquisition feed of the current user's
+// to-read list.
+// GET /opds/v2/to-read
+func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
+	if s.toReadManager == nil {
+		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
+		return
+	}
+	userID := currentUserID(r)
+	if userID == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	tok := r.URL.Query().Get("token")
+	items, err := s.toReadManager.ToReadList(userID)
+	if err != nil {
+		http.Error(w, "catalog error", http.StatusInternalServerError)
+		return
+	}
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{
+			Title:         fmt.Sprintf("Pile à lire (%d)", len(items)),
+			NumberOfItems: len(items),
+		},
+		Links: []opds2.Link{
+			{Rel: "self", Href: withToken("/opds/v2/to-read", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+		},
+	}
+	for _, it := range items {
+		feed.Publications = append(feed.Publications, bookToPublication(it.Book, tok))
+	}
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
 // ─── OPDS Wishlist / Recommendations ─────────────────────────────────────────
 
 // handleOPDSWishlist serves an OPDS 1.x navigation feed of wishlist items.
@@ -2277,6 +2479,14 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: "Recommandations",
 			Href:  withToken("/opds/v2/recommendations", tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "current",
+		})
+	}
+	if s.toReadManager != nil {
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: "Pile à lire",
+			Href:  withToken("/opds/v2/to-read", tok),
 			Type:  opds2.MIMEFeed,
 			Rel:   "current",
 		})
