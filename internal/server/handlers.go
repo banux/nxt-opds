@@ -235,6 +235,21 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.toReadManager != nil {
+		s.appendToReadV1Entries(feed, r, tok, now)
+	}
+
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// appendToReadV1Entries emits one or more "Pile à lire" entries on the OPDS v1
+// root navigation feed.  When the request has a session-cookie userID the
+// entry points to /opds/to-read (the handler reads the userID from the
+// session).  When there is no session userID and multi-user mode is active
+// (typical for OPDS reader clients that only have the shared OPDS token), one
+// entry per user is emitted with ?user=<id> so the reader can pick a pile.
+// In single-user mode (no users) a single generic entry is emitted.
+func (s *Server) appendToReadV1Entries(feed *opds.Feed, r *http.Request, tok string, now time.Time) {
+	if currentUserID(r) != "" || !s.hasMultipleUsers() {
 		feed.AddEntry(opds.Entry{
 			ID:      "urn:nxt-opds:to-read",
 			Title:   opds.Text{Value: "Pile à lire"},
@@ -244,9 +259,24 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 				{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/to-read", tok), Type: opds.MIMEAcquisitionFeed},
 			},
 		})
+		return
 	}
-
-	writeOPDS(w, http.StatusOK, feed)
+	users, err := s.userManager.Users()
+	if err != nil {
+		return
+	}
+	for _, u := range users {
+		href := "/opds/to-read?user=" + url.QueryEscape(u.ID)
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:to-read:" + u.ID,
+			Title:   opds.Text{Value: "Pile à lire de " + u.Name},
+			Updated: opds.AtomDate{Time: now},
+			Content: &opds.Content{Type: "text", Value: "Livres à lire pour " + u.Name},
+			Links: []opds.Link{
+				{Rel: opds.RelCatalogNavigation, Href: withToken(href, tok), Type: opds.MIMEAcquisitionFeed},
+			},
+		})
+	}
 }
 
 // handleUnreadBooks serves the OPDS 1.x acquisition feed filtered to unread books.
@@ -742,6 +772,46 @@ type bookJSON struct {
 func currentUserID(r *http.Request) string {
 	uid, _ := r.Context().Value(ctxUserID).(string)
 	return uid
+}
+
+// hasMultipleUsers reports whether the catalog is running in multi-user mode
+// (UserManager is wired up AND at least one user is registered).  Single-user
+// mode (no UserManager, or zero users) keeps per-user data under userID="".
+func (s *Server) hasMultipleUsers() bool {
+	if s.userManager == nil {
+		return false
+	}
+	users, err := s.userManager.Users()
+	if err != nil {
+		return false
+	}
+	return len(users) > 0
+}
+
+// resolveUserForRequest returns the user ID to use for per-user data.
+//  1. Session cookie userID (set by authMiddleware).
+//  2. ?user= query parameter (for OPDS-token / Basic-Auth clients that have
+//     no session cookie).  Validated against the catalog when multi-user.
+//  3. Empty string when running in single-user mode.
+//
+// ok=false means multi-user mode + no userID could be determined, so the
+// caller should respond with 401.
+func (s *Server) resolveUserForRequest(r *http.Request) (userID string, ok bool) {
+	if uid := currentUserID(r); uid != "" {
+		return uid, true
+	}
+	if uid := r.URL.Query().Get("user"); uid != "" {
+		if s.userManager != nil {
+			if _, err := s.userManager.UserByID(uid); err != nil {
+				return "", false
+			}
+		}
+		return uid, true
+	}
+	if !s.hasMultipleUsers() {
+		return "", true
+	}
+	return "", false
 }
 
 // maxAgeRatingForUser returns the MaxAgeRating to apply for the current user.
@@ -1830,9 +1900,9 @@ func (s *Server) handleAPIToRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
 		return
 	}
-	userID := currentUserID(r)
-	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+	userID, ok := s.resolveUserForRequest(r)
+	if !ok {
+		http.Error(w, "user not specified; pass ?user=<id>", http.StatusUnauthorized)
 		return
 	}
 	items, err := s.toReadManager.ToReadList(userID)
@@ -1867,9 +1937,9 @@ func (s *Server) handleAPIAddToRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
 		return
 	}
-	userID := currentUserID(r)
-	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+	userID, ok := s.resolveUserForRequest(r)
+	if !ok {
+		http.Error(w, "user not specified; pass ?user=<id>", http.StatusUnauthorized)
 		return
 	}
 	var req struct {
@@ -1893,9 +1963,9 @@ func (s *Server) handleAPIRemoveToRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
 		return
 	}
-	userID := currentUserID(r)
-	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+	userID, ok := s.resolveUserForRequest(r)
+	if !ok {
+		http.Error(w, "user not specified; pass ?user=<id>", http.StatusUnauthorized)
 		return
 	}
 	bookID := mux.Vars(r)["bookId"]
@@ -1913,9 +1983,9 @@ func (s *Server) handleAPIReorderToRead(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
 		return
 	}
-	userID := currentUserID(r)
-	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+	userID, ok := s.resolveUserForRequest(r)
+	if !ok {
+		http.Error(w, "user not specified; pass ?user=<id>", http.StatusUnauthorized)
 		return
 	}
 	var req struct {
@@ -1935,17 +2005,25 @@ func (s *Server) handleAPIReorderToRead(w http.ResponseWriter, r *http.Request) 
 // handleOPDSToRead serves the OPDS 1.x acquisition feed of the current user's
 // to-read list, in user-defined order.
 // GET /opds/to-read
+//
+// In multi-user mode, the user must be identified either by session cookie or
+// by a ?user=<id> query parameter (used by OPDS reader clients that
+// authenticate via the shared OPDS token).
 func (s *Server) handleOPDSToRead(w http.ResponseWriter, r *http.Request) {
 	if s.toReadManager == nil {
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
 		return
 	}
-	userID := currentUserID(r)
-	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+	userID, ok := s.resolveUserForRequest(r)
+	if !ok {
+		http.Error(w, "user not specified; pass ?user=<id>", http.StatusUnauthorized)
 		return
 	}
 	tok := r.URL.Query().Get("token")
+	selfHref := "/opds/to-read"
+	if userID != "" && currentUserID(r) == "" {
+		selfHref = "/opds/to-read?user=" + url.QueryEscape(userID)
+	}
 	items, err := s.toReadManager.ToReadList(userID)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -1956,7 +2034,7 @@ func (s *Server) handleOPDSToRead(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Pile à lire (%d)", len(items)),
 	)
 	feed.Author = &opds.Author{Name: "nxt-opds"}
-	feed.AddLink(opds.RelSelf, withToken("/opds/to-read", tok), opds.MIMEAcquisitionFeed)
+	feed.AddLink(opds.RelSelf, withToken(selfHref, tok), opds.MIMEAcquisitionFeed)
 	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
 	for _, it := range items {
 		feed.AddEntry(bookToEntry(it.Book, tok))
@@ -1967,17 +2045,25 @@ func (s *Server) handleOPDSToRead(w http.ResponseWriter, r *http.Request) {
 // handleOPDS2ToRead serves the OPDS 2.0 acquisition feed of the current user's
 // to-read list.
 // GET /opds/v2/to-read
+//
+// In multi-user mode, the user must be identified either by session cookie or
+// by a ?user=<id> query parameter (used by OPDS reader clients that
+// authenticate via the shared OPDS token).
 func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
 	if s.toReadManager == nil {
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
 		return
 	}
-	userID := currentUserID(r)
-	if userID == "" {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+	userID, ok := s.resolveUserForRequest(r)
+	if !ok {
+		http.Error(w, "user not specified; pass ?user=<id>", http.StatusUnauthorized)
 		return
 	}
 	tok := r.URL.Query().Get("token")
+	selfHref := "/opds/v2/to-read"
+	if userID != "" && currentUserID(r) == "" {
+		selfHref = "/opds/v2/to-read?user=" + url.QueryEscape(userID)
+	}
 	items, err := s.toReadManager.ToReadList(userID)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -1989,7 +2075,7 @@ func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
 			NumberOfItems: len(items),
 		},
 		Links: []opds2.Link{
-			{Rel: "self", Href: withToken("/opds/v2/to-read", tok), Type: opds2.MIMEFeed},
+			{Rel: "self", Href: withToken(selfHref, tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 		},
 	}
@@ -2484,14 +2570,35 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if s.toReadManager != nil {
+		s.appendToReadV2NavItems(feed, r, tok)
+	}
+	writeOPDS2(w, http.StatusOK, feed)
+}
+
+// appendToReadV2NavItems is the OPDS v2 counterpart to appendToReadV1Entries.
+func (s *Server) appendToReadV2NavItems(feed *opds2.Feed, r *http.Request, tok string) {
+	if currentUserID(r) != "" || !s.hasMultipleUsers() {
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: "Pile à lire",
 			Href:  withToken("/opds/v2/to-read", tok),
 			Type:  opds2.MIMEFeed,
 			Rel:   "current",
 		})
+		return
 	}
-	writeOPDS2(w, http.StatusOK, feed)
+	users, err := s.userManager.Users()
+	if err != nil {
+		return
+	}
+	for _, u := range users {
+		href := "/opds/v2/to-read?user=" + url.QueryEscape(u.ID)
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: "Pile à lire de " + u.Name,
+			Href:  withToken(href, tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "current",
+		})
+	}
 }
 
 // handleOPDS2Unread serves the OPDS 2.0 acquisition feed filtered to unread books.

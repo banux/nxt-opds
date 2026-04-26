@@ -163,7 +163,7 @@ Authentication uses the same OPDS bearer token (`?token=<value>` or `Authorizati
 | `GET /opds/publishers`             | Publisher navigation feed      |
 | `GET /opds/publishers/{publisher}` | Books by publisher             |
 | `GET /opds/unread`                 | Unread books feed              |
-| `GET /opds/to-read`                | To-read pile feed (per user)   |
+| `GET /opds/to-read`                | To-read pile feed (per user; multi-user clients pass `?user=<id>`) |
 | `GET /opds/wishlist`               | Wishlist feed                  |
 | `GET /opds/recommendations`        | Recommendations feed           |
 
