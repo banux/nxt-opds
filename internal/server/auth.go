@@ -129,12 +129,18 @@ func (s *sessionStore) delete(token string) {
 //
 // Authentication methods (in order of precedence):
 //  1. Session cookie (browser users after login).
-//  2. OPDS token via ?token= query parameter (for OPDS reader clients on OPDS routes).
-//  3. HTTP Basic Auth fallback (kept for API clients; only when no opdsToken is set).
+//  2. Per-user token via ?token= query parameter (or Bearer header on /mcp);
+//     when a token matches a registered user, that user's ID is injected into
+//     the request context so per-user feeds (recommendations, to-read pile,
+//     unread) are personalised.
+//  3. Shared OPDS token via ?token= query parameter (for OPDS reader clients
+//     on OPDS routes).
+//  4. HTTP Basic Auth fallback (kept for API clients; only when no opdsToken is set).
 //
 // If password is empty, auth is disabled (development mode).
 // opdsToken is the shared token for OPDS feed access; empty means token auth disabled.
-func authMiddleware(password, opdsToken string, sessions *sessionStore) func(http.Handler) http.Handler {
+// userManager (optional) enables per-user token authentication; nil disables it.
+func authMiddleware(password, opdsToken string, sessions *sessionStore, userManager catalog.UserManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if password == "" {
 			return next
@@ -159,25 +165,35 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore) func(htt
 				r.URL.Path == "/opds" || r.URL.Path == "/opds/"
 			isCover := strings.HasPrefix(r.URL.Path, "/covers/")
 			isMCP := r.URL.Path == "/mcp"
-			if (isOPDS || isCover) && opdsToken != "" {
-				if tok := r.URL.Query().Get("token"); tok != "" {
-					if subtle.ConstantTimeCompare([]byte(tok), []byte(opdsToken)) == 1 {
+
+			// Extract candidate token from query string (OPDS / cover) or
+			// Bearer header / query (MCP).
+			var presented string
+			if isOPDS || isCover {
+				presented = r.URL.Query().Get("token")
+			} else if isMCP {
+				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+					presented = strings.TrimPrefix(auth, "Bearer ")
+				} else if tok := r.URL.Query().Get("token"); tok != "" {
+					presented = tok
+				}
+			}
+
+			if presented != "" {
+				// 2a. Per-user token (works on OPDS routes, covers and /mcp).
+				if (isOPDS || isCover || isMCP) && userManager != nil {
+					if u, err := userManager.UserByToken(presented); err == nil && u != nil {
+						r = r.WithContext(context.WithValue(r.Context(), ctxUserID, u.ID))
 						next.ServeHTTP(w, r)
 						return
 					}
 				}
-			}
-			if isMCP && opdsToken != "" {
-				// Accept Bearer token in Authorization header or ?token= query param.
-				bearer := ""
-				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-					bearer = strings.TrimPrefix(auth, "Bearer ")
-				} else if tok := r.URL.Query().Get("token"); tok != "" {
-					bearer = tok
-				}
-				if bearer != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(opdsToken)) == 1 {
-					next.ServeHTTP(w, r)
-					return
+				// 2b. Shared OPDS token (back-compat for clients that still use it).
+				if opdsToken != "" && (isOPDS || isCover || isMCP) {
+					if subtle.ConstantTimeCompare([]byte(presented), []byte(opdsToken)) == 1 {
+						next.ServeHTTP(w, r)
+						return
+					}
 				}
 			}
 

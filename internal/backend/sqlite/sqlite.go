@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 12
+const currentSchemaVersion = 13
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -94,6 +94,53 @@ var schemaMigrations = []schemaMigration{
 	{version: 10, apply: migration10},
 	{version: 11, apply: migration11},
 	{version: 12, apply: migration12},
+	{version: 13, apply: migration13},
+}
+
+// migration13 adds a per-user authentication token column on users so each
+// user can authenticate to OPDS / MCP endpoints with their own token, making
+// recommendations / to-read pile / unread feeds personal to them
+// (version 12 → 13).  Existing users are assigned a freshly generated token.
+func migration13(db *sql.DB) error {
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN token TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	rows, err := db.Query(`SELECT id FROM users WHERE token = ''`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		tok, err := newToken()
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE users SET token = ? WHERE id = ?`, tok, id); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_token ON users(token)`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// newToken generates a 32-byte random hex-encoded token.
+func newToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // migration12 adds the to_read_list table for per-user ordered to-read piles
@@ -1159,7 +1206,7 @@ func (b *Backend) countBooks(query string, args ...any) (int, error) {
 
 // Users returns all registered users sorted by name.
 func (b *Backend) Users() ([]catalog.User, error) {
-	rows, err := b.db.Query(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10) FROM users ORDER BY name`)
+	rows, err := b.db.Query(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10), COALESCE(token,'') FROM users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1168,7 +1215,7 @@ func (b *Backend) Users() ([]catalog.User, error) {
 	for rows.Next() {
 		var u catalog.User
 		var isAdmin, isChild int
-		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge, &u.Token); err != nil {
 			return nil, err
 		}
 		u.IsAdmin = isAdmin == 1
@@ -1182,8 +1229,8 @@ func (b *Backend) Users() ([]catalog.User, error) {
 func (b *Backend) UserByID(id string) (*catalog.User, error) {
 	var u catalog.User
 	var isAdmin, isChild int
-	err := b.db.QueryRow(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10) FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge)
+	err := b.db.QueryRow(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10), COALESCE(token,'') FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge, &u.Token)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %s", id)
 	}
@@ -1195,11 +1242,36 @@ func (b *Backend) UserByID(id string) (*catalog.User, error) {
 	return &u, nil
 }
 
-// CreateUser creates a new user and returns it.
+// UserByToken returns the user that owns the given non-empty per-user token.
+func (b *Backend) UserByToken(token string) (*catalog.User, error) {
+	if token == "" {
+		return nil, fmt.Errorf("empty token")
+	}
+	var u catalog.User
+	var isAdmin, isChild int
+	err := b.db.QueryRow(`SELECT id, name, color, is_admin, COALESCE(is_child,0), COALESCE(max_age,10), COALESCE(token,'') FROM users WHERE token = ?`, token).
+		Scan(&u.ID, &u.Name, &u.Color, &isAdmin, &isChild, &u.MaxAge, &u.Token)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found for token")
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.IsAdmin = isAdmin == 1
+	u.IsChild = isChild == 1
+	return &u, nil
+}
+
+// CreateUser creates a new user and returns it.  A fresh per-user token is
+// generated automatically.
 func (b *Backend) CreateUser(name, color string, isAdmin, isChild bool, maxAge int) (*catalog.User, error) {
 	id, err := newID()
 	if err != nil {
 		return nil, fmt.Errorf("generate user id: %w", err)
+	}
+	tok, err := newToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate user token: %w", err)
 	}
 	admin := 0
 	if isAdmin {
@@ -1213,13 +1285,13 @@ func (b *Backend) CreateUser(name, color string, isAdmin, isChild bool, maxAge i
 		maxAge = 10
 	}
 	_, err = b.db.Exec(
-		`INSERT INTO users (id, name, color, is_admin, is_child, max_age) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, name, color, admin, child, maxAge,
+		`INSERT INTO users (id, name, color, is_admin, is_child, max_age, token) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, name, color, admin, child, maxAge, tok,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
-	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild, MaxAge: maxAge}, nil
+	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild, MaxAge: maxAge, Token: tok}, nil
 }
 
 // DeleteUser removes the user with the given ID.
@@ -1229,6 +1301,7 @@ func (b *Backend) DeleteUser(id string) error {
 }
 
 // UpdateUser updates the name, color, admin, child status and max age of an existing user.
+// The user token is preserved.
 func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool, maxAge int) (*catalog.User, error) {
 	admin := 0
 	if isAdmin {
@@ -1248,7 +1321,24 @@ func (b *Backend) UpdateUser(id, name, color string, isAdmin, isChild bool, maxA
 	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
-	return &catalog.User{ID: id, Name: name, Color: color, IsAdmin: isAdmin, IsChild: isChild, MaxAge: maxAge}, nil
+	return b.UserByID(id)
+}
+
+// RegenerateUserToken assigns a fresh per-user token to the user with the
+// given ID, invalidating the previous one.
+func (b *Backend) RegenerateUserToken(id string) (*catalog.User, error) {
+	tok, err := newToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate token: %w", err)
+	}
+	res, err := b.db.Exec(`UPDATE users SET token = ? WHERE id = ?`, tok, id)
+	if err != nil {
+		return nil, fmt.Errorf("update token: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, fmt.Errorf("user not found: %s", id)
+	}
+	return b.UserByID(id)
 }
 
 // ─── UserReadManager ─────────────────────────────────────────────────────────

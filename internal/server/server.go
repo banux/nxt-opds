@@ -149,7 +149,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registerRoutes sets up all endpoint routes.
 func (s *Server) registerRoutes() {
 	r := s.router
-	auth := authMiddleware(s.opts.Password, s.opdsToken, s.sessions)
+	auth := authMiddleware(s.opts.Password, s.opdsToken, s.sessions, s.userManager)
 
 	// Always-public endpoints (no auth required)
 	r.HandleFunc("/health", s.handleHealth).Methods(http.MethodGet)
@@ -259,6 +259,7 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/users", s.handleAPICreateUser).Methods(http.MethodPost)
 	protected.HandleFunc("/api/users/{id}", s.handleAPIUpdateUser).Methods(http.MethodPatch)
 	protected.HandleFunc("/api/users/{id}", s.handleAPIDeleteUser).Methods(http.MethodDelete)
+	protected.HandleFunc("/api/users/{id}/token", s.handleAPIRegenerateUserToken).Methods(http.MethodPost)
 
 	// API: per-user read toggle
 	protected.HandleFunc("/api/books/{id}/read", s.handleAPIToggleRead).Methods(http.MethodPut)

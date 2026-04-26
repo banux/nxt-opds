@@ -280,12 +280,17 @@ func (s *Server) appendToReadV1Entries(feed *opds.Feed, r *http.Request, tok str
 }
 
 // handleUnreadBooks serves the OPDS 1.x acquisition feed filtered to unread books.
+// In multi-user mode, when the request is authenticated as a specific user
+// (session cookie or per-user token), the feed is filtered to that user's
+// unread books only; otherwise it falls back to the global is_read flag.
 func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
 		UnreadOnly: true,
+		UserID:     userID,
 		Offset:     offset,
 		Limit:      limit,
 		SortBy:     "added",
@@ -1406,6 +1411,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		IsAdmin bool   `json:"isAdmin"`
 		IsChild bool   `json:"isChild"`
 		MaxAge  int    `json:"maxAge"`
+		Token   string `json:"token,omitempty"`
 	}
 	type configJSON struct {
 		OPDSToken   string    `json:"opdsToken"`
@@ -1424,7 +1430,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		uid := currentUserID(r)
 		if uid != "" {
 			if u, err := s.userManager.UserByID(uid); err == nil {
-				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild, MaxAge: u.MaxAge}
+				cfg.CurrentUser = &userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild, MaxAge: u.MaxAge, Token: u.Token}
 			}
 		}
 	}
@@ -1432,7 +1438,8 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(cfg)
 }
 
-// handleAPIMe returns the currently logged-in user's info.
+// handleAPIMe returns the currently logged-in user's info, including the
+// per-user OPDS / MCP token so the frontend can build personalised feed URLs.
 func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
 	if s.userManager == nil {
 		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
@@ -1457,10 +1464,14 @@ func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
 		"isAdmin": u.IsAdmin,
 		"isChild": u.IsChild,
 		"maxAge":  u.MaxAge,
+		"token":   u.Token,
 	})
 }
 
 // handleAPIUsers returns all registered users as JSON.
+// The per-user token is only included when the requester is an administrator
+// (or in single-user / dev mode where currentUserID is empty), so non-admin
+// users cannot see other users' tokens.
 func (s *Server) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
 	if s.userManager == nil {
 		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
@@ -1471,6 +1482,16 @@ func (s *Server) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "users query error", http.StatusInternalServerError)
 		return
 	}
+
+	includeTokens := true
+	if uid := currentUserID(r); uid != "" {
+		if me, err := s.userManager.UserByID(uid); err == nil {
+			includeTokens = me.IsAdmin
+		} else {
+			includeTokens = false
+		}
+	}
+
 	type userJSON struct {
 		ID      string `json:"id"`
 		Name    string `json:"name"`
@@ -1478,10 +1499,15 @@ func (s *Server) handleAPIUsers(w http.ResponseWriter, r *http.Request) {
 		IsAdmin bool   `json:"isAdmin"`
 		IsChild bool   `json:"isChild"`
 		MaxAge  int    `json:"maxAge"`
+		Token   string `json:"token,omitempty"`
 	}
 	result := make([]userJSON, 0, len(users))
 	for _, u := range users {
-		result = append(result, userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild, MaxAge: u.MaxAge})
+		row := userJSON{ID: u.ID, Name: u.Name, Color: u.Color, IsAdmin: u.IsAdmin, IsChild: u.IsChild, MaxAge: u.MaxAge}
+		if includeTokens {
+			row.Token = u.Token
+		}
+		result = append(result, row)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
@@ -1525,6 +1551,7 @@ func (s *Server) handleAPICreateUser(w http.ResponseWriter, r *http.Request) {
 		"isAdmin": u.IsAdmin,
 		"isChild": u.IsChild,
 		"maxAge":  u.MaxAge,
+		"token":   u.Token,
 	})
 }
 
@@ -1559,6 +1586,40 @@ func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 		"isAdmin": u.IsAdmin,
 		"isChild": u.IsChild,
 		"maxAge":  u.MaxAge,
+		"token":   u.Token,
+	})
+}
+
+// handleAPIRegenerateUserToken assigns a fresh per-user token to a user, invalidating
+// the previous one.  Only administrators (or single-user mode) may call this.
+// POST /api/users/{id}/token
+func (s *Server) handleAPIRegenerateUserToken(w http.ResponseWriter, r *http.Request) {
+	if s.userManager == nil {
+		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
+		return
+	}
+	if uid := currentUserID(r); uid != "" {
+		me, err := s.userManager.UserByID(uid)
+		if err != nil || !me.IsAdmin {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
+	id := mux.Vars(r)["id"]
+	u, err := s.userManager.RegenerateUserToken(id)
+	if err != nil {
+		http.Error(w, "regenerate token failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":      u.ID,
+		"name":    u.Name,
+		"color":   u.Color,
+		"isAdmin": u.IsAdmin,
+		"isChild": u.IsChild,
+		"maxAge":  u.MaxAge,
+		"token":   u.Token,
 	})
 }
 
@@ -2139,9 +2200,11 @@ func (s *Server) handleOPDSWishlist(w http.ResponseWriter, r *http.Request) {
 	writeOPDS(w, http.StatusOK, feed)
 }
 
-// handleOPDSRecommendations serves an OPDS 1.x acquisition feed of all
-// recommended books (deduplicated). Since OPDS clients have no user context,
-// all recommendations are returned regardless of sender/recipient.
+// handleOPDSRecommendations serves an OPDS 1.x acquisition feed of recommended
+// books.  When the request is authenticated as a specific user (session
+// cookie or per-user token), only that user's incoming recommendations are
+// returned; otherwise (single-user mode or shared token) all recommendations
+// across users are returned, deduplicated by book ID.
 // GET /opds/recommendations
 func (s *Server) handleOPDSRecommendations(w http.ResponseWriter, r *http.Request) {
 	if s.recommender == nil {
@@ -2153,28 +2216,12 @@ func (s *Server) handleOPDSRecommendations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	tok := r.URL.Query().Get("token")
+	uid := currentUserID(r)
 
-	// Gather all recommendations for all users (deduplicated by book ID).
-	users, err := s.userManager.Users()
+	books, err := s.recommendedBooks(uid)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
-	}
-
-	seen := map[string]bool{}
-	var books []catalog.Book
-	for _, u := range users {
-		recs, err := s.recommender.RecommendationsForUser(u.ID)
-		if err != nil {
-			continue
-		}
-		for _, rec := range recs {
-			if seen[rec.Book.ID] {
-				continue
-			}
-			seen[rec.Book.ID] = true
-			books = append(books, rec.Book)
-		}
 	}
 
 	feed := opds.NewAcquisitionFeed(
@@ -2188,6 +2235,47 @@ func (s *Server) handleOPDSRecommendations(w http.ResponseWriter, r *http.Reques
 		feed.AddEntry(bookToEntry(bk, tok))
 	}
 	writeOPDS(w, http.StatusOK, feed)
+}
+
+// recommendedBooks returns the deduplicated list of recommended books visible
+// to the given user.  When uid is non-empty, only recommendations addressed
+// to that user are returned; when empty, all users' recommendations are
+// merged.  The book order follows RecommendationsForUser's "newest first".
+func (s *Server) recommendedBooks(uid string) ([]catalog.Book, error) {
+	seen := map[string]bool{}
+	var books []catalog.Book
+	if uid != "" {
+		recs, err := s.recommender.RecommendationsForUser(uid)
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range recs {
+			if seen[rec.Book.ID] {
+				continue
+			}
+			seen[rec.Book.ID] = true
+			books = append(books, rec.Book)
+		}
+		return books, nil
+	}
+	users, err := s.userManager.Users()
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range users {
+		recs, err := s.recommender.RecommendationsForUser(u.ID)
+		if err != nil {
+			continue
+		}
+		for _, rec := range recs {
+			if seen[rec.Book.ID] {
+				continue
+			}
+			seen[rec.Book.ID] = true
+			books = append(books, rec.Book)
+		}
+	}
+	return books, nil
 }
 
 // handleOPDS2Wishlist serves an OPDS 2.0 navigation feed of wishlist items.
@@ -2226,8 +2314,11 @@ func (s *Server) handleOPDS2Wishlist(w http.ResponseWriter, r *http.Request) {
 	writeOPDS2(w, http.StatusOK, feed)
 }
 
-// handleOPDS2Recommendations serves an OPDS 2.0 acquisition feed of all
-// recommended books (deduplicated across all users).
+// handleOPDS2Recommendations serves an OPDS 2.0 acquisition feed of recommended
+// books.  When the request is authenticated as a specific user (session
+// cookie or per-user token), only that user's incoming recommendations are
+// returned; otherwise (single-user mode or shared token) all users'
+// recommendations are merged, deduplicated by book ID.
 // GET /opds/v2/recommendations
 func (s *Server) handleOPDS2Recommendations(w http.ResponseWriter, r *http.Request) {
 	if s.recommender == nil {
@@ -2239,27 +2330,12 @@ func (s *Server) handleOPDS2Recommendations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	tok := r.URL.Query().Get("token")
+	uid := currentUserID(r)
 
-	users, err := s.userManager.Users()
+	books, err := s.recommendedBooks(uid)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
-	}
-
-	seen := map[string]bool{}
-	var books []catalog.Book
-	for _, u := range users {
-		recs, err := s.recommender.RecommendationsForUser(u.ID)
-		if err != nil {
-			continue
-		}
-		for _, rec := range recs {
-			if seen[rec.Book.ID] {
-				continue
-			}
-			seen[rec.Book.ID] = true
-			books = append(books, rec.Book)
-		}
 	}
 
 	feed := &opds2.Feed{
@@ -2602,12 +2678,17 @@ func (s *Server) appendToReadV2NavItems(feed *opds2.Feed, r *http.Request, tok s
 }
 
 // handleOPDS2Unread serves the OPDS 2.0 acquisition feed filtered to unread books.
+// In multi-user mode, when the request is authenticated as a specific user
+// (session cookie or per-user token), the feed is filtered to that user's
+// unread books only; otherwise it falls back to the global is_read flag.
 func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
 		UnreadOnly: true,
+		UserID:     userID,
 		Offset:     offset,
 		Limit:      limit,
 		SortBy:     "added",

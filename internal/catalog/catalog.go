@@ -183,6 +183,11 @@ type User struct {
 	// Allowed values mirror the AgeRating field: 3, 6, 10, 12, 16.
 	// A value of 0 is treated as 10 (default child restriction).
 	MaxAge int
+
+	// Token is a per-user authentication token used to access OPDS feeds
+	// and the MCP endpoint as that specific user (so per-user views like
+	// recommendations, the to-read pile and unread filter work).
+	Token string
 }
 
 // UserManager is an optional interface for catalog backends that support
@@ -208,6 +213,14 @@ type UserManager interface {
 	// UpdateUser updates the name, color, admin, child status and max age of an existing user.
 	// maxAge is the maximum AgeRating for child profiles (0 = use default 10).
 	UpdateUser(id, name, color string, isAdmin, isChild bool, maxAge int) (*User, error)
+
+	// UserByToken returns the user that owns the given per-user token.
+	// Returns an error if no user matches.
+	UserByToken(token string) (*User, error)
+
+	// RegenerateUserToken assigns a fresh token to the user with the given ID
+	// and returns the updated User (with the new Token populated).
+	RegenerateUserToken(id string) (*User, error)
 }
 
 // UserReadManager is an optional interface for catalog backends that support
