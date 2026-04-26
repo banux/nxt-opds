@@ -415,6 +415,217 @@ func TestToolUploadBook(t *testing.T) {
 	}
 }
 
+// ─── to-read tests ────────────────────────────────────────────────────────────
+
+// toReadCatalog embeds fakeCatalog and implements catalog.ToReadManager.
+type toReadCatalog struct {
+	*fakeCatalog
+	lists       map[string][]string // userID → ordered book IDs
+	added       []string            // sequence of "userID:bookID" Add calls
+	removed     []string            // sequence of "userID:bookID" Remove calls
+	reordered   map[string][]string // last ordering passed to Reorder per user
+}
+
+func newToReadCatalog() *toReadCatalog {
+	return &toReadCatalog{
+		fakeCatalog: newFakeCatalog(),
+		lists:       map[string][]string{},
+		reordered:   map[string][]string{},
+	}
+}
+
+func (c *toReadCatalog) ToReadList(userID string) ([]catalog.ToReadItem, error) {
+	ids := c.lists[userID]
+	out := make([]catalog.ToReadItem, 0, len(ids))
+	for i, id := range ids {
+		b, err := c.BookByID(id)
+		if err != nil {
+			continue
+		}
+		out = append(out, catalog.ToReadItem{
+			UserID:   userID,
+			Book:     *b,
+			Position: i,
+			AddedAt:  time.Now().Add(-time.Duration(i) * time.Hour),
+		})
+	}
+	return out, nil
+}
+
+func (c *toReadCatalog) AddToReadList(userID, bookID string) error {
+	c.added = append(c.added, userID+":"+bookID)
+	for _, id := range c.lists[userID] {
+		if id == bookID {
+			return nil
+		}
+	}
+	c.lists[userID] = append(c.lists[userID], bookID)
+	return nil
+}
+
+func (c *toReadCatalog) RemoveFromToReadList(userID, bookID string) error {
+	c.removed = append(c.removed, userID+":"+bookID)
+	out := c.lists[userID][:0]
+	for _, id := range c.lists[userID] {
+		if id != bookID {
+			out = append(out, id)
+		}
+	}
+	c.lists[userID] = out
+	return nil
+}
+
+func (c *toReadCatalog) ReorderToReadList(userID string, bookIDs []string) error {
+	cp := append([]string(nil), bookIDs...)
+	c.reordered[userID] = cp
+	c.lists[userID] = cp
+	return nil
+}
+
+func TestToolListToRead(t *testing.T) {
+	cat := newToReadCatalog()
+	cat.lists["u1"] = []string{"book-2", "book-1"}
+	srv := mcp.New(cat)
+
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      30,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "list_to_read",
+			"arguments": map[string]any{"user_id": "u1"},
+		},
+	})
+	result := rpcResult(t, resp)
+	content := result["content"].([]any)
+	text := content[0].(map[string]any)["text"].(string)
+	if !containsStr(text, "Les Misérables") {
+		t.Errorf("expected 'Les Misérables' in to-read list, got: %s", text)
+	}
+	if !containsStr(text, "Vingt mille lieues") {
+		t.Errorf("expected 'Vingt mille lieues' in to-read list, got: %s", text)
+	}
+	// Position 1 (= "1.") should be Les Misérables since it appears first.
+	if idxA, idxB := indexOf(text, "Les Misérables"), indexOf(text, "Vingt mille lieues"); idxA > idxB {
+		t.Errorf("expected Les Misérables before Vingt mille lieues; got order reversed")
+	}
+}
+
+func TestToolListToReadNotSupported(t *testing.T) {
+	srv := mcp.New(newFakeCatalog())
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      31,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "list_to_read",
+			"arguments": map[string]any{"user_id": "u1"},
+		},
+	})
+	result := rpcResult(t, resp)
+	if result["isError"] != true {
+		t.Errorf("expected isError=true, got: %v", result)
+	}
+}
+
+func TestToolAddToRead(t *testing.T) {
+	cat := newToReadCatalog()
+	srv := mcp.New(cat)
+
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      32,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "add_to_read",
+			"arguments": map[string]any{
+				"user_id": "u1",
+				"book_id": "book-1",
+			},
+		},
+	})
+	rpcResult(t, resp)
+	if len(cat.added) != 1 || cat.added[0] != "u1:book-1" {
+		t.Errorf("expected AddToReadList called with u1:book-1, got: %v", cat.added)
+	}
+	if got := cat.lists["u1"]; len(got) != 1 || got[0] != "book-1" {
+		t.Errorf("expected list to contain [book-1], got: %v", got)
+	}
+}
+
+func TestToolRemoveToRead(t *testing.T) {
+	cat := newToReadCatalog()
+	cat.lists["u1"] = []string{"book-1", "book-2"}
+	srv := mcp.New(cat)
+
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      33,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "remove_to_read",
+			"arguments": map[string]any{
+				"user_id": "u1",
+				"book_id": "book-1",
+			},
+		},
+	})
+	rpcResult(t, resp)
+	if got := cat.lists["u1"]; len(got) != 1 || got[0] != "book-2" {
+		t.Errorf("expected list to contain only [book-2] after removal, got: %v", got)
+	}
+}
+
+func TestToolReorderToRead(t *testing.T) {
+	cat := newToReadCatalog()
+	cat.lists["u1"] = []string{"book-1", "book-2"}
+	srv := mcp.New(cat)
+
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      34,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "reorder_to_read",
+			"arguments": map[string]any{
+				"user_id":  "u1",
+				"book_ids": []any{"book-2", "book-1"},
+			},
+		},
+	})
+	rpcResult(t, resp)
+	got := cat.reordered["u1"]
+	if len(got) != 2 || got[0] != "book-2" || got[1] != "book-1" {
+		t.Errorf("expected reorder [book-2, book-1], got: %v", got)
+	}
+}
+
+func TestToolAddToReadMissingArgs(t *testing.T) {
+	srv := mcp.New(newToReadCatalog())
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      35,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "add_to_read",
+			"arguments": map[string]any{"user_id": "u1"},
+		},
+	})
+	if resp["error"] == nil {
+		t.Error("expected RPC error for missing book_id")
+	}
+}
+
+// indexOf returns the byte index of sub in s, or -1.
+func indexOf(s, sub string) int {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestToolUploadBookNotSupported(t *testing.T) {
 	// fakeCatalog does not implement Uploader → tool returns an error result.
 	srv := mcp.New(newFakeCatalog())

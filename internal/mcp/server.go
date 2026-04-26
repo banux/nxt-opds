@@ -37,6 +37,7 @@ type Server struct {
 	wishlistManager catalog.WishlistManager
 	recommender     catalog.Recommender
 	userManager     catalog.UserManager
+	toReadManager   catalog.ToReadManager
 }
 
 // New creates a new MCP Server backed by the given catalog.
@@ -62,6 +63,9 @@ func New(cat catalog.Catalog) *Server {
 	}
 	if um, ok := cat.(catalog.UserManager); ok {
 		s.userManager = um
+	}
+	if tr, ok := cat.(catalog.ToReadManager); ok {
+		s.toReadManager = tr
 	}
 	return s
 }
@@ -200,7 +204,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.83.0",
+			"version": "1.94.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
@@ -379,6 +383,53 @@ func (s *Server) toolsList() toolsListResult {
 				},
 			},
 		},
+		{
+			Name:        "list_to_read",
+			Description: "Retourne la pile de lecture (to-read pile) ordonnée d'un utilisateur. Les livres sont listés dans l'ordre de la pile (position 0 = premier à lire).",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"user_id"},
+				Properties: map[string]*jsonSchema{
+					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur"},
+				},
+			},
+		},
+		{
+			Name:        "add_to_read",
+			Description: "Ajoute un livre à la fin de la pile de lecture d'un utilisateur. Si le livre y est déjà, l'opération est ignorée.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"user_id", "book_id"},
+				Properties: map[string]*jsonSchema{
+					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"book_id": {Type: "string", Description: "Identifiant du livre à ajouter"},
+				},
+			},
+		},
+		{
+			Name:        "remove_to_read",
+			Description: "Retire un livre de la pile de lecture d'un utilisateur. Si le livre n'y est pas, l'opération est ignorée.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"user_id", "book_id"},
+				Properties: map[string]*jsonSchema{
+					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"book_id": {Type: "string", Description: "Identifiant du livre à retirer"},
+				},
+			},
+		},
+		{
+			Name:        "reorder_to_read",
+			Description: "Réordonne la pile de lecture d'un utilisateur selon la liste fournie. Les livres absents de la liste mais présents dans la pile sont laissés à la fin dans leur ordre d'origine ; les identifiants inconnus sont ignorés.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"user_id", "book_ids"},
+				Properties: map[string]*jsonSchema{
+					"user_id":  {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"book_ids": {Type: "array", Description: "Liste ordonnée d'identifiants de livres", Items: &jsonSchema{Type: "string"}},
+				},
+			},
+		},
 	}
 	return toolsListResult{Tools: tools}
 }
@@ -416,6 +467,14 @@ func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
 		return s.toolUpdateCover(p.Arguments)
 	case "list_recommendations":
 		return s.toolListRecommendations(p.Arguments)
+	case "list_to_read":
+		return s.toolListToRead(p.Arguments)
+	case "add_to_read":
+		return s.toolAddToRead(p.Arguments)
+	case "remove_to_read":
+		return s.toolRemoveToRead(p.Arguments)
+	case "reorder_to_read":
+		return s.toolReorderToRead(p.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: "Unknown tool: " + p.Name}
 	}
@@ -861,6 +920,108 @@ func (s *Server) toolListRecommendations(args map[string]any) (any, *rpcError) {
 		fmt.Fprintf(&sb, "   Date: %s\n\n", rec.CreatedAt.Format("2006-01-02"))
 	}
 	return textResult(sb.String()), nil
+}
+
+func (s *Server) toolListToRead(args map[string]any) (any, *rpcError) {
+	if s.toReadManager == nil {
+		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
+	}
+	userID, ok := args["user_id"].(string)
+	if !ok || userID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	}
+
+	items, err := s.toReadManager.ToReadList(userID)
+	if err != nil {
+		return errorResult("Erreur : " + err.Error()), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d livre(s) dans la pile de lecture :\n\n", len(items))
+	for _, it := range items {
+		fmt.Fprintf(&sb, "%d. **%s**\n", it.Position+1, it.Book.Title)
+		fmt.Fprintf(&sb, "   ID: %s\n", it.Book.ID)
+		if len(it.Book.Authors) > 0 {
+			names := make([]string, len(it.Book.Authors))
+			for i, a := range it.Book.Authors {
+				names[i] = a.Name
+			}
+			fmt.Fprintf(&sb, "   Auteur(s): %s\n", strings.Join(names, ", "))
+		}
+		if it.Book.Series != "" {
+			serInfo := it.Book.Series
+			if it.Book.SeriesIndex != "" {
+				serInfo += " #" + it.Book.SeriesIndex
+			}
+			fmt.Fprintf(&sb, "   Série: %s\n", serInfo)
+		}
+		fmt.Fprintf(&sb, "   Ajouté le: %s\n\n", it.AddedAt.Format("2006-01-02"))
+	}
+	return textResult(sb.String()), nil
+}
+
+func (s *Server) toolAddToRead(args map[string]any) (any, *rpcError) {
+	if s.toReadManager == nil {
+		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
+	}
+	userID, ok := args["user_id"].(string)
+	if !ok || userID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	}
+	bookID, ok := args["book_id"].(string)
+	if !ok || bookID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'book_id' requis"}
+	}
+	if err := s.toReadManager.AddToReadList(userID, bookID); err != nil {
+		return errorResult("Erreur lors de l'ajout : " + err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Livre %s ajouté à la pile de lecture de l'utilisateur %s.", bookID, userID)), nil
+}
+
+func (s *Server) toolRemoveToRead(args map[string]any) (any, *rpcError) {
+	if s.toReadManager == nil {
+		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
+	}
+	userID, ok := args["user_id"].(string)
+	if !ok || userID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	}
+	bookID, ok := args["book_id"].(string)
+	if !ok || bookID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'book_id' requis"}
+	}
+	if err := s.toReadManager.RemoveFromToReadList(userID, bookID); err != nil {
+		return errorResult("Erreur lors du retrait : " + err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Livre %s retiré de la pile de lecture de l'utilisateur %s.", bookID, userID)), nil
+}
+
+func (s *Server) toolReorderToRead(args map[string]any) (any, *rpcError) {
+	if s.toReadManager == nil {
+		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
+	}
+	userID, ok := args["user_id"].(string)
+	if !ok || userID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	}
+	raw, ok := args["book_ids"]
+	if !ok {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'book_ids' requis"}
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'book_ids' doit être un tableau"}
+	}
+	bookIDs := make([]string, 0, len(arr))
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			bookIDs = append(bookIDs, s)
+		}
+	}
+	if err := s.toReadManager.ReorderToReadList(userID, bookIDs); err != nil {
+		return errorResult("Erreur lors du réordonnancement : " + err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Pile de lecture de l'utilisateur %s réordonnée (%d livre(s)).", userID, len(bookIDs))), nil
 }
 
 func (s *Server) toolUpdateCover(args map[string]any) (any, *rpcError) {
