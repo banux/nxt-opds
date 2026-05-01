@@ -408,7 +408,7 @@
           <!-- Update available button -->
           <button v-if="updateAvailable" @click="showUpdateDialog = true"
             title="Mise à jour disponible"
-            class="relative p-2 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
+            class="hidden sm:flex relative p-2 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -417,7 +417,7 @@
           </button>
 
           <button v-if="!(multiUser && currentUser)" @click="navigateTo('/wishlist')" title="Liste de souhaits"
-            class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            class="hidden sm:flex relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
             </svg>
@@ -433,7 +433,7 @@
           </button>
 
           <button @click="uploadDialog = true" title="Téléverser un livre"
-            class="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+            class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
             </svg>
@@ -443,13 +443,13 @@
 
         <!-- Current user display + admin link (multi-user mode) -->
         <template v-if="multiUser && currentUser">
-          <span class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400">
+          <span class="hidden sm:flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400">
             <span class="w-3.5 h-3.5 rounded-full shrink-0 border border-white/50" :style="{ background: currentUser.color }"></span>
             <span class="hidden md:inline truncate max-w-[6rem]">{{ currentUser.name }}</span>
           </span>
           <!-- Wishlist button -->
           <button @click="navigateTo('/wishlist')" title="Liste de souhaits"
-            class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            class="hidden sm:flex relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
             </svg>
@@ -459,7 +459,7 @@
 
           <!-- To-read pile button -->
           <button @click="navigateTo('/to-read')" title="Pile à lire"
-            class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            class="hidden sm:flex relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 12h14M5 16h10"/>
             </svg>
@@ -469,7 +469,7 @@
 
           <!-- Recommendations bell -->
           <button @click="navigateTo('/recommendations')" title="Mes recommandations"
-            class="relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            class="hidden sm:flex relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
             </svg>
@@ -486,7 +486,7 @@
           </button>
 
           <button v-if="currentUser.isAdmin" @click="navigateTo('/admin')" title="Administration des utilisateurs"
-            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            class="hidden sm:flex p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -521,7 +521,7 @@
         </button>
 
         <!-- Logout (POST form so the server clears the session cookie) -->
-        <form method="POST" action="/logout" class="inline">
+        <form method="POST" action="/logout" class="hidden sm:inline">
           <button type="submit" title="Se déconnecter"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -530,7 +530,176 @@
             </svg>
           </button>
         </form>
+
+        <!-- Mobile hamburger button -->
+        <button v-if="currentView !== 'reader'" @click="mobileMenuOpen = !mobileMenuOpen"
+          :title="mobileMenuOpen ? 'Fermer le menu' : 'Ouvrir le menu'"
+          class="flex sm:hidden relative p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <svg v-if="!mobileMenuOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+          <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+          <span v-if="!mobileMenuOpen && (updateAvailable || wishlistHasNew || recommendationsHasNew)"
+            class="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+        </button>
       </div>
+    </div>
+
+    <!-- Mobile dropdown menu (outside inner flex container so it isn't clipped by overflow-hidden) -->
+    <div v-if="mobileMenuOpen" class="sm:hidden border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg max-h-[calc(100vh-3.5rem)] overflow-y-auto"
+      @click="mobileMenuOpen = false">
+        <nav class="flex flex-col py-1">
+          <!-- User badge (multi-user) -->
+          <div v-if="multiUser && currentUser"
+            class="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/50 text-sm">
+            <span class="w-3.5 h-3.5 rounded-full shrink-0 border border-white/50" :style="{ background: currentUser.color }"></span>
+            <span class="font-medium text-gray-700 dark:text-gray-200 truncate">{{ currentUser.name }}</span>
+            <span v-if="currentUser.isAdmin" class="ml-auto text-[10px] uppercase tracking-wide text-violet-600 dark:text-violet-400 font-bold">Admin</span>
+          </div>
+
+          <!-- Update available (grid) -->
+          <button v-if="updateAvailable" @click="showUpdateDialog = true"
+            class="flex items-center gap-3 px-4 py-3 text-left text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            <span class="font-medium">Mise à jour disponible</span>
+            <span class="ml-auto w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          </button>
+
+          <!-- Grid-only items -->
+          <template v-if="currentView === 'grid'">
+            <button @click="uploadDialog = true"
+              class="flex items-center gap-3 px-4 py-3 text-left text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+              </svg>
+              <span class="font-medium">Téléverser un livre</span>
+            </button>
+
+            <button @click.stop="doRefresh(); mobileMenuOpen = false" :disabled="refreshing"
+              class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50">
+              <svg class="w-5 h-5 shrink-0" :class="refreshing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span>Rafraîchir le catalogue</span>
+            </button>
+
+            <a href="/opds" target="_blank"
+              class="flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M5 3a1 1 0 000 2c5.523 0 10 4.477 10 10a1 1 0 102 0C17 8.373 11.627 3 5 3z"/>
+                <path d="M4 9a1 1 0 012 0c0 3.314 2.686 6 6 6a1 1 0 110 2A8 8 0 014 9zM3 15a2 2 0 114 0 2 2 0 01-4 0z"/>
+              </svg>
+              <span>Flux OPDS</span>
+            </a>
+
+            <button @click.stop="copyOPDSUrl(); mobileMenuOpen = false"
+              class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+              </svg>
+              <span>{{ opdsUrlCopied ? 'URL OPDS copiée' : "Copier l'URL OPDS" }}</span>
+            </button>
+          </template>
+
+          <!-- Wishlist (always available) -->
+          <button @click="navigateTo('/wishlist')"
+            class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+            </svg>
+            <span>Liste de souhaits</span>
+            <span v-if="wishlistHasNew" class="ml-auto w-2 h-2 rounded-full bg-amber-500"></span>
+          </button>
+
+          <!-- Multi-user only items -->
+          <template v-if="multiUser && currentUser">
+            <button @click="navigateTo('/to-read')"
+              class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 12h14M5 16h10"/>
+              </svg>
+              <span>Pile à lire</span>
+              <span v-if="toReadList.length > 0"
+                class="ml-auto min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-500 text-[11px] font-bold text-white flex items-center justify-center">{{ toReadList.length }}</span>
+            </button>
+
+            <button @click="navigateTo('/recommendations')"
+              class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+              </svg>
+              <span>Mes recommandations</span>
+              <span v-if="recommendationsHasNew" class="ml-auto w-2 h-2 rounded-full bg-violet-500"></span>
+            </button>
+          </template>
+
+          <!-- Stats (always available) -->
+          <button @click="navigateTo('/stats')"
+            class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 14l4-4 4 4 5-5"/>
+            </svg>
+            <span>Statistiques de lecture</span>
+          </button>
+
+          <!-- Admin (multi-user, admin only) -->
+          <button v-if="multiUser && currentUser && currentUser.isAdmin" @click="navigateTo('/admin')"
+            class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span>Administration</span>
+          </button>
+
+          <!-- Divider -->
+          <div class="border-t border-gray-100 dark:border-gray-700/50 my-1"></div>
+
+          <!-- AI Chat -->
+          <button v-if="aiEnabled" @click.stop="chatOpen = !chatOpen; mobileMenuOpen = false"
+            class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            :class="chatOpen ? 'text-violet-600 dark:text-violet-400' : ''">
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+            </svg>
+            <span>{{ chatOpen ? "Fermer l'assistant IA" : 'Assistant IA' }}</span>
+          </button>
+
+          <!-- Dark mode -->
+          <button @click.stop="toggleDark(); mobileMenuOpen = false"
+            class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg v-if="isDark" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <svg v-else class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+            <span>{{ isDark ? 'Mode clair' : 'Mode sombre' }}</span>
+          </button>
+
+          <!-- Logout -->
+          <form method="POST" action="/logout" class="block">
+            <button type="submit"
+              class="w-full flex items-center gap-3 px-4 py-3 text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+              </svg>
+              <span class="font-medium">Se déconnecter</span>
+            </button>
+          </form>
+        </nav>
     </div>
   </header>
 
@@ -2493,6 +2662,9 @@ const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick } =
 
 createApp({
   setup() {
+    // ---- Mobile menu ----
+    const mobileMenuOpen = ref(false)
+
     // ---- Dark mode ----
     const isDark = ref(localStorage.getItem('nxt-dark') === '1')
     function applyDark(v) {
@@ -2953,6 +3125,8 @@ createApp({
 
     async function onHashChange() {
       const hash = window.location.hash
+      // Always close mobile menu when navigating
+      mobileMenuOpen.value = false
       // Destroy epub.js when leaving reader
       if (currentView.value === 'reader' && !hash.match(/^#\/read\//)) {
         destroyReader()
@@ -4093,6 +4267,7 @@ createApp({
       showUpdateDialog, updating, updateError, updateApplied, restarting,
       checkForUpdate, applyUpdate, restartServer,
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
+      mobileMenuOpen,
       aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
       sendChatMessage, clearChat,
       multiUser, currentUser,

@@ -67,6 +67,8 @@ Si `age_rating > 0` est déjà renseigné, ne le modifie pas sauf si clairement 
 
 - Inclus `last_maintenance_at: -1` dans `update_book` pour enregistrer la date de maintenance
 - Affiche un résumé des changements en une ligne (ex: "✓ Dune : +3 tags, résumé ajouté, age_rating=16")
+- Affiche le résumé des changements en une ligne
+- compress pour libérer le contexte avant le livre suivant
 
 ## Mode batch (sans argument)
 
