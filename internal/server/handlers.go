@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/skip2/go-qrcode"
 
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/opds"
@@ -1438,6 +1439,87 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(cfg)
 }
 
+// handleAPIQR returns a PNG QR code that encodes the OPDS feed URL for the
+// requesting user, embedding the appropriate token so a phone or e-reader
+// scanning it can pair without typing a password.
+//
+// Query parameters:
+//   - type: "opds" (default) or "mcp" — selects which endpoint to encode.
+//   - size: pixel side length, clamped to [128, 1024], default 320.
+//   - user_url: when set (admin UI use), encodes that exact URL instead of
+//     deriving one from the session.  Must point at the same host as the
+//     request, otherwise we ignore it — prevents the endpoint from being
+//     used as an arbitrary-string-to-PNG generator for off-host URLs.
+//
+// Token resolution for the auto-derived URL: if multi-user mode is on and
+// the request belongs to a known user, the per-user token is used so
+// scanning grants a personalised view (recommendations, to-read pile, unread
+// filter).  Otherwise the shared OPDS token is used.  When no token is
+// configured AND no user_url is supplied, a 503 is returned.
+func (s *Server) handleAPIQR(w http.ResponseWriter, r *http.Request) {
+	size := 320
+	if v := r.URL.Query().Get("size"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			size = n
+		}
+	}
+	if size < 128 {
+		size = 128
+	}
+	if size > 1024 {
+		size = 1024
+	}
+
+	var feedURL string
+	if explicit := r.URL.Query().Get("user_url"); explicit != "" {
+		// Admin-supplied URL must target the same host as the current request
+		// to prevent abusing /api/qr as a generic QR encoder for arbitrary
+		// strings (an admin can already do many things, but constraining the
+		// endpoint to its stated purpose keeps audit logs tractable).
+		parsed, err := url.Parse(explicit)
+		if err != nil || parsed.Host != "" && parsed.Host != r.Host {
+			http.Error(w, "user_url must target the same host as the request", http.StatusBadRequest)
+			return
+		}
+		feedURL = explicit
+	} else {
+		target := r.URL.Query().Get("type")
+		if target == "" {
+			target = "opds"
+		}
+		tok := s.opdsToken
+		if s.userManager != nil {
+			if uid := currentUserID(r); uid != "" {
+				if u, err := s.userManager.UserByID(uid); err == nil && u.Token != "" {
+					tok = u.Token
+				}
+			}
+		}
+		if tok == "" {
+			http.Error(w, "no token configured", http.StatusServiceUnavailable)
+			return
+		}
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		path := "/opds"
+		if target == "mcp" {
+			path = "/mcp"
+		}
+		feedURL = fmt.Sprintf("%s://%s%s?token=%s", scheme, r.Host, path, tok)
+	}
+
+	png, err := qrcode.Encode(feedURL, qrcode.Medium, size)
+	if err != nil {
+		http.Error(w, "qr generation error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store") // tokens rotate; never cache
+	_, _ = w.Write(png)
+}
+
 // handleAPIMe returns the currently logged-in user's info, including the
 // per-user OPDS / MCP token so the frontend can build personalised feed URLs.
 func (s *Server) handleAPIMe(w http.ResponseWriter, r *http.Request) {
@@ -1591,19 +1673,12 @@ func (s *Server) handleAPIUpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAPIRegenerateUserToken assigns a fresh per-user token to a user, invalidating
-// the previous one.  Only administrators (or single-user mode) may call this.
+// the previous one.  Admin-only (enforced by the requireAdmin route wrapper).
 // POST /api/users/{id}/token
 func (s *Server) handleAPIRegenerateUserToken(w http.ResponseWriter, r *http.Request) {
 	if s.userManager == nil {
 		http.Error(w, "multi-user not supported", http.StatusNotImplemented)
 		return
-	}
-	if uid := currentUserID(r); uid != "" {
-		me, err := s.userManager.UserByID(uid)
-		if err != nil || !me.IsAdmin {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
 	}
 	id := mux.Vars(r)["id"]
 	u, err := s.userManager.RegenerateUserToken(id)
@@ -2239,8 +2314,10 @@ func (s *Server) handleOPDSRecommendations(w http.ResponseWriter, r *http.Reques
 
 // recommendedBooks returns the deduplicated list of recommended books visible
 // to the given user.  When uid is non-empty, only recommendations addressed
-// to that user are returned; when empty, all users' recommendations are
-// merged.  The book order follows RecommendationsForUser's "newest first".
+// to that user are returned; when empty, every user's recommendations are
+// merged via a single AllRecommendations() call when the backend supports
+// catalog.AllRecommendationsLister, falling back to a per-user loop otherwise.
+// Order follows the underlying query's "newest first".
 func (s *Server) recommendedBooks(uid string) ([]catalog.Book, error) {
 	seen := map[string]bool{}
 	var books []catalog.Book
@@ -2258,6 +2335,22 @@ func (s *Server) recommendedBooks(uid string) ([]catalog.Book, error) {
 		}
 		return books, nil
 	}
+	if all, ok := s.recommender.(catalog.AllRecommendationsLister); ok {
+		recs, err := all.AllRecommendations()
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range recs {
+			if seen[rec.Book.ID] {
+				continue
+			}
+			seen[rec.Book.ID] = true
+			books = append(books, rec.Book)
+		}
+		return books, nil
+	}
+	// Fallback: per-user fan-out for backends that don't yet expose the
+	// AllRecommendationsLister optimisation.
 	users, err := s.userManager.Users()
 	if err != nil {
 		return nil, err

@@ -626,6 +626,137 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
+// readCatalog embeds fakeCatalog and adds the bare minimum to satisfy
+// catalog.Updater (single-user) and catalog.UserReadManager (multi-user) so
+// the set_book_read tool can be exercised in both modes.
+type readCatalog struct {
+	*fakeCatalog
+	perUserRead map[string]map[string]bool // userID → bookID → isRead
+	updates     []string                   // sequence of "id:isRead" calls to UpdateBook
+}
+
+func newReadCatalog() *readCatalog {
+	return &readCatalog{
+		fakeCatalog: newFakeCatalog(),
+		perUserRead: map[string]map[string]bool{},
+	}
+}
+
+func (c *readCatalog) UpdateBook(id string, u catalog.BookUpdate) (*catalog.Book, error) {
+	if u.IsRead != nil {
+		c.updates = append(c.updates, fmt.Sprintf("%s:%v", id, *u.IsRead))
+	}
+	for i := range c.books {
+		if c.books[i].ID == id {
+			if u.IsRead != nil {
+				c.books[i].IsRead = *u.IsRead
+			}
+			cp := c.books[i]
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("book %q not found", id)
+}
+
+func (c *readCatalog) SetUserRead(userID, bookID string, isRead bool) error {
+	if c.perUserRead[userID] == nil {
+		c.perUserRead[userID] = map[string]bool{}
+	}
+	c.perUserRead[userID][bookID] = isRead
+	return nil
+}
+
+func (c *readCatalog) UserReadStatuses(userID string, bookIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, id := range bookIDs {
+		out[id] = c.perUserRead[userID][id]
+	}
+	return out, nil
+}
+
+func (c *readCatalog) BookReadColors(bookIDs []string) (map[string][]string, error) {
+	return map[string][]string{}, nil
+}
+
+// TestToolSetBookRead_PerUser verifies the tool routes through UserReadManager
+// when both user_id is supplied and the backend supports it.
+func TestToolSetBookRead_PerUser(t *testing.T) {
+	cat := newReadCatalog()
+	srv := mcp.New(cat)
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      40,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "set_book_read",
+			"arguments": map[string]any{
+				"book_id": "book-1",
+				"user_id": "alice",
+				"is_read": true,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("unexpected error result: %v", result)
+	}
+	if got := cat.perUserRead["alice"]["book-1"]; !got {
+		t.Errorf("expected per-user read=true for alice/book-1, got %v", got)
+	}
+	if len(cat.updates) != 0 {
+		t.Errorf("UpdateBook should not have been called in multi-user mode; got %v", cat.updates)
+	}
+}
+
+// TestToolSetBookRead_SingleUser verifies the tool falls back to UpdateBook
+// (global is_read column) when no user_id is provided.
+func TestToolSetBookRead_SingleUser(t *testing.T) {
+	cat := newReadCatalog()
+	srv := mcp.New(cat)
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      41,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "set_book_read",
+			"arguments": map[string]any{
+				"book_id": "book-1",
+				"is_read": false,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("unexpected error result: %v", result)
+	}
+	if len(cat.updates) != 1 || cat.updates[0] != "book-1:false" {
+		t.Errorf("expected single UpdateBook call book-1:false, got %v", cat.updates)
+	}
+}
+
+// TestToolSetBookRead_NotSupported verifies a clean error when the backend
+// supports neither per-user reads nor metadata updates.
+func TestToolSetBookRead_NotSupported(t *testing.T) {
+	srv := mcp.New(newFakeCatalog()) // no Updater, no UserReadManager
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      42,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "set_book_read",
+			"arguments": map[string]any{
+				"book_id": "book-1",
+				"is_read": true,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	isErr, _ := result["isError"].(bool)
+	if !isErr {
+		t.Errorf("expected isError=true when backend lacks both Updater and UserReadManager")
+	}
+}
+
 func TestToolUploadBookNotSupported(t *testing.T) {
 	// fakeCatalog does not implement Uploader → tool returns an error result.
 	srv := mcp.New(newFakeCatalog())

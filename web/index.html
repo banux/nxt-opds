@@ -1721,6 +1721,11 @@
                     class="text-xs px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors">
                     {{ adminCopiedUserId === u.id ? 'Copié !' : 'Copier URL OPDS' }}
                   </button>
+                  <button @click="showQRForUser(u)"
+                    title="Afficher un QR code de l'URL OPDS pour scanner depuis un téléphone"
+                    class="text-xs px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors">
+                    QR
+                  </button>
                   <button @click="regenerateUserToken(u.id)"
                     class="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">
                     Régénérer
@@ -2494,6 +2499,43 @@
     class="fixed bottom-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all"
     :class="[toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white', chatOpen ? 'right-[26rem]' : 'right-4']">
     {{ toast.message }}
+  </div>
+
+  <!-- ===== QR Code modal (admin: pair an e-reader / phone) ===== -->
+  <div v-if="qrModalUser"
+    @click.self="closeQRModal"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+          QR code OPDS — {{ qrModalUser.name }}
+        </h3>
+        <button @click="closeQRModal"
+          class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+        Scannez ce QR code depuis un téléphone ou une liseuse pour ouvrir le flux OPDS
+        avec le token personnel de cet utilisateur (recommandations, pile à lire, non lus).
+      </p>
+      <!-- The /api/qr endpoint reads the per-user token from the session
+           context: when an admin is logged in the request is on behalf of
+           that admin's session, so we instead pass the user's token via
+           ?type=opds — we encode the URL client-side and use a third-party
+           QR rendering would require another dependency.  The Go endpoint
+           encodes the *current* user's URL; for an arbitrary user the admin
+           selects, we pass the URL as query so the user gets exactly that. -->
+      <img :src="'/api/qr?size=512&user_url=' + encodeURIComponent(qrModalUrl)"
+        alt="QR code"
+        class="mx-auto rounded-lg border border-gray-200 dark:border-gray-700"
+        style="image-rendering: pixelated; max-width: 280px; width: 100%;"/>
+      <div class="mt-4 text-xs font-mono text-gray-500 dark:text-gray-400 break-all px-2">
+        {{ qrModalUrl }}
+      </div>
+    </div>
   </div>
 
   <!-- ===== Update Dialog ===== -->
@@ -3723,6 +3765,20 @@ createApp({
     // ---- Per-user token management (admin) ----
     const adminTokenVisible = reactive({})
     const adminCopiedUserId = ref(null)
+    const qrModalUser = ref(null)
+    const qrModalUrl = ref('')
+
+    function showQRForUser(u) {
+      // Build the OPDS URL with the per-user token so the QR code grants
+      // personalised access (recommandations, pile à lire, etc.).
+      qrModalUser.value = u
+      qrModalUrl.value = window.location.origin + '/opds?token=' + (u.token || '')
+    }
+
+    function closeQRModal() {
+      qrModalUser.value = null
+      qrModalUrl.value = ''
+    }
 
     async function copyUserOPDSUrl(u) {
       if (!u.token) return
@@ -4274,6 +4330,7 @@ createApp({
       adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
       loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
       adminTokenVisible, adminCopiedUserId, copyUserOPDSUrl, regenerateUserToken,
+      qrModalUser, qrModalUrl, showQRForUser, closeQRModal,
       wishlistHasNew, recommendationsHasNew,
       myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,

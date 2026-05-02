@@ -37,6 +37,7 @@ type Server struct {
 	wishlistManager catalog.WishlistManager
 	recommender     catalog.Recommender
 	userManager     catalog.UserManager
+	userReadManager catalog.UserReadManager
 	toReadManager   catalog.ToReadManager
 }
 
@@ -63,6 +64,9 @@ func New(cat catalog.Catalog) *Server {
 	}
 	if um, ok := cat.(catalog.UserManager); ok {
 		s.userManager = um
+	}
+	if urm, ok := cat.(catalog.UserReadManager); ok {
+		s.userReadManager = urm
 	}
 	if tr, ok := cat.(catalog.ToReadManager); ok {
 		s.toReadManager = tr
@@ -204,7 +208,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.97.0",
+			"version": "1.98.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
@@ -430,6 +434,19 @@ func (s *Server) toolsList() toolsListResult {
 				},
 			},
 		},
+		{
+			Name:        "set_book_read",
+			Description: "Marque un livre comme lu (is_read=true) ou non lu (is_read=false) pour un utilisateur. En mode mono-utilisateur, user_id peut être omis et le statut global du livre est utilisé. En mode multi-utilisateur, marquer comme lu retire automatiquement le livre de la pile de lecture de l'utilisateur.",
+			InputSchema: &jsonSchema{
+				Type:     "object",
+				Required: []string{"book_id", "is_read"},
+				Properties: map[string]*jsonSchema{
+					"book_id": {Type: "string", Description: "Identifiant du livre"},
+					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur (multi-utilisateur uniquement)"},
+					"is_read": {Type: "boolean", Description: "Vrai pour marquer comme lu, faux pour décocher"},
+				},
+			},
+		},
 	}
 	return toolsListResult{Tools: tools}
 }
@@ -475,6 +492,8 @@ func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
 		return s.toolRemoveToRead(p.Arguments)
 	case "reorder_to_read":
 		return s.toolReorderToRead(p.Arguments)
+	case "set_book_read":
+		return s.toolSetBookRead(p.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: "Unknown tool: " + p.Name}
 	}
@@ -1022,6 +1041,45 @@ func (s *Server) toolReorderToRead(args map[string]any) (any, *rpcError) {
 		return errorResult("Erreur lors du réordonnancement : " + err.Error()), nil
 	}
 	return textResult(fmt.Sprintf("Pile de lecture de l'utilisateur %s réordonnée (%d livre(s)).", userID, len(bookIDs))), nil
+}
+
+// toolSetBookRead toggles a book's read status.  Mirrors the precedence used
+// by the HTTP handler handleAPIToggleRead: prefer per-user storage when both
+// userReadManager and a non-empty user_id are available, otherwise fall back
+// to the legacy global is_read column via Updater.UpdateBook.
+func (s *Server) toolSetBookRead(args map[string]any) (any, *rpcError) {
+	bookID, ok := args["book_id"].(string)
+	if !ok || bookID == "" {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'book_id' requis"}
+	}
+	isRead, ok := args["is_read"].(bool)
+	if !ok {
+		return nil, &rpcError{Code: -32602, Message: "Paramètre 'is_read' (bool) requis"}
+	}
+	userID, _ := args["user_id"].(string)
+
+	if s.userReadManager != nil && userID != "" {
+		if err := s.userReadManager.SetUserRead(userID, bookID, isRead); err != nil {
+			return errorResult("Erreur lors de la mise à jour : " + err.Error()), nil
+		}
+		state := "non lu"
+		if isRead {
+			state = "lu"
+		}
+		return textResult(fmt.Sprintf("Livre %s marqué comme %s pour l'utilisateur %s.", bookID, state, userID)), nil
+	}
+
+	if s.updater == nil {
+		return errorResult("Le backend ne supporte pas la modification du statut de lecture"), nil
+	}
+	if _, err := s.updater.UpdateBook(bookID, catalog.BookUpdate{IsRead: &isRead}); err != nil {
+		return errorResult("Erreur lors de la mise à jour : " + err.Error()), nil
+	}
+	state := "non lu"
+	if isRead {
+		state = "lu"
+	}
+	return textResult(fmt.Sprintf("Livre %s marqué comme %s.", bookID, state)), nil
 }
 
 func (s *Server) toolUpdateCover(args map[string]any) (any, *rpcError) {

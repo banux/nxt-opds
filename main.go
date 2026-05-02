@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/banux/nxt-opds/internal/config"
@@ -38,6 +42,18 @@ func main() {
 	// Ensure the books directory exists.
 	if err := os.MkdirAll(cfg.BooksDir, 0755); err != nil {
 		log.Fatalf("cannot create books directory %q: %v", cfg.BooksDir, err)
+	}
+
+	// When auth is enabled but no explicit OPDS token is configured, load (or
+	// generate and persist) a random token from {books_dir}/.opds_token.
+	// Replaces the previous SHA-256(password) derivation, which leaked the
+	// password to anyone who observed a token.
+	if cfg.OPDSToken == "" && cfg.Password != "" {
+		tok, err := config.LoadOrCreateOPDSToken(cfg.BooksDir)
+		if err != nil {
+			log.Fatalf("OPDS token error: %v", err)
+		}
+		cfg.OPDSToken = tok
 	}
 
 	var cat catalog.Catalog
@@ -107,11 +123,53 @@ func main() {
 	log.Printf("nxt-opds %s starting on %s", version, cfg.ListenAddr)
 	log.Printf("Web UI available at http://localhost%s/", cfg.ListenAddr)
 	if cfg.OPDSToken != "" {
-		log.Printf("OPDS feed URL (for reader apps): http://localhost%s/opds?token=%s", cfg.ListenAddr, cfg.OPDSToken)
-		log.Printf("MCP endpoint (for AI agents): http://localhost%s/mcp (Bearer token: %s)", cfg.ListenAddr, cfg.OPDSToken)
+		// Never log the bearer token in plaintext: an operator with shell or
+		// log access should already know it from the .opds_token file or env.
+		// We log only a short fingerprint so two log lines can be correlated.
+		fp := config.TokenFingerprint(cfg.OPDSToken)
+		log.Printf("OPDS feed URL ready at http://localhost%s/opds (token fingerprint: %s — see %s/.opds_token)",
+			cfg.ListenAddr, fp, cfg.BooksDir)
+		log.Printf("MCP endpoint ready at http://localhost%s/mcp (Bearer token fingerprint: %s)",
+			cfg.ListenAddr, fp)
 	}
-	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
-		log.Fatalf("server error: %v", err)
+	httpServer := &http.Server{
+		Addr:    cfg.ListenAddr,
+		Handler: srv,
+		// ReadHeaderTimeout caps how long the server will wait for the request
+		// headers to arrive — primary defence against slowloris connections
+		// that dribble bytes to keep the goroutine alive.
+		ReadHeaderTimeout: 10 * time.Second,
+		// IdleTimeout is the maximum time keep-alive connections sit idle.
+		IdleTimeout: 120 * time.Second,
+		// No ReadTimeout / WriteTimeout: book uploads and downloads can take
+		// minutes on slow connections.  ReadHeaderTimeout already protects the
+		// header-parse phase.
+	}
+
+	// Catch SIGINT / SIGTERM and trigger a graceful shutdown so in-flight
+	// uploads, downloads and SQL writes get a chance to finish.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server error: %v", err)
+		}
+	case <-ctx.Done():
+		log.Printf("shutdown signal received, draining for up to 30s...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("graceful shutdown failed: %v", err)
+		} else {
+			log.Printf("server stopped cleanly")
+		}
 	}
 }
 

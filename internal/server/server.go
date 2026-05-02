@@ -146,6 +146,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
+// requireAdmin wraps a handler so it only runs for admin users.  In single-user
+// mode (no UserManager or no users registered), or when authentication is
+// disabled (no Password), the wrapped handler runs unchanged.  Otherwise the
+// caller must be authenticated as a user whose IsAdmin flag is true; anything
+// else returns 403 Forbidden.
+//
+// A shared OPDS token (or a session that resolved to no specific user) does
+// not grant admin access — we explicitly require a user identity.
+func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.userManager != nil && s.hasMultipleUsers() {
+			uid := currentUserID(r)
+			if uid == "" {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			me, err := s.userManager.UserByID(uid)
+			if err != nil || me == nil || !me.IsAdmin {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		h(w, r)
+	}
+}
+
 // registerRoutes sets up all endpoint routes.
 func (s *Server) registerRoutes() {
 	r := s.router
@@ -222,8 +248,9 @@ func (s *Server) registerRoutes() {
 	// API: update book metadata (enabled when backend supports it)
 	protected.HandleFunc("/api/books/{id}", s.handleAPIUpdateBook).Methods(http.MethodPatch)
 
-	// API: delete a book (enabled when backend supports it)
-	protected.HandleFunc("/api/books/{id}", s.handleAPIDeleteBook).Methods(http.MethodDelete)
+	// API: delete a book (enabled when backend supports it).  Admin-only in
+	// multi-user mode to avoid one user destroying another user's library.
+	protected.HandleFunc("/api/books/{id}", s.requireAdmin(s.handleAPIDeleteBook)).Methods(http.MethodDelete)
 
 	// API: update cover image for a book (enabled when backend supports it)
 	protected.HandleFunc("/api/books/{id}/cover", s.handleAPIUpdateCover).Methods(http.MethodPost)
@@ -236,8 +263,8 @@ func (s *Server) registerRoutes() {
 
 	// API: list all distinct tags
 	protected.HandleFunc("/api/tags", s.handleAPITags).Methods(http.MethodGet)
-	// API: delete a tag from all books
-	protected.HandleFunc("/api/tags/{tag}", s.handleAPIDeleteTag).Methods(http.MethodDelete)
+	// API: delete a tag from all books.  Admin-only.
+	protected.HandleFunc("/api/tags/{tag}", s.requireAdmin(s.handleAPIDeleteTag)).Methods(http.MethodDelete)
 
 	// API: list all distinct publishers
 	protected.HandleFunc("/api/publishers", s.handleAPIPublishers).Methods(http.MethodGet)
@@ -251,15 +278,21 @@ func (s *Server) registerRoutes() {
 	// API: public server config (opdsToken, etc.) for the web frontend
 	protected.HandleFunc("/api/config", s.handleAPIConfig).Methods(http.MethodGet)
 
+	// API: PNG QR code that encodes the user's OPDS or MCP URL with token
+	// embedded — used for pairing phones / e-readers without typing it.
+	protected.HandleFunc("/api/qr", s.handleAPIQR).Methods(http.MethodGet)
+
 	// API: current logged-in user info
 	protected.HandleFunc("/api/me", s.handleAPIMe).Methods(http.MethodGet)
 
-	// API: user management (list, create, delete)
+	// API: user management.  All write operations require admin privileges in
+	// multi-user mode; listing is allowed for everyone (token field is filtered
+	// per-caller in handleAPIUsers).
 	protected.HandleFunc("/api/users", s.handleAPIUsers).Methods(http.MethodGet)
-	protected.HandleFunc("/api/users", s.handleAPICreateUser).Methods(http.MethodPost)
-	protected.HandleFunc("/api/users/{id}", s.handleAPIUpdateUser).Methods(http.MethodPatch)
-	protected.HandleFunc("/api/users/{id}", s.handleAPIDeleteUser).Methods(http.MethodDelete)
-	protected.HandleFunc("/api/users/{id}/token", s.handleAPIRegenerateUserToken).Methods(http.MethodPost)
+	protected.HandleFunc("/api/users", s.requireAdmin(s.handleAPICreateUser)).Methods(http.MethodPost)
+	protected.HandleFunc("/api/users/{id}", s.requireAdmin(s.handleAPIUpdateUser)).Methods(http.MethodPatch)
+	protected.HandleFunc("/api/users/{id}", s.requireAdmin(s.handleAPIDeleteUser)).Methods(http.MethodDelete)
+	protected.HandleFunc("/api/users/{id}/token", s.requireAdmin(s.handleAPIRegenerateUserToken)).Methods(http.MethodPost)
 
 	// API: per-user read toggle
 	protected.HandleFunc("/api/books/{id}/read", s.handleAPIToggleRead).Methods(http.MethodPut)
@@ -284,13 +317,15 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/to-read/reorder", s.handleAPIReorderToRead).Methods(http.MethodPut)
 	protected.HandleFunc("/api/to-read/{bookId}", s.handleAPIRemoveToRead).Methods(http.MethodDelete)
 
-	// API: trigger a manual catalog refresh (enabled when backend supports it)
-	protected.HandleFunc("/api/refresh", s.handleAPIRefresh).Methods(http.MethodPost)
+	// API: trigger a manual catalog refresh (enabled when backend supports it).
+	// Admin-only in multi-user mode (avoid log-in users triggering heavy I/O).
+	protected.HandleFunc("/api/refresh", s.requireAdmin(s.handleAPIRefresh)).Methods(http.MethodPost)
 
-	// API: auto-update check and apply
+	// API: auto-update check (read-only) is open to all logged-in users so the
+	// SPA can show the "update available" badge.  Apply and restart are admin-only.
 	protected.HandleFunc("/api/update/check", s.handleAPIUpdateCheck).Methods(http.MethodGet)
-	protected.HandleFunc("/api/update/apply", s.handleAPIUpdateApply).Methods(http.MethodPost)
-	protected.HandleFunc("/api/restart", s.handleAPIRestart).Methods(http.MethodPost)
+	protected.HandleFunc("/api/update/apply", s.requireAdmin(s.handleAPIUpdateApply)).Methods(http.MethodPost)
+	protected.HandleFunc("/api/restart", s.requireAdmin(s.handleAPIRestart)).Methods(http.MethodPost)
 
 	// MCP: Model Context Protocol endpoint for AI agent access
 	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)

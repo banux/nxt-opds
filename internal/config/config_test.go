@@ -270,33 +270,69 @@ func writeTemp(t *testing.T, name, content string) string {
 	return path
 }
 
-func TestLoad_OPDSToken_DerivedFromPassword(t *testing.T) {
+// TestLoad_OPDSToken_NoLongerDerived verifies that Load() never derives a
+// token from the password (the previous SHA-256(password) shortcut leaked the
+// password to anyone who saw a token).  Persistence is now main.go's
+// responsibility via LoadOrCreateOPDSToken.
+func TestLoad_OPDSToken_NoLongerDerived(t *testing.T) {
 	t.Setenv("OPDS_TOKEN", "")
+	t.Setenv("AUTH_PASSWORD", "supersecret")
 	cfg, err := config.Load("")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	// No password set → no token derived
 	if cfg.OPDSToken != "" {
-		t.Errorf("expected empty token when no password, got %q", cfg.OPDSToken)
+		t.Errorf("Load() should not derive a token; got %q", cfg.OPDSToken)
+	}
+}
+
+// TestLoadOrCreateOPDSToken_PersistsAndReuses verifies that the helper
+// generates a fresh token on first call and returns the same token on
+// subsequent calls (it is persisted in {dir}/.opds_token).
+func TestLoadOrCreateOPDSToken_PersistsAndReuses(t *testing.T) {
+	dir := t.TempDir()
+	first, err := config.LoadOrCreateOPDSToken(dir)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if len(first) != 64 {
+		t.Errorf("expected 64-char hex token, got %d chars: %q", len(first), first)
+	}
+	second, err := config.LoadOrCreateOPDSToken(dir)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if first != second {
+		t.Errorf("token should be persisted, got %q then %q", first, second)
 	}
 
-	t.Setenv("AUTH_PASSWORD", "supersecret")
-	cfg, err = config.Load("")
+	// File should exist with restrictive permissions.
+	info, err := os.Stat(filepath.Join(dir, ".opds_token"))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("stat: %v", err)
 	}
-	if cfg.OPDSToken == "" {
-		t.Error("expected token to be derived when password is set")
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("expected 0600 permissions on .opds_token, got %o", info.Mode().Perm())
 	}
-	// Token must be 32 hex chars (16 bytes SHA-256 truncated)
-	if len(cfg.OPDSToken) != 32 {
-		t.Errorf("expected 32-char token, got %d chars: %q", len(cfg.OPDSToken), cfg.OPDSToken)
+}
+
+// TestTokenFingerprint verifies that the fingerprint helper does not leak the
+// token but is stable for a given input.
+func TestTokenFingerprint(t *testing.T) {
+	if got := config.TokenFingerprint(""); got != "" {
+		t.Errorf("empty input should yield empty fingerprint, got %q", got)
 	}
-	// Token is deterministic for the same password
-	cfg2, _ := config.Load("")
-	if cfg.OPDSToken != cfg2.OPDSToken {
-		t.Errorf("token must be deterministic: %q != %q", cfg.OPDSToken, cfg2.OPDSToken)
+	a := config.TokenFingerprint("hello")
+	b := config.TokenFingerprint("hello")
+	if a != b {
+		t.Errorf("fingerprint should be stable: %q vs %q", a, b)
+	}
+	if a == "hello" {
+		t.Errorf("fingerprint must not echo the token")
+	}
+	c := config.TokenFingerprint("world")
+	if a == c {
+		t.Errorf("different inputs should produce different fingerprints")
 	}
 }
 

@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 13
+const currentSchemaVersion = 14
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -95,6 +95,82 @@ var schemaMigrations = []schemaMigration{
 	{version: 11, apply: migration11},
 	{version: 12, apply: migration12},
 	{version: 13, apply: migration13},
+	{version: 14, apply: migration14},
+}
+
+// migration14 introduces an FTS5 virtual table over (title, authors, series,
+// summary) so the catalog search runs against an indexed token store instead
+// of a `LOWER(...) LIKE '%q%'` full-table scan (version 13 → 14).
+//
+// Triggers keep books_fts in sync with mutations on books and book_authors so
+// the application code never has to think about it.  An initial backfill
+// pass populates the index from the existing book rows.
+func migration14(db *sql.DB) error {
+	// Defensive ALTERs for very old databases that pre-date migration1's full
+	// CREATE TABLE: the FTS5 backfill below SELECTs summary, so the column
+	// must exist.  Errors here mean "column already there" and are safe.
+	for _, alter := range []string{
+		`ALTER TABLE books ADD COLUMN summary   TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE books ADD COLUMN language  TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE books ADD COLUMN publisher TEXT NOT NULL DEFAULT ''`,
+	} {
+		_, _ = db.Exec(alter)
+	}
+
+	if _, err := db.Exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS books_fts USING fts5(
+    title, authors, series, summary,
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+-- One-time backfill: pull every existing book into the index.  Subsequent
+-- changes flow through the triggers below.
+INSERT INTO books_fts(rowid, title, authors, series, summary)
+SELECT b.rowid,
+       b.title,
+       COALESCE((SELECT GROUP_CONCAT(author_name, ' ')
+                 FROM book_authors WHERE book_id = b.id), ''),
+       b.series,
+       b.summary
+FROM books b;
+
+CREATE TRIGGER IF NOT EXISTS books_fts_ai AFTER INSERT ON books BEGIN
+    INSERT INTO books_fts(rowid, title, authors, series, summary)
+    VALUES (new.rowid, new.title,
+            COALESCE((SELECT GROUP_CONCAT(author_name, ' ')
+                      FROM book_authors WHERE book_id = new.id), ''),
+            new.series, new.summary);
+END;
+
+CREATE TRIGGER IF NOT EXISTS books_fts_ad AFTER DELETE ON books BEGIN
+    DELETE FROM books_fts WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER IF NOT EXISTS books_fts_au AFTER UPDATE OF title, series, summary ON books BEGIN
+    UPDATE books_fts
+    SET title   = new.title,
+        series  = new.series,
+        summary = new.summary
+    WHERE rowid = new.rowid;
+END;
+
+CREATE TRIGGER IF NOT EXISTS book_authors_fts_ai AFTER INSERT ON book_authors BEGIN
+    UPDATE books_fts
+    SET authors = COALESCE((SELECT GROUP_CONCAT(author_name, ' ')
+                            FROM book_authors WHERE book_id = new.book_id), '')
+    WHERE rowid = (SELECT rowid FROM books WHERE id = new.book_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS book_authors_fts_ad AFTER DELETE ON book_authors BEGIN
+    UPDATE books_fts
+    SET authors = COALESCE((SELECT GROUP_CONCAT(author_name, ' ')
+                            FROM book_authors WHERE book_id = old.book_id), '')
+    WHERE rowid = (SELECT rowid FROM books WHERE id = old.book_id);
+END;
+`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // migration13 adds a per-user authentication token column on users so each
@@ -651,8 +727,40 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		return books, total, err
 	}
 
-	like := "%" + strings.ToLower(q.Query) + "%"
+	// Translate the user query into an FTS5 MATCH expression with prefix
+	// matching on each token.  An unparseable query (e.g. only special chars)
+	// falls back to a LIKE scan so search never returns a 500.
+	fts := buildFTSMatchQuery(q.Query)
+	if fts == "" {
+		return b.searchLikeFallback(q, extraWhere, extraArgs, orderBy)
+	}
 
+	countArgs := append([]any{fts}, extraArgs...)
+	total, err := b.countBooks(`
+SELECT COUNT(*) FROM books b
+JOIN books_fts fts ON fts.rowid = b.rowid
+WHERE books_fts MATCH ?`+extraWhere, countArgs...)
+	if err != nil {
+		// Most likely cause: corrupt/missing FTS index in a database that
+		// pre-dates migration14 and somehow skipped it.  Fall back to LIKE so
+		// the user can still search while we surface the issue in logs.
+		return b.searchLikeFallback(q, extraWhere, extraArgs, orderBy)
+	}
+
+	queryArgs := append([]any{fts}, extraArgs...)
+	queryArgs = append(queryArgs, q.Limit, q.Offset)
+	books, err := b.queryBooks(`
+JOIN books_fts fts ON fts.rowid = b.rowid
+WHERE books_fts MATCH ?`+extraWhere+`
+`+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
+	return books, total, err
+}
+
+// searchLikeFallback runs the legacy LOWER LIKE search.  It is the safety net
+// when FTS5 is unavailable (very old DBs missing migration14) or the query
+// produces an empty MATCH expression after sanitisation.
+func (b *Backend) searchLikeFallback(q catalog.SearchQuery, extraWhere string, extraArgs []any, orderBy string) ([]catalog.Book, int, error) {
+	like := "%" + strings.ToLower(q.Query) + "%"
 	countArgs := append([]any{like, like, like}, extraArgs...)
 	total, err := b.countBooks(`
 SELECT COUNT(DISTINCT b.id) FROM books b
@@ -661,7 +769,6 @@ WHERE (LOWER(b.title) LIKE ? OR LOWER(ba.author_name) LIKE ? OR LOWER(b.series) 
 	if err != nil {
 		return nil, 0, err
 	}
-
 	queryArgs := append([]any{like, like, like}, extraArgs...)
 	queryArgs = append(queryArgs, q.Limit, q.Offset)
 	books, err := b.queryBooks(`
@@ -673,6 +780,36 @@ JOIN (
 WHERE 1=1`+extraWhere+`
 `+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
 	return books, total, err
+}
+
+// buildFTSMatchQuery turns a free-text user query into an FTS5 MATCH
+// expression: each whitespace-separated token becomes a quoted prefix term
+// (`"harry"*`) joined by AND semantics (FTS5's default conjunction).
+// Tokens that contain no alphanumeric characters are dropped — they would
+// otherwise be lexed as operators by FTS5 and break the parse.
+// Returns "" when no usable token remains, signalling the caller to take
+// the LIKE fallback path.
+func buildFTSMatchQuery(q string) string {
+	parts := strings.Fields(q)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		// Strip characters that FTS5 treats specially in a quoted phrase
+		// (only `"` is unsafe inside a double-quoted token).
+		p = strings.ReplaceAll(p, `"`, "")
+		// Skip tokens with no alphanumeric content (e.g. "+++").
+		hasAlnum := false
+		for _, r := range p {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				hasAlnum = true
+				break
+			}
+		}
+		if !hasAlnum {
+			continue
+		}
+		out = append(out, `"`+p+`"*`)
+	}
+	return strings.Join(out, " ")
 }
 
 // BooksByAuthor returns books by a specific author with pagination.
@@ -1014,8 +1151,12 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 // Backup creates a consistent snapshot of the catalog database in destDir
 // using SQLite's VACUUM INTO statement, which produces a defragmented copy
 // even while the database is in use.  The backup file is named
-// "catalog-YYYYMMDD-HHMMSS.db".  Afterwards the oldest backups in destDir
-// are pruned so that at most keep files remain (keep ≤ 0 = unlimited).
+// "catalog-YYYYMMDD-HHMMSS.db".  Before pruning, the new file is reopened
+// and PRAGMA integrity_check is run; if the result is anything other than
+// "ok", the corrupt backup is deleted and an error is returned so the
+// operator is alerted instead of silently retaining a broken file.
+// Afterwards the oldest backups in destDir are pruned so that at most keep
+// files remain (keep ≤ 0 = unlimited).
 // It implements catalog.Backupper.
 func (b *Backend) Backup(destDir string, keep int) (string, error) {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -1029,6 +1170,11 @@ func (b *Backend) Backup(destDir string, keep int) (string, error) {
 		return "", fmt.Errorf("vacuum into %q: %w", destPath, err)
 	}
 
+	if err := verifyBackupIntegrity(destPath); err != nil {
+		_ = os.Remove(destPath)
+		return "", err
+	}
+
 	if keep > 0 {
 		if err := pruneBackups(destDir, keep); err != nil {
 			// Non-fatal: log via return but don't abort.
@@ -1036,6 +1182,39 @@ func (b *Backend) Backup(destDir string, keep int) (string, error) {
 		}
 	}
 	return destPath, nil
+}
+
+// verifyBackupIntegrity opens the backup file in a fresh connection and runs
+// PRAGMA integrity_check.  A healthy database returns a single row containing
+// the literal string "ok"; any other output indicates corruption.
+func verifyBackupIntegrity(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open backup for verification: %w", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`PRAGMA integrity_check`)
+	if err != nil {
+		return fmt.Errorf("integrity_check %q: %w", path, err)
+	}
+	defer rows.Close()
+
+	var lines []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return fmt.Errorf("scan integrity_check: %w", err)
+		}
+		lines = append(lines, s)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iter integrity_check: %w", err)
+	}
+	if len(lines) == 1 && lines[0] == "ok" {
+		return nil
+	}
+	return fmt.Errorf("backup %q failed integrity_check: %s", path, strings.Join(lines, "; "))
 }
 
 // pruneBackups keeps only the most recent keep files matching the backup
@@ -1577,6 +1756,59 @@ ORDER BY r.created_at DESC`, fromUserID)
 		recs[i].FromUser = *fu
 	}
 	return recs, nil
+}
+
+// AllRecommendations returns every recommendation in the catalog, newest first.
+// It implements catalog.AllRecommendationsLister and lets handlers avoid the
+// N+1 pattern of calling RecommendationsForUser once per registered user.
+func (b *Backend) AllRecommendations() ([]catalog.Recommendation, error) {
+	rows, err := b.db.Query(`
+SELECT fu.id, fu.name, fu.color, fu.is_admin,
+       tu.id, tu.name, tu.color, tu.is_admin,
+       r.message, r.created_at,` + bookSelectColumns + `
+FROM recommendations r
+JOIN users fu ON fu.id = r.from_user_id
+JOIN users tu ON tu.id = r.to_user_id
+JOIN books b  ON b.id  = r.book_id
+ORDER BY r.created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var recs []catalog.Recommendation
+	for rows.Next() {
+		var fu, tu catalog.User
+		var fuAdmin, tuAdmin int
+		var message string
+		var createdAt int64
+		var r bookRow
+		if err := rows.Scan(
+			&fu.ID, &fu.Name, &fu.Color, &fuAdmin,
+			&tu.ID, &tu.Name, &tu.Color, &tuAdmin,
+			&message, &createdAt,
+			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt,
+			&r.Series, &r.SeriesIndex, &r.SeriesTotal,
+			&r.Collection, &r.CollectionIndex,
+			&r.IsRead, &r.Rating, &r.AgeRating,
+			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
+			&r.LastMaintenanceAt,
+			&r.AuthorsJSON, &r.TagsJSON,
+		); err != nil {
+			return nil, err
+		}
+		fu.IsAdmin = fuAdmin == 1
+		tu.IsAdmin = tuAdmin == 1
+		recs = append(recs, catalog.Recommendation{
+			FromUser:  fu,
+			ToUser:    tu,
+			Book:      r.toBook(),
+			Message:   message,
+			CreatedAt: time.Unix(createdAt, 0),
+		})
+	}
+	return recs, rows.Err()
 }
 
 // BookRecipients returns the IDs of users to whom fromUserID has recommended bookID.

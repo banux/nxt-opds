@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Development image — the production image (Dockerfile) is tiny and shell-less.
+# This dev variant adds Node.js + the Claude Code CLI so operators can `docker
+# exec` into the container to run AI-assisted maintenance flows or interactive
+# debugging.  Use for devcontainers and ops boxes, never for production.
+# Build:  docker build -f Dockerfile.dev -t nxt-opds:dev .
+# ──────────────────────────────────────────────────────────────────────────────
+FROM golang:1.24-bookworm AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /nxt-opds .
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g @anthropic-ai/claude-code && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd -u 1000 -m -d /app nxt-opds
+USER nxt-opds
+
+COPY --from=builder /nxt-opds /app/nxt-opds
+
+VOLUME ["/data/books"]
+WORKDIR /app
+EXPOSE 8080
+
+ENV LISTEN_ADDR=:8080
+ENV BOOKS_DIR=/data/books
+ENV BACKEND=sqlite
+
+ENTRYPOINT ["/app/nxt-opds"]

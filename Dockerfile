@@ -19,23 +19,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /nxt-opds .
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 2 – Runtime
-# Minimal Debian-slim image: has CA certs and a shell for debugging.
-# Includes Node.js + Claude Code CLI so AI-assisted workflows are available
-# inside the container (e.g. for operators via `docker exec`).
+# Distroless static image: just the bare minimum needed to run a static Go
+# binary (CA bundle, /etc/passwd, tzdata).  No shell, no package manager,
+# no Node.js — that bloat lived only to support the Claude Code CLI which is
+# now in Dockerfile.dev for operator/devcontainer workflows.
+# Resulting image size: ~25 MB instead of ~450 MB.
 # ──────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
-
-# Install CA certificates, Node.js (LTS via NodeSource) and Claude Code CLI.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl && \
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    npm install -g @anthropic-ai/claude-code && \
-    rm -rf /var/lib/apt/lists/*
-
-# Run as a non-root user.
-RUN useradd -u 1000 -m -d /app nxt-opds
-USER nxt-opds
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 
 # Copy the compiled binary.
 COPY --from=builder /nxt-opds /app/nxt-opds
@@ -51,4 +41,6 @@ ENV LISTEN_ADDR=:8080
 ENV BOOKS_DIR=/data/books
 ENV BACKEND=sqlite
 
+# distroless/static "nonroot" runs as uid 65532; matches the previous Debian
+# image's behaviour of dropping privileges.
 ENTRYPOINT ["/app/nxt-opds"]

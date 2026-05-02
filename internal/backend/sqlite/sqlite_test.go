@@ -731,6 +731,196 @@ func TestBackup_PrunesOldFiles(t *testing.T) {
 	}
 }
 
+// TestSearch_FTS5_AuthorMatch verifies that the FTS5 index returns a book
+// when the query matches an author (a column not present on the books table
+// itself — the trigger denormalises it).
+func TestSearch_FTS5_AuthorMatch(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Foundation", "Isaac Asimov", "SF")
+	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Hyperion", "Dan Simmons", "SF")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	books, total, err := b.Search(catalog.SearchQuery{Query: "asimov", Limit: 50})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if total != 1 || len(books) != 1 || books[0].Title != "Foundation" {
+		t.Errorf("expected only 'Foundation' for 'asimov', got total=%d books=%v", total, books)
+	}
+}
+
+// TestSearch_FTS5_PrefixMatch verifies that a partial token matches via the
+// trailing `*` prefix operator added by buildFTSMatchQuery.
+func TestSearch_FTS5_PrefixMatch(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Programming Rust", "Jim Blandy", "Tech")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	for _, q := range []string{"prog", "rust", "blandy"} {
+		_, total, err := b.Search(catalog.SearchQuery{Query: q, Limit: 50})
+		if err != nil {
+			t.Fatalf("Search %q: %v", q, err)
+		}
+		if total != 1 {
+			t.Errorf("query %q: expected 1, got %d", q, total)
+		}
+	}
+}
+
+// TestSearch_FTS5_SpecialCharsFallback ensures a query made of only operator
+// characters does not crash and returns no result rather than a 5xx.
+func TestSearch_FTS5_SpecialCharsFallback(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Hyperion", "Dan Simmons", "SF")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	// Only punctuation — buildFTSMatchQuery returns "", so we exercise the
+	// LIKE fallback path; "+++" doesn't match anything but must not error.
+	if _, _, err := b.Search(catalog.SearchQuery{Query: "+++", Limit: 50}); err != nil {
+		t.Errorf("Search('+++') returned error: %v", err)
+	}
+}
+
+// TestSearch_FTS5_FollowsTitleUpdates verifies that the AFTER UPDATE trigger
+// keeps the FTS index in sync when a book is renamed.
+func TestSearch_FTS5_FollowsTitleUpdates(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Old Title", "Some Author", "")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	books, _, _ := b.Search(catalog.SearchQuery{Limit: 50})
+	if len(books) != 1 {
+		t.Fatalf("expected 1 book, got %d", len(books))
+	}
+	newTitle := "Brave New World"
+	if _, err := b.UpdateBook(books[0].ID, catalog.BookUpdate{Title: &newTitle}); err != nil {
+		t.Fatalf("UpdateBook: %v", err)
+	}
+
+	_, total, _ := b.Search(catalog.SearchQuery{Query: "brave", Limit: 50})
+	if total != 1 {
+		t.Errorf("FTS index not updated after rename — search 'brave' returned %d", total)
+	}
+	_, total, _ = b.Search(catalog.SearchQuery{Query: "old", Limit: 50})
+	if total != 0 {
+		t.Errorf("FTS index still contains old title — search 'old' returned %d", total)
+	}
+}
+
+// TestAllRecommendations_AggregatesAcrossUsers verifies that
+// AllRecommendations returns recommendations from every (from, to) pair in
+// a single query, replacing the previous N+1 fan-out.
+func TestAllRecommendations_AggregatesAcrossUsers(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Book A", "Author A", "")
+	createMinimalEPUB(t, filepath.Join(dir, "b.epub"), "Book B", "Author B", "")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	alice, err := b.CreateUser("Alice", "#f00", false, false, 0)
+	if err != nil {
+		t.Fatalf("alice: %v", err)
+	}
+	bob, err := b.CreateUser("Bob", "#00f", false, false, 0)
+	if err != nil {
+		t.Fatalf("bob: %v", err)
+	}
+	carol, err := b.CreateUser("Carol", "#0f0", false, false, 0)
+	if err != nil {
+		t.Fatalf("carol: %v", err)
+	}
+
+	books, _, _ := b.Search(catalog.SearchQuery{Limit: 50})
+	if len(books) != 2 {
+		t.Fatalf("expected 2 books, got %d", len(books))
+	}
+
+	// Alice → Bob (book A); Bob → Carol (book B).
+	if err := b.RecommendBook(alice.ID, bob.ID, books[0].ID, "good one"); err != nil {
+		t.Fatalf("RecommendBook 1: %v", err)
+	}
+	if err := b.RecommendBook(bob.ID, carol.ID, books[1].ID, ""); err != nil {
+		t.Fatalf("RecommendBook 2: %v", err)
+	}
+
+	recs, err := b.AllRecommendations()
+	if err != nil {
+		t.Fatalf("AllRecommendations: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 recommendations, got %d", len(recs))
+	}
+	// Both FromUser and ToUser must be populated (the previous per-user
+	// helper only filled one of them).
+	for _, r := range recs {
+		if r.FromUser.ID == "" || r.ToUser.ID == "" {
+			t.Errorf("FromUser/ToUser should be populated, got %+v / %+v", r.FromUser, r.ToUser)
+		}
+	}
+}
+
+// TestBackup_RejectsCorruptFile verifies that the integrity check refuses
+// to keep a backup whose bytes have been mangled, so a silent VACUUM INTO
+// failure (e.g. partial disk full) cannot end up retained as a valid backup.
+func TestBackup_RejectsCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backups")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := filepath.Join(backupDir, "corrupt.db")
+	if err := os.WriteFile(corrupt, []byte("not a real sqlite file"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupIntegrity(corrupt); err == nil {
+		t.Errorf("expected integrity check to reject a non-SQLite file")
+	}
+}
+
+// TestBackup_AcceptsValidBackup verifies that the integrity check passes for
+// a backup just produced by Backup().
+func TestBackup_AcceptsValidBackup(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	backupDir := filepath.Join(dir, "backups")
+	path, err := b.Backup(backupDir, 7)
+	if err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	if err := verifyBackupIntegrity(path); err != nil {
+		t.Errorf("freshly produced backup should pass integrity_check: %v", err)
+	}
+}
+
 // TestReadStats_PerUser verifies that ReadStats aggregates per-user read-status
 // correctly: count of books read, top authors/tags, and rating distribution.
 func TestReadStats_PerUser(t *testing.T) {

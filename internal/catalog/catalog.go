@@ -611,3 +611,14 @@ type Recommender interface {
 	// recommended bookID.
 	BookRecipients(fromUserID, bookID string) ([]string, error)
 }
+
+// AllRecommendationsLister is an optional interface implemented by Recommender
+// backends that can return every recommendation in a single query.  It exists
+// to avoid the N+1 pattern of calling RecommendationsForUser once per user
+// when the caller wants a deduplicated cross-user view (e.g. an admin's
+// global "what has been recommended to anyone" feed).
+type AllRecommendationsLister interface {
+	// AllRecommendations returns every recommendation in the catalog,
+	// newest first.
+	AllRecommendations() ([]Recommendation, error)
+}
