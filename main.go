@@ -82,6 +82,10 @@ func main() {
 		OllamaURL:   cfg.OllamaURL,
 		OllamaModel: cfg.OllamaModel,
 		Version:     version,
+		Debug:       cfg.Debug,
+	}
+	if cfg.Debug {
+		log.Printf("DEBUG mode enabled — verbose auth and /mcp logging")
 	}
 	if cfg.OllamaURL != "" {
 		model := cfg.OllamaModel

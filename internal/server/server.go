@@ -38,6 +38,10 @@ type Options struct {
 	// Version is the current binary version (e.g. "v1.52.0" or "dev").
 	// Used by the update-check endpoint.
 	Version string
+
+	// Debug enables verbose request logging on the auth middleware and the
+	// MCP endpoint.  Useful for diagnosing why an MCP client cannot connect.
+	Debug bool
 }
 
 // Server is the HTTP server for the OPDS catalog.
@@ -134,6 +138,7 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 
 	s.mcpServer = mcp.New(cat)
+	s.mcpServer.SetDebug(opts.Debug)
 	if opts.OllamaURL != "" {
 		s.aiAgent = ai.New(opts.OllamaURL, opts.OllamaModel, cat)
 	}
@@ -175,7 +180,7 @@ func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
 // registerRoutes sets up all endpoint routes.
 func (s *Server) registerRoutes() {
 	r := s.router
-	auth := authMiddleware(s.opts.Password, s.opdsToken, s.sessions, s.userManager)
+	auth := authMiddleware(s.opts.Password, s.opdsToken, s.sessions, s.userManager, s.opts.Debug)
 
 	// Always-public endpoints (no auth required)
 	r.HandleFunc("/health", s.handleHealth).Methods(http.MethodGet)
@@ -327,8 +332,12 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/update/apply", s.requireAdmin(s.handleAPIUpdateApply)).Methods(http.MethodPost)
 	protected.HandleFunc("/api/restart", s.requireAdmin(s.handleAPIRestart)).Methods(http.MethodPost)
 
-	// MCP: Model Context Protocol endpoint for AI agent access
+	// MCP: Model Context Protocol endpoint for AI agent access.
+	// POST handles JSON-RPC requests; GET returns endpoint info so clients
+	// (and operators using `curl /mcp`) get a clear hint instead of a 404
+	// from the catch-all SPA fallback.
 	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)
+	protected.HandleFunc("/mcp", s.handleMCPInfo).Methods(http.MethodGet)
 
 	// AI: conversational assistant endpoint
 	protected.HandleFunc("/api/ai/chat", s.handleAIChat).Methods(http.MethodPost)

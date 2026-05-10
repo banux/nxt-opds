@@ -1106,3 +1106,43 @@ func TestCoverToken_NoToken(t *testing.T) {
 		t.Errorf("cover with no token: expected 401, got %d", rr.Code)
 	}
 }
+
+// TestMCPInfo_GET verifies that GET /mcp returns a small JSON document
+// instead of falling through to the SPA catch-all and returning a 404.
+// Without this, operators get an opaque 404 with zero diagnostics when
+// they curl the endpoint to check it is reachable.
+func TestMCPInfo_GET(t *testing.T) {
+	srv := newTestServer(t, Options{OPDSToken: "tok"})
+	req := httptest.NewRequest(http.MethodGet, "/mcp?token=tok", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /mcp: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("GET /mcp: expected application/json, got %q", ct)
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if doc["method"] != "POST" || doc["endpoint"] != "/mcp" {
+		t.Errorf("missing method/endpoint hints in info doc: %v", doc)
+	}
+}
+
+// TestMCP_GET_Unauthenticated verifies that a GET /mcp without auth returns
+// 401 instead of redirecting to /login (which would confuse JSON-RPC clients
+// inspecting the endpoint with `curl`).
+func TestMCP_GET_Unauthenticated(t *testing.T) {
+	srv := newTestServer(t, Options{Password: "pw", OPDSToken: "tok"})
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set("Accept", "text/html")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("GET /mcp without auth: expected 401, got %d", rr.Code)
+	}
+}

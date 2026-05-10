@@ -749,6 +749,24 @@ func (s *Server) handleAPIPing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMCPInfo answers GET /mcp with a small JSON document describing how to
+// reach the MCP endpoint.  Without this, a `curl /mcp` would fall through to
+// the SPA catch-all and return an HTML 404, leaving operators with no clue
+// that the endpoint is alive but only accepts POST.
+func (s *Server) handleMCPInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"name":            "nxt-opds MCP",
+		"version":         s.opts.Version,
+		"protocolVersion": "2024-11-05",
+		"transport":       "Streamable HTTP",
+		"method":          "POST",
+		"endpoint":        "/mcp",
+		"auth":            "Authorization: Bearer <opds_token | per-user token>  ou  ?token=<…>",
+		"hint":            "Cette URL n'accepte que POST avec une enveloppe JSON-RPC 2.0. Voir la doc README.md.",
+	})
+}
+
 // bookJSON is the JSON representation of a book for the frontend API.
 type bookJSON struct {
 	ID          string   `json:"id"`

@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -78,6 +79,12 @@ type Config struct {
 	// Defaults to qwen2.5:7b.
 	// Set via OLLAMA_MODEL env var or ollama_model config key.
 	OllamaModel string `yaml:"ollama_model"`
+
+	// Debug enables verbose logging across the HTTP server (auth decisions,
+	// MCP JSON-RPC requests/responses, etc.).  Useful when diagnosing why a
+	// client cannot connect.  Off by default.
+	// Set via DEBUG env var (1/true/yes) or debug config key.
+	Debug bool `yaml:"debug"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -141,6 +148,14 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("OLLAMA_MODEL"); v != "" {
 		cfg.OllamaModel = v
+	}
+	if v := os.Getenv("DEBUG"); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			cfg.Debug = true
+		case "0", "false", "no", "off":
+			cfg.Debug = false
+		}
 	}
 
 	// Parse the refresh interval string into a Duration.

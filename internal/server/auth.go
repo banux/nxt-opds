@@ -140,9 +140,16 @@ func (s *sessionStore) delete(token string) {
 // If password is empty, auth is disabled (development mode).
 // opdsToken is the shared token for OPDS feed access; empty means token auth disabled.
 // userManager (optional) enables per-user token authentication; nil disables it.
-func authMiddleware(password, opdsToken string, sessions *sessionStore, userManager catalog.UserManager) func(http.Handler) http.Handler {
+// debug enables verbose per-request logging (auth decisions, presented tokens).
+func authMiddleware(password, opdsToken string, sessions *sessionStore, userManager catalog.UserManager, debug bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if password == "" {
+			if debug {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					log.Printf("[debug] %s %s (auth disabled)", r.Method, r.URL.Path)
+					next.ServeHTTP(w, r)
+				})
+			}
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +160,9 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore, userMana
 					uid := sessions.userIDForToken(c.Value)
 					if uid != "" {
 						r = r.WithContext(context.WithValue(r.Context(), ctxUserID, uid))
+					}
+					if debug {
+						log.Printf("[debug] %s %s — auth=session user=%q", r.Method, r.URL.Path, uid)
 					}
 					next.ServeHTTP(w, r)
 					return
@@ -168,14 +178,17 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore, userMana
 
 			// Extract candidate token from query string (OPDS / cover) or
 			// Bearer header / query (MCP).
-			var presented string
+			var presented, src string
 			if isOPDS || isCover {
 				presented = r.URL.Query().Get("token")
+				src = "query"
 			} else if isMCP {
 				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 					presented = strings.TrimPrefix(auth, "Bearer ")
+					src = "bearer"
 				} else if tok := r.URL.Query().Get("token"); tok != "" {
 					presented = tok
+					src = "query"
 				}
 			}
 
@@ -184,6 +197,9 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore, userMana
 				if (isOPDS || isCover || isMCP) && userManager != nil {
 					if u, err := userManager.UserByToken(presented); err == nil && u != nil {
 						r = r.WithContext(context.WithValue(r.Context(), ctxUserID, u.ID))
+						if debug {
+							log.Printf("[debug] %s %s — auth=user-token (%s) user=%q", r.Method, r.URL.Path, src, u.ID)
+						}
 						next.ServeHTTP(w, r)
 						return
 					}
@@ -191,9 +207,15 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore, userMana
 				// 2b. Shared OPDS token (back-compat for clients that still use it).
 				if opdsToken != "" && (isOPDS || isCover || isMCP) {
 					if subtle.ConstantTimeCompare([]byte(presented), []byte(opdsToken)) == 1 {
+						if debug {
+							log.Printf("[debug] %s %s — auth=shared-opds-token (%s)", r.Method, r.URL.Path, src)
+						}
 						next.ServeHTTP(w, r)
 						return
 					}
+				}
+				if debug {
+					log.Printf("[debug] %s %s — token presented (%s) did not match any user or shared OPDS token", r.Method, r.URL.Path, src)
 				}
 			}
 
@@ -202,6 +224,9 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore, userMana
 			if opdsToken == "" {
 				if _, pass, ok := r.BasicAuth(); ok {
 					if subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1 {
+						if debug {
+							log.Printf("[debug] %s %s — auth=basic", r.Method, r.URL.Path)
+						}
 						next.ServeHTTP(w, r)
 						return
 					}
@@ -212,7 +237,11 @@ func authMiddleware(password, opdsToken string, sessions *sessionStore, userMana
 			//    return 401 for API / OPDS requests.
 			accept := r.Header.Get("Accept")
 			isAPI := strings.HasPrefix(r.URL.Path, "/api/") || isOPDS
-			if !isAPI && (accept == "" || containsHTML(accept)) {
+			if debug {
+				log.Printf("[debug] %s %s — UNAUTHORIZED (api=%t, opds=%t, mcp=%t, cover=%t)",
+					r.Method, r.URL.Path, isAPI, isOPDS, isMCP, isCover)
+			}
+			if !isAPI && !isMCP && (accept == "" || containsHTML(accept)) {
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return
 			}

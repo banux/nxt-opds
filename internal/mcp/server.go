@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,7 +40,14 @@ type Server struct {
 	userManager     catalog.UserManager
 	userReadManager catalog.UserReadManager
 	toReadManager   catalog.ToReadManager
+	debug           bool
 }
+
+// SetDebug toggles verbose request/response logging on the MCP server.
+// When true, every incoming JSON-RPC method is logged along with errors
+// and tool-call arguments — useful when an MCP client cannot connect or
+// is silently failing on a malformed payload.
+func (s *Server) SetDebug(v bool) { s.debug = v }
 
 // New creates a new MCP Server backed by the given catalog.
 func New(cat catalog.Catalog) *Server {
@@ -142,18 +150,31 @@ type toolsCallResult struct {
 // ServeHTTP handles a single MCP HTTP request/response cycle.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		if s.debug {
+			log.Printf("[mcp] reject method=%s path=%s — only POST is accepted on /mcp", r.Method, r.URL.Path)
+		}
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req rpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if s.debug {
+			log.Printf("[mcp] parse error from %s: %v", r.RemoteAddr, err)
+		}
 		writeRPCError(w, nil, -32700, "Parse error: "+err.Error())
 		return
 	}
 	if req.JSONRPC != "2.0" {
+		if s.debug {
+			log.Printf("[mcp] invalid jsonrpc field %q from %s", req.JSONRPC, r.RemoteAddr)
+		}
 		writeRPCError(w, req.ID, -32600, "Invalid Request: jsonrpc must be \"2.0\"")
 		return
+	}
+
+	if s.debug {
+		log.Printf("[mcp] %s method=%s id=%s", r.RemoteAddr, req.Method, rawID(req.ID))
 	}
 
 	var result any
@@ -176,9 +197,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case "tools/call":
 		result, rpcErr = s.handleToolsCall(req.Params)
+		if s.debug && rpcErr != nil {
+			log.Printf("[mcp] tools/call error: code=%d message=%s", rpcErr.Code, rpcErr.Message)
+		}
 
 	default:
 		rpcErr = &rpcError{Code: -32601, Message: "Method not found: " + req.Method}
+		if s.debug {
+			log.Printf("[mcp] unknown method %q", req.Method)
+		}
 	}
 
 	resp := rpcResponse{
@@ -189,6 +216,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// rawID renders a JSON-RPC request ID for log output.
+func rawID(id *json.RawMessage) string {
+	if id == nil {
+		return "<notification>"
+	}
+	return string(*id)
 }
 
 func writeRPCError(w http.ResponseWriter, id *json.RawMessage, code int, msg string) {
@@ -208,7 +243,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.98.0",
+			"version": "1.99.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
