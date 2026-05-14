@@ -827,6 +827,63 @@ func TestSearch_FTS5_FollowsTitleUpdates(t *testing.T) {
 	}
 }
 
+// TestSearch_SeriesSizeFilter verifies that the SeriesSize filter buckets
+// books by how many siblings share their series name.
+func TestSearch_SeriesSizeFilter(t *testing.T) {
+	dir := t.TempDir()
+	// 1 standalone, 1 series with 2 books (short), 1 series with 5 books (medium)
+	createMinimalEPUB(t, filepath.Join(dir, "solo.epub"), "Solo Title", "Author S", "")
+	createMinimalEPUB(t, filepath.Join(dir, "duo1.epub"), "Duo One", "Author D", "")
+	createMinimalEPUB(t, filepath.Join(dir, "duo2.epub"), "Duo Two", "Author D", "")
+	createMinimalEPUB(t, filepath.Join(dir, "saga1.epub"), "Saga One", "Author M", "")
+	createMinimalEPUB(t, filepath.Join(dir, "saga2.epub"), "Saga Two", "Author M", "")
+	createMinimalEPUB(t, filepath.Join(dir, "saga3.epub"), "Saga Three", "Author M", "")
+	createMinimalEPUB(t, filepath.Join(dir, "saga4.epub"), "Saga Four", "Author M", "")
+	createMinimalEPUB(t, filepath.Join(dir, "saga5.epub"), "Saga Five", "Author M", "")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	all, _, _ := b.Search(catalog.SearchQuery{Limit: 50})
+	duo := "Duo Series"
+	saga := "Saga Series"
+	for _, bk := range all {
+		switch bk.Title {
+		case "Duo One", "Duo Two":
+			if _, err := b.UpdateBook(bk.ID, catalog.BookUpdate{Series: &duo}); err != nil {
+				t.Fatalf("UpdateBook Duo: %v", err)
+			}
+		case "Saga One", "Saga Two", "Saga Three", "Saga Four", "Saga Five":
+			if _, err := b.UpdateBook(bk.ID, catalog.BookUpdate{Series: &saga}); err != nil {
+				t.Fatalf("UpdateBook Saga: %v", err)
+			}
+		}
+	}
+
+	cases := []struct {
+		name  string
+		size  string
+		count int
+	}{
+		{"standalone", "standalone", 1}, // Solo
+		{"short", "short", 2},           // Duo
+		{"medium", "medium", 5},         // Saga (5 books)
+		{"long", "long", 0},             // none
+	}
+	for _, tc := range cases {
+		_, total, err := b.Search(catalog.SearchQuery{SeriesSize: tc.size, Limit: 50})
+		if err != nil {
+			t.Fatalf("%s: Search: %v", tc.name, err)
+		}
+		if total != tc.count {
+			t.Errorf("%s: expected %d books, got %d", tc.name, tc.count, total)
+		}
+	}
+}
+
 // TestAllRecommendations_AggregatesAcrossUsers verifies that
 // AllRecommendations returns recommendations from every (from, to) pair in
 // a single query, replacing the previous N+1 fan-out.

@@ -783,6 +783,17 @@
           </button>
         </template>
 
+        <!-- Series size filter chips -->
+        <template v-for="ss in [{v:'standalone',l:'Tome unique'},{v:'short',l:'Saga 2-3'},{v:'medium',l:'Saga 4-7'},{v:'long',l:'Saga 8+'}]" :key="ss.v">
+          <button @click="setSeriesSizeFilter(ss.v)"
+            :class="seriesSizeFilter === ss.v
+              ? 'bg-indigo-500 text-white border-indigo-500'
+              : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-500'"
+            class="shrink-0 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
+            {{ ss.l }}
+          </button>
+        </template>
+
         <!-- Tags management link -->
         <a @click="navigateTo('/tags')"
           class="flex shrink-0 items-center gap-1 px-3 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
@@ -2729,6 +2740,7 @@ createApp({
     const unreadOnly        = ref(false)
     const notIndexedOnly    = ref(false)
     const ageRatingFilter   = ref([])  // empty = all; values: -1 = unclassified, 3/6/10/12/16/18 = exact match
+    const seriesSizeFilter  = ref('')  // '' = all; values: standalone, short, medium, long
     const sortOrder         = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
@@ -2775,6 +2787,7 @@ createApp({
         if (unreadOnly.value) params.set('unread', '1')
         if (notIndexedOnly.value) params.set('not_indexed', '1')
         if (ageRatingFilter.value.length > 0) params.set('age_rating', ageRatingFilter.value.join(','))
+        if (seriesSizeFilter.value) params.set('series_size', seriesSizeFilter.value)
         if (sortOrder.value) params.set('sort', sortOrder.value)
         const res = await apiFetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -2812,6 +2825,12 @@ createApp({
       } else {
         ageRatingFilter.value = ageRatingFilter.value.filter(x => x !== v)
       }
+      page.value = 1
+      loadBooks()
+    }
+
+    function setSeriesSizeFilter(v) {
+      seriesSizeFilter.value = seriesSizeFilter.value === v ? '' : v
       page.value = 1
       loadBooks()
     }
@@ -3330,6 +3349,7 @@ createApp({
       if (unreadOnly.value) p.set('unread', '1')
       if (notIndexedOnly.value) p.set('not_indexed', '1')
       if (ageRatingFilter.value.length > 0) p.set('age_rating', ageRatingFilter.value.join(','))
+      if (seriesSizeFilter.value) p.set('series_size', seriesSizeFilter.value)
       if (sortOrder.value) p.set('sort', sortOrder.value)
       return p.toString()
     }
@@ -4296,8 +4316,8 @@ createApp({
 
     return {
       isDark, toggleDark,
-      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, sortOrder, totalPages, pageNumbers,
-      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, onSortChange, goPage, coverGradient,
+      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, seriesSizeFilter, sortOrder, totalPages, pageNumbers,
+      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, setSeriesSizeFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
       onBookTouchStart, onBookTouchEnd,

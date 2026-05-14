@@ -502,6 +502,18 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	defer b.mu.RUnlock()
 
 	qLower := strings.ToLower(q.Query)
+
+	// Pre-compute series sizes when a series-size filter is requested.
+	var seriesSizes map[string]int
+	if q.SeriesSize != "" && q.SeriesSize != "standalone" {
+		seriesSizes = map[string]int{}
+		for _, bk := range b.books {
+			if bk.Series != "" {
+				seriesSizes[bk.Series]++
+			}
+		}
+	}
+
 	var matched []catalog.Book
 	for _, bk := range b.books {
 		if q.UnreadOnly && bk.IsRead {
@@ -509,6 +521,11 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		}
 		if q.Series != "" && bk.Series != q.Series {
 			continue
+		}
+		if q.SeriesSize != "" {
+			if !matchSeriesSize(q.SeriesSize, bk.Series, seriesSizes) {
+				continue
+			}
 		}
 		if q.Author != "" {
 			authorMatch := false
@@ -768,6 +785,35 @@ func (b *Backend) BooksByPublisher(publisher string, offset, limit int) ([]catal
 		}
 	}
 	return books, total, nil
+}
+
+// matchSeriesSize reports whether a book whose series field is `series` matches
+// the supplied SeriesSize filter value.  Counts is the pre-computed map of
+// series name → number of books in that series (nil for "standalone" which
+// does not need counts).
+func matchSeriesSize(size, series string, counts map[string]int) bool {
+	switch size {
+	case "standalone":
+		return series == ""
+	case "short":
+		if series == "" {
+			return false
+		}
+		c := counts[series]
+		return c >= 2 && c <= 3
+	case "medium":
+		if series == "" {
+			return false
+		}
+		c := counts[series]
+		return c >= 4 && c <= 7
+	case "long":
+		if series == "" {
+			return false
+		}
+		return counts[series] >= 8
+	}
+	return true
 }
 
 // Series returns all distinct non-empty series names sorted alphabetically

@@ -630,6 +630,35 @@ func (b *Backend) BookByID(id string) (*catalog.Book, error) {
 	return &books[0], nil
 }
 
+// seriesSizeClause returns the SQL WHERE fragment + bind args for the given
+// SearchQuery.SeriesSize value.  An empty SeriesSize (or unrecognised value)
+// yields an empty clause and no bind args.
+//
+// The non-standalone clauses use a sub-select that groups the books table by
+// series name and keeps only series whose count falls in the requested range,
+// then matches b.series against that set.  This is faster than a correlated
+// subquery on a per-row basis and the sub-select fits comfortably in memory
+// for personal libraries.
+func seriesSizeClause(size string) (string, []any) {
+	switch size {
+	case "standalone":
+		return "(b.series IS NULL OR b.series = '')", nil
+	case "short":
+		return `b.series IS NOT NULL AND b.series != '' AND b.series IN (
+			SELECT series FROM books WHERE series IS NOT NULL AND series != ''
+			GROUP BY series HAVING COUNT(*) BETWEEN ? AND ?)`, []any{2, 3}
+	case "medium":
+		return `b.series IS NOT NULL AND b.series != '' AND b.series IN (
+			SELECT series FROM books WHERE series IS NOT NULL AND series != ''
+			GROUP BY series HAVING COUNT(*) BETWEEN ? AND ?)`, []any{4, 7}
+	case "long":
+		return `b.series IS NOT NULL AND b.series != '' AND b.series IN (
+			SELECT series FROM books WHERE series IS NOT NULL AND series != ''
+			GROUP BY series HAVING COUNT(*) >= ?)`, []any{8}
+	}
+	return "", nil
+}
+
 // sortClause returns the SQL ORDER BY clause for the given SearchQuery.
 func sortClause(q catalog.SearchQuery) string {
 	switch q.SortBy {
@@ -708,6 +737,10 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	}
 	if q.NotIndexed {
 		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")
+	}
+	if clause, args := seriesSizeClause(q.SeriesSize); clause != "" {
+		extraClauses = append(extraClauses, clause)
+		extraArgs = append(extraArgs, args...)
 	}
 
 	extraWhere := ""

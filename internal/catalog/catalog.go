@@ -145,6 +145,15 @@ type SearchQuery struct {
 	// Series filters by exact series name (empty = no filter).
 	Series string
 
+	// SeriesSize filters books by the size of the series they belong to.
+	// Values:
+	//   ""           — no filter
+	//   "standalone" — books not in a series (Series field empty)
+	//   "short"      — part of a series with 2 or 3 books
+	//   "medium"     — part of a series with 4 to 7 books
+	//   "long"       — part of a series with 8 or more books
+	SeriesSize string
+
 	// SortBy is the sort field: "" or "added" for added date, "title" for alphabetical,
 	// "series_index" for numeric series position.
 	SortBy string
