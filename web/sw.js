@@ -1,4 +1,7 @@
-const CACHE_NAME = 'nxt-opds-v2';
+// The literal token below is replaced by the server at request time with the
+// running binary version (handleSW). Each release therefore gets its own cache
+// namespace; the activate handler deletes any cache whose name doesn't match.
+const CACHE_NAME = 'nxt-opds-static-' + '__APP_VERSION__';
 // EPUB downloads live in a separate cache so the static cache can be wiped
 // on a UI release without losing the user's offline books.
 const EPUB_CACHE = 'nxt-opds-epubs-v1';

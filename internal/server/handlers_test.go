@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	fsbackend "github.com/banux/nxt-opds/internal/backend/fs"
 	"github.com/banux/nxt-opds/internal/catalog"
@@ -1144,5 +1145,53 @@ func TestMCP_GET_Unauthenticated(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("GET /mcp without auth: expected 401, got %d", rr.Code)
+	}
+}
+
+// TestHandleSW_InjectsVersion verifies that GET /sw.js substitutes the
+// __APP_VERSION__ placeholder with the running binary version so each release
+// gets its own service-worker cache namespace. A regression here means clients
+// stay stuck on the previous cached HTML forever.
+func TestHandleSW_InjectsVersion(t *testing.T) {
+	const swContents = `const CACHE_NAME = 'nxt-opds-static-' + '__APP_VERSION__';`
+	staticFS := fstest.MapFS{
+		"sw.js": &fstest.MapFile{Data: []byte(swContents)},
+	}
+	srv := newTestServer(t, Options{
+		StaticFS: staticFS,
+		Version:  "v1.101.0",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /sw.js: expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "__APP_VERSION__") {
+		t.Errorf("expected __APP_VERSION__ to be replaced, got: %s", body)
+	}
+	if !strings.Contains(body, "nxt-opds-static-") || !strings.Contains(body, "v1.101.0") {
+		t.Errorf("expected cache name to contain version v1.101.0, got: %s", body)
+	}
+}
+
+// TestHandleSW_DefaultsToDev verifies that when no version is provided (e.g.
+// `go run` without ldflags), the cache name falls back to a deterministic
+// "dev" suffix rather than something empty that could collide across builds.
+func TestHandleSW_DefaultsToDev(t *testing.T) {
+	staticFS := fstest.MapFS{
+		"sw.js": &fstest.MapFile{Data: []byte(`'__APP_VERSION__'`)},
+	}
+	srv := newTestServer(t, Options{StaticFS: staticFS})
+
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if !strings.Contains(rr.Body.String(), "'dev'") {
+		t.Errorf("expected dev fallback, got: %s", rr.Body.String())
 	}
 }

@@ -733,7 +733,7 @@ func (s *Server) handleSW(w http.ResponseWriter, r *http.Request) {
 	if version == "" {
 		version = "dev"
 	}
-	content := strings.ReplaceAll(string(data), "nxt-opds-v1", "nxt-opds-"+version)
+	content := strings.ReplaceAll(string(data), "__APP_VERSION__", version)
 	w.Header().Set("Content-Type", "application/javascript")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	_, _ = w.Write([]byte(content))
