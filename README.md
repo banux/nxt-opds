@@ -234,7 +234,7 @@ Leaving the subscription list empty subscribes the webhook to every event.
 | `Content-Type`          | `application/json`                                       |
 | `User-Agent`            | `nxt-opds/webhook`                                       |
 | `X-NxtOpds-Event`       | The event name (e.g. `book.created`)                     |
-| `X-NxtOpds-Signature`   | `sha256=<hex>` HMAC of the body, only if a secret is set |
+| `X-Signature`           | `sha256=<hex>` HMAC of the body, only if a secret is set |
 
 **Envelope**
 

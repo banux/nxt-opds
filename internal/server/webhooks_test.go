@@ -117,7 +117,7 @@ func TestWebhook_FiresOnBookUpload(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, call{
 			event:     r.Header.Get("X-NxtOpds-Event"),
-			signature: r.Header.Get("X-NxtOpds-Signature"),
+			signature: r.Header.Get("X-Signature"),
 			body:      buf,
 		})
 		mu.Unlock()

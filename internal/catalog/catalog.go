@@ -653,7 +653,7 @@ var AllWebhookEvents = []string{
 
 // Webhook is an admin-configured HTTP callback that is notified whenever one
 // of its subscribed events occurs.  Secret (when set) is used to compute an
-// HMAC-SHA256 signature over the JSON payload, sent in the X-NxtOpds-Signature
+// HMAC-SHA256 signature over the JSON payload, sent in the X-Signature
 // header so receivers can verify the call.
 type Webhook struct {
 	// ID is a unique identifier (UUID-style hex string).
@@ -669,7 +669,7 @@ type Webhook struct {
 	Events []string
 
 	// Secret, when non-empty, is used to compute an HMAC-SHA256 signature
-	// of the request body and send it in the X-NxtOpds-Signature header.
+	// of the request body and send it in the X-Signature header.
 	Secret string
 
 	// Enabled controls whether the dispatcher will fire this webhook.

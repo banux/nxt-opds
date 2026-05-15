@@ -134,7 +134,7 @@ func (d *Dispatcher) deliver(h catalog.Webhook, event string, body []byte) {
 	if h.Secret != "" {
 		mac := hmac.New(sha256.New, []byte(h.Secret))
 		mac.Write(body)
-		req.Header.Set("X-NxtOpds-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		req.Header.Set("X-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
 	resp, err := d.client.Do(req)

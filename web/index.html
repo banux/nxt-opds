@@ -1912,7 +1912,7 @@
                 <input v-model="webhookForm.secret" type="text" :placeholder="webhookForm.id && webhookForm.hasSecret ? 'Laisser vide pour conserver' : 'Chaîne secrète'"
                   class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 font-mono"/>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Si défini, chaque appel inclura un en-tête <code>X-NxtOpds-Signature: sha256=…</code>.
+                  Si défini, chaque appel inclura un en-tête <code>X-Signature: sha256=…</code>.
                 </p>
               </div>
               <div>
