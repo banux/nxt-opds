@@ -1228,3 +1228,80 @@ func TestToReadList_RemovedOnRead(t *testing.T) {
 		t.Errorf("expected empty list after read, got %d items", len(items))
 	}
 }
+
+// TestWebhook_CRUD verifies the WebhookManager CRUD round-trip.
+func TestWebhook_CRUD(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	// Empty list initially.
+	hooks, err := b.Webhooks()
+	if err != nil {
+		t.Fatalf("Webhooks (empty): %v", err)
+	}
+	if len(hooks) != 0 {
+		t.Fatalf("expected 0 webhooks initially, got %d", len(hooks))
+	}
+
+	// Create.
+	h, err := b.CreateWebhook("My Webhook", "https://example.test/hook",
+		[]string{catalog.WebhookEventBookCreated, catalog.WebhookEventBookUpdated},
+		"s3cret", true)
+	if err != nil {
+		t.Fatalf("CreateWebhook: %v", err)
+	}
+	if h.ID == "" {
+		t.Errorf("expected non-empty ID")
+	}
+	if h.CreatedAt.IsZero() {
+		t.Errorf("expected non-zero CreatedAt")
+	}
+	if len(h.Events) != 2 {
+		t.Errorf("expected 2 events, got %d", len(h.Events))
+	}
+
+	// Get by ID.
+	got, err := b.WebhookByID(h.ID)
+	if err != nil {
+		t.Fatalf("WebhookByID: %v", err)
+	}
+	if got.URL != "https://example.test/hook" {
+		t.Errorf("URL mismatch: %q", got.URL)
+	}
+	if got.Secret != "s3cret" {
+		t.Errorf("secret mismatch: %q", got.Secret)
+	}
+
+	// Update: disable + change name.
+	newName := "Renamed"
+	disabled := false
+	upd := catalog.WebhookUpdate{Name: &newName, Enabled: &disabled}
+	got2, err := b.UpdateWebhook(h.ID, upd)
+	if err != nil {
+		t.Fatalf("UpdateWebhook: %v", err)
+	}
+	if got2.Name != "Renamed" || got2.Enabled {
+		t.Errorf("update mismatch: %+v", got2)
+	}
+
+	// Record fire.
+	if err := b.RecordWebhookFire(h.ID, "200 OK", time.Unix(1700000000, 0)); err != nil {
+		t.Fatalf("RecordWebhookFire: %v", err)
+	}
+	got3, _ := b.WebhookByID(h.ID)
+	if got3.LastStatus != "200 OK" || got3.LastFiredAt.IsZero() {
+		t.Errorf("expected last-fired updated: %+v", got3)
+	}
+
+	// Delete.
+	if err := b.DeleteWebhook(h.ID); err != nil {
+		t.Fatalf("DeleteWebhook: %v", err)
+	}
+	if _, err := b.WebhookByID(h.ID); err == nil {
+		t.Errorf("expected error after delete")
+	}
+}
