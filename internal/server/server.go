@@ -11,6 +11,7 @@ import (
 	"github.com/banux/nxt-opds/internal/ai"
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/mcp"
+	"github.com/banux/nxt-opds/internal/webhooks"
 )
 
 // Options holds optional configuration for the Server.
@@ -62,6 +63,8 @@ type Server struct {
 	wishlistManager catalog.WishlistManager // optional; nil if backend doesn't support wishlists
 	toReadManager   catalog.ToReadManager   // optional; nil if backend doesn't support to-read lists
 	readStats       catalog.ReadStatsProvider // optional; nil if backend doesn't expose reading statistics
+	webhookManager catalog.WebhookManager // optional; nil if backend doesn't store webhooks
+	webhooks       *webhooks.Dispatcher  // dispatches catalog events to webhooks (no-op when webhookManager is nil)
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
@@ -126,6 +129,10 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	if rs, ok := cat.(catalog.ReadStatsProvider); ok {
 		s.readStats = rs
 	}
+	if wm, ok := cat.(catalog.WebhookManager); ok {
+		s.webhookManager = wm
+	}
+	s.webhooks = webhooks.New(s.webhookManager)
 	// If the catalog backend supports session persistence, wire it up and load
 	// any sessions that survived the previous process run.
 	if sp, ok := cat.(catalog.SessionPersistence); ok {
@@ -325,6 +332,13 @@ func (s *Server) registerRoutes() {
 	// API: trigger a manual catalog refresh (enabled when backend supports it).
 	// Admin-only in multi-user mode (avoid log-in users triggering heavy I/O).
 	protected.HandleFunc("/api/refresh", s.requireAdmin(s.handleAPIRefresh)).Methods(http.MethodPost)
+
+	// API: webhook management.  Admin-only in multi-user mode.
+	protected.HandleFunc("/api/webhooks", s.requireAdmin(s.handleAPIWebhooks)).Methods(http.MethodGet)
+	protected.HandleFunc("/api/webhooks", s.requireAdmin(s.handleAPICreateWebhook)).Methods(http.MethodPost)
+	protected.HandleFunc("/api/webhooks/{id}", s.requireAdmin(s.handleAPIUpdateWebhook)).Methods(http.MethodPatch)
+	protected.HandleFunc("/api/webhooks/{id}", s.requireAdmin(s.handleAPIDeleteWebhook)).Methods(http.MethodDelete)
+	protected.HandleFunc("/api/webhooks/{id}/test", s.requireAdmin(s.handleAPITestWebhook)).Methods(http.MethodPost)
 
 	// API: auto-update check (read-only) is open to all logged-in users so the
 	// SPA can show the "update available" badge.  Apply and restart are admin-only.

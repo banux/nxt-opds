@@ -1173,6 +1173,8 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.webhooks.Fire(catalog.WebhookEventBookUpdated, bookEventPayload(bk))
+
 	// Enrich response with per-user read status.
 	isRead := bk.IsRead
 	colors := []string{}
@@ -1234,9 +1236,18 @@ func (s *Server) handleAPIDeleteBook(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// Fetch the book before deleting so the webhook payload can describe it.
+	bk, _ := s.catalog.BookByID(id)
+
 	if err := s.deleter.DeleteBook(id); err != nil {
 		http.Error(w, "delete failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
+	}
+
+	if bk != nil {
+		s.webhooks.Fire(catalog.WebhookEventBookDeleted, bookEventPayload(bk))
+	} else {
+		s.webhooks.Fire(catalog.WebhookEventBookDeleted, map[string]string{"id": id})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1416,6 +1427,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upload failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
+
+	s.webhooks.Fire(catalog.WebhookEventBookCreated, bookEventPayload(book))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -1754,6 +1767,7 @@ func (s *Server) handleAPIToggleRead(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "update failed: "+err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
+		s.webhooks.Fire(catalog.WebhookEventBookRead, bookReadEventPayload(bk, nil, bk.IsRead))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":     bk.ID,
@@ -1772,6 +1786,14 @@ func (s *Server) handleAPIToggleRead(w http.ResponseWriter, r *http.Request) {
 	if err := s.userReadManager.SetUserRead(userID, id, req.IsRead); err != nil {
 		http.Error(w, "set read status failed: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Fire book.read webhook with the user's identity attached for routing.
+	if bk, _ := s.catalog.BookByID(id); bk != nil {
+		var u *catalog.User
+		if s.userManager != nil && userID != "" {
+			u, _ = s.userManager.UserByID(userID)
+		}
+		s.webhooks.Fire(catalog.WebhookEventBookRead, bookReadEventPayload(bk, u, req.IsRead))
 	}
 	colors := []string{}
 	if cm, _ := s.userReadManager.BookReadColors([]string{id}); cm != nil {
@@ -3529,3 +3551,4 @@ func toLabelJSON(rows []catalog.LabelCount) []statsLabelJSON {
 	}
 	return out
 }
+

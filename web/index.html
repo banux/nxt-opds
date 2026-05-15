@@ -1812,6 +1812,141 @@
             </div>
           </div>
         </template>
+
+        <!-- ===== Webhooks section ===== -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-8 overflow-hidden mt-8">
+          <div class="px-5 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+              Webhooks ({{ webhooks.length }})
+            </h3>
+            <button @click="openWebhookForm(null)"
+              class="text-xs px-2 py-1 bg-brand-600 hover:bg-brand-700 text-white rounded-md transition-colors">
+              + Ajouter
+            </button>
+          </div>
+          <div v-if="webhooksLoading" class="px-5 py-6 text-center text-gray-400 dark:text-gray-500 text-sm">
+            Chargement…
+          </div>
+          <div v-else-if="webhooks.length === 0" class="px-5 py-8 text-center text-gray-400 dark:text-gray-500 text-sm">
+            Aucun webhook configuré. Ajoute-en un pour recevoir des notifications HTTP lors d'événements du catalogue.
+          </div>
+          <ul v-else class="divide-y divide-gray-100 dark:divide-gray-700">
+            <li v-for="h in webhooks" :key="h.id" class="px-5 py-3">
+              <div class="flex items-center gap-3 flex-wrap">
+                <span class="w-2 h-2 rounded-full shrink-0"
+                      :class="h.enabled ? 'bg-emerald-500' : 'bg-gray-400'"></span>
+                <span class="flex-1 font-medium text-gray-900 dark:text-gray-100 truncate">
+                  {{ h.name || h.url }}
+                </span>
+                <span v-if="!h.enabled"
+                      class="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-full">
+                  Désactivé
+                </span>
+                <button @click="testWebhook(h)" title="Tester"
+                  class="text-xs px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">
+                  Tester
+                </button>
+                <button @click="openWebhookForm(h)" title="Modifier"
+                  class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                  </svg>
+                </button>
+                <button @click="deleteWebhook(h.id)" title="Supprimer"
+                  class="p-1.5 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="mt-1 ml-5 text-xs text-gray-500 dark:text-gray-400 break-all">{{ h.url }}</div>
+              <div class="mt-1 ml-5 flex flex-wrap gap-1.5 items-center">
+                <span v-if="!h.events || h.events.length === 0"
+                      class="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded-full">
+                  Tous les événements
+                </span>
+                <span v-for="e in (h.events || [])" :key="e"
+                      class="text-xs px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full">
+                  {{ e }}
+                </span>
+                <span v-if="h.hasSecret"
+                      class="text-xs px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded-full">
+                  Signé HMAC
+                </span>
+                <span v-if="h.lastStatus" class="text-xs text-gray-500 dark:text-gray-400 ml-auto">
+                  Dernière : {{ h.lastStatus }}
+                </span>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Webhook edit modal -->
+        <div v-if="webhookForm.open" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-0 sm:px-4">
+          <div class="bg-white dark:bg-gray-800 w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden">
+            <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h3 class="font-semibold text-gray-900 dark:text-gray-100">
+                {{ webhookForm.id ? 'Modifier le webhook' : 'Nouveau webhook' }}
+              </h3>
+              <button @click="closeWebhookForm" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div class="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nom (optionnel)</label>
+                <input v-model="webhookForm.name" type="text" placeholder="Mon serveur Discord"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">URL <span class="text-red-500">*</span></label>
+                <input v-model="webhookForm.url" type="url" placeholder="https://example.com/hook"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"/>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Secret HMAC (optionnel)</label>
+                <input v-model="webhookForm.secret" type="text" :placeholder="webhookForm.id && webhookForm.hasSecret ? 'Laisser vide pour conserver' : 'Chaîne secrète'"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 font-mono"/>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Si défini, chaque appel inclura un en-tête <code>X-NxtOpds-Signature: sha256=…</code>.
+                </p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Événements</label>
+                <div class="space-y-1.5">
+                  <label v-for="ev in webhookEventOptions" :key="ev.value" class="flex items-start gap-2 cursor-pointer select-none">
+                    <input type="checkbox" :value="ev.value" v-model="webhookForm.events"
+                      class="mt-0.5 w-4 h-4 accent-brand-600 rounded"/>
+                    <span class="text-sm text-gray-700 dark:text-gray-300">
+                      <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">{{ ev.value }}</code>
+                      — {{ ev.label }}
+                    </span>
+                  </label>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Aucune case cochée = tous les événements.</p>
+              </div>
+              <label class="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" v-model="webhookForm.enabled" class="w-4 h-4 accent-emerald-600 rounded"/>
+                <span class="text-sm text-gray-700 dark:text-gray-300">Activé</span>
+              </label>
+            </div>
+            <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
+              <button @click="closeWebhookForm"
+                class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                Annuler
+              </button>
+              <button @click="saveWebhook" :disabled="!webhookForm.url || webhookFormSaving"
+                class="px-4 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+                {{ webhookFormSaving ? 'Enregistrement…' : (webhookForm.id ? 'Mettre à jour' : 'Créer') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </template><!-- end admin view -->
 
@@ -3241,6 +3376,7 @@ createApp({
         currentView.value = 'admin'
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadAdminUsers()
+        await loadWebhooks()
       } else if (hash === '#/recommendations') {
         currentView.value = 'recommendations'
         window.scrollTo({ top: 0, behavior: 'instant' })
@@ -3824,6 +3960,106 @@ createApp({
       }
     }
 
+    // ---- Webhooks (admin) ----
+    const webhooks         = ref([])
+    const webhooksLoading  = ref(false)
+    const webhookFormSaving = ref(false)
+    const webhookForm = ref({
+      open: false, id: null, name: '', url: '', secret: '',
+      events: [], enabled: true, hasSecret: false,
+    })
+    const webhookEventOptions = [
+      { value: 'book.created', label: "Un nouveau livre est ajouté" },
+      { value: 'book.updated', label: "Les métadonnées d'un livre sont modifiées" },
+      { value: 'book.deleted', label: "Un livre est supprimé" },
+      { value: 'book.read',    label: "Un utilisateur marque un livre comme lu/non lu" },
+    ]
+
+    async function loadWebhooks() {
+      webhooksLoading.value = true
+      try {
+        const res = await apiFetch('/api/webhooks')
+        if (res.ok) webhooks.value = await res.json()
+      } catch {
+        // ignore — admin not allowed in single-user mode etc.
+      } finally {
+        webhooksLoading.value = false
+      }
+    }
+
+    function openWebhookForm(h) {
+      if (h) {
+        webhookForm.value = {
+          open: true, id: h.id, name: h.name || '', url: h.url, secret: '',
+          events: (h.events || []).slice(), enabled: !!h.enabled, hasSecret: !!h.hasSecret,
+        }
+      } else {
+        webhookForm.value = {
+          open: true, id: null, name: '', url: '', secret: '',
+          events: [], enabled: true, hasSecret: false,
+        }
+      }
+    }
+
+    function closeWebhookForm() {
+      webhookForm.value.open = false
+    }
+
+    async function saveWebhook() {
+      const f = webhookForm.value
+      if (!f.url) return
+      webhookFormSaving.value = true
+      try {
+        const body = {
+          name: f.name || '',
+          url: f.url,
+          events: f.events,
+          enabled: f.enabled,
+        }
+        // Only send secret if user typed one (so we don't wipe an existing one).
+        if (f.secret) body.secret = f.secret
+        const url = f.id ? '/api/webhooks/' + f.id : '/api/webhooks'
+        const method = f.id ? 'PATCH' : 'POST'
+        const res = await apiFetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Erreur')
+        await loadWebhooks()
+        closeWebhookForm()
+        showToast(f.id ? 'Webhook mis à jour' : 'Webhook créé', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        webhookFormSaving.value = false
+      }
+    }
+
+    async function deleteWebhook(id) {
+      if (!confirm('Supprimer ce webhook ?')) return
+      try {
+        const res = await apiFetch('/api/webhooks/' + id, { method: 'DELETE' })
+        if (!res.ok) throw new Error(await res.text() || 'Erreur')
+        await loadWebhooks()
+        showToast('Webhook supprimé', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      }
+    }
+
+    async function testWebhook(h) {
+      try {
+        const res = await apiFetch('/api/webhooks/' + h.id + '/test', { method: 'POST' })
+        if (!res.ok) throw new Error(await res.text() || 'Erreur')
+        showToast('Webhook de test envoyé', 'success')
+        // Refresh after a short delay so the lastStatus column updates.
+        setTimeout(() => { loadWebhooks() }, 2500)
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      }
+    }
+
     // ---- Seen tracking (localStorage) ----
     const wishlistSeenCount         = ref(parseInt(localStorage.getItem('wishlist_seen_count') || '0', 10))
     const recommendationsSeenCount  = ref(parseInt(localStorage.getItem('recommendations_seen_count') || '0', 10))
@@ -4351,6 +4587,8 @@ createApp({
       loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
       adminTokenVisible, adminCopiedUserId, copyUserOPDSUrl, regenerateUserToken,
       qrModalUser, qrModalUrl, showQRForUser, closeQRModal,
+      webhooks, webhooksLoading, webhookForm, webhookFormSaving, webhookEventOptions,
+      loadWebhooks, openWebhookForm, closeWebhookForm, saveWebhook, deleteWebhook, testWebhook,
       wishlistHasNew, recommendationsHasNew,
       myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,

@@ -631,3 +631,94 @@ type AllRecommendationsLister interface {
 	// newest first.
 	AllRecommendations() ([]Recommendation, error)
 }
+
+// Webhook event names.  Servers fire these when the corresponding action
+// happens on the catalog.  Admins subscribe to one or more of these events
+// when registering a webhook.
+const (
+	WebhookEventBookCreated = "book.created"
+	WebhookEventBookUpdated = "book.updated"
+	WebhookEventBookDeleted = "book.deleted"
+	WebhookEventBookRead    = "book.read"
+)
+
+// AllWebhookEvents is the canonical list of events that can fire a webhook.
+// Used by the admin UI for the multi-select form.
+var AllWebhookEvents = []string{
+	WebhookEventBookCreated,
+	WebhookEventBookUpdated,
+	WebhookEventBookDeleted,
+	WebhookEventBookRead,
+}
+
+// Webhook is an admin-configured HTTP callback that is notified whenever one
+// of its subscribed events occurs.  Secret (when set) is used to compute an
+// HMAC-SHA256 signature over the JSON payload, sent in the X-NxtOpds-Signature
+// header so receivers can verify the call.
+type Webhook struct {
+	// ID is a unique identifier (UUID-style hex string).
+	ID string
+
+	// Name is a short label shown in the admin UI (free-text).
+	Name string
+
+	// URL is the absolute HTTP(S) URL the JSON payload is POSTed to.
+	URL string
+
+	// Events is the list of event names this webhook is subscribed to.
+	Events []string
+
+	// Secret, when non-empty, is used to compute an HMAC-SHA256 signature
+	// of the request body and send it in the X-NxtOpds-Signature header.
+	Secret string
+
+	// Enabled controls whether the dispatcher will fire this webhook.
+	// Disabled webhooks are kept in the catalog so the admin can re-enable
+	// them without having to re-enter the URL/secret.
+	Enabled bool
+
+	// CreatedAt is when the webhook was registered.
+	CreatedAt time.Time
+
+	// LastFiredAt is the most recent time the dispatcher attempted to call
+	// this webhook (zero value = never fired).
+	LastFiredAt time.Time
+
+	// LastStatus is a short string describing the outcome of the last call
+	// (e.g. "200 OK", "timeout", "connection refused").
+	LastStatus string
+}
+
+// WebhookUpdate carries the editable fields for a webhook update.
+// Nil pointer fields are left unchanged; non-nil fields replace the value.
+type WebhookUpdate struct {
+	Name    *string
+	URL     *string
+	Events  []string // nil = unchanged, empty = clear
+	Secret  *string
+	Enabled *bool
+}
+
+// WebhookManager is an optional interface for catalog backends that support
+// managing user-defined webhooks.
+type WebhookManager interface {
+	// Webhooks returns every registered webhook, newest first.
+	Webhooks() ([]Webhook, error)
+
+	// WebhookByID returns the webhook with the given ID or an error if missing.
+	WebhookByID(id string) (*Webhook, error)
+
+	// CreateWebhook registers a new webhook and returns the stored value
+	// (with ID + CreatedAt populated).
+	CreateWebhook(name, url string, events []string, secret string, enabled bool) (*Webhook, error)
+
+	// UpdateWebhook applies the patch to the webhook with the given ID and
+	// returns the resulting record.
+	UpdateWebhook(id string, update WebhookUpdate) (*Webhook, error)
+
+	// DeleteWebhook removes the webhook with the given ID.
+	DeleteWebhook(id string) error
+
+	// RecordWebhookFire stores the outcome of an HTTP delivery attempt.
+	RecordWebhookFire(id, status string, at time.Time) error
+}

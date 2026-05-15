@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 14
+const currentSchemaVersion = 15
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -96,6 +96,25 @@ var schemaMigrations = []schemaMigration{
 	{version: 12, apply: migration12},
 	{version: 13, apply: migration13},
 	{version: 14, apply: migration14},
+	{version: 15, apply: migration15},
+}
+
+// migration15 adds the webhooks table for admin-configured HTTP callbacks
+// (version 14 → 15).
+func migration15(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS webhooks (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL DEFAULT '',
+    events        TEXT NOT NULL DEFAULT '',
+    secret        TEXT NOT NULL DEFAULT '',
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    INTEGER NOT NULL DEFAULT 0,
+    last_fired_at INTEGER NOT NULL DEFAULT 0,
+    last_status   TEXT NOT NULL DEFAULT ''
+);`)
+	return err
 }
 
 // migration14 introduces an FTS5 virtual table over (title, authors, series,
@@ -2415,4 +2434,166 @@ func (b *Backend) labelCounts(query string, args ...any) ([]catalog.LabelCount, 
 		out = append(out, lc)
 	}
 	return out, rows.Err()
+}
+
+// ─── WebhookManager ───────────────────────────────────────────────────────────
+
+func encodeWebhookEvents(events []string) string {
+	out := make([]string, 0, len(events))
+	for _, e := range events {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		out = append(out, e)
+	}
+	return strings.Join(out, ",")
+}
+
+func decodeWebhookEvents(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (b *Backend) scanWebhookRow(scan func(...any) error) (catalog.Webhook, error) {
+	var (
+		w           catalog.Webhook
+		enabledInt  int
+		createdAt   int64
+		lastFiredAt int64
+		eventsCSV   string
+	)
+	if err := scan(&w.ID, &w.Name, &w.URL, &eventsCSV, &w.Secret, &enabledInt, &createdAt, &lastFiredAt, &w.LastStatus); err != nil {
+		return w, err
+	}
+	w.Events = decodeWebhookEvents(eventsCSV)
+	w.Enabled = enabledInt != 0
+	if createdAt > 0 {
+		w.CreatedAt = time.Unix(createdAt, 0)
+	}
+	if lastFiredAt > 0 {
+		w.LastFiredAt = time.Unix(lastFiredAt, 0)
+	}
+	return w, nil
+}
+
+// Webhooks returns every registered webhook, newest first.
+func (b *Backend) Webhooks() ([]catalog.Webhook, error) {
+	rows, err := b.db.Query(`
+SELECT id, name, url, events, secret, enabled, created_at, last_fired_at, last_status
+FROM webhooks ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []catalog.Webhook
+	for rows.Next() {
+		w, err := b.scanWebhookRow(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// WebhookByID returns the webhook with the given ID.
+func (b *Backend) WebhookByID(id string) (*catalog.Webhook, error) {
+	row := b.db.QueryRow(`
+SELECT id, name, url, events, secret, enabled, created_at, last_fired_at, last_status
+FROM webhooks WHERE id = ?`, id)
+	w, err := b.scanWebhookRow(row.Scan)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("webhook %q not found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// CreateWebhook registers a new webhook.
+func (b *Backend) CreateWebhook(name, url string, events []string, secret string, enabled bool) (*catalog.Webhook, error) {
+	id, err := newID()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	enabledInt := 0
+	if enabled {
+		enabledInt = 1
+	}
+	_, err = b.db.Exec(`
+INSERT INTO webhooks (id, name, url, events, secret, enabled, created_at, last_fired_at, last_status)
+VALUES (?, ?, ?, ?, ?, ?, ?, 0, '')`,
+		id, name, url, encodeWebhookEvents(events), secret, enabledInt, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	return &catalog.Webhook{
+		ID:        id,
+		Name:      name,
+		URL:       url,
+		Events:    events,
+		Secret:    secret,
+		Enabled:   enabled,
+		CreatedAt: now,
+	}, nil
+}
+
+// UpdateWebhook updates the editable fields of an existing webhook.
+func (b *Backend) UpdateWebhook(id string, u catalog.WebhookUpdate) (*catalog.Webhook, error) {
+	existing, err := b.WebhookByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if u.Name != nil {
+		existing.Name = *u.Name
+	}
+	if u.URL != nil {
+		existing.URL = *u.URL
+	}
+	if u.Events != nil {
+		existing.Events = u.Events
+	}
+	if u.Secret != nil {
+		existing.Secret = *u.Secret
+	}
+	if u.Enabled != nil {
+		existing.Enabled = *u.Enabled
+	}
+	enabledInt := 0
+	if existing.Enabled {
+		enabledInt = 1
+	}
+	_, err = b.db.Exec(`
+UPDATE webhooks SET name=?, url=?, events=?, secret=?, enabled=? WHERE id=?`,
+		existing.Name, existing.URL, encodeWebhookEvents(existing.Events), existing.Secret, enabledInt, id)
+	if err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+// DeleteWebhook removes the webhook with the given ID.
+func (b *Backend) DeleteWebhook(id string) error {
+	_, err := b.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
+	return err
+}
+
+// RecordWebhookFire stores the outcome of an HTTP delivery attempt.
+func (b *Backend) RecordWebhookFire(id, status string, at time.Time) error {
+	_, err := b.db.Exec(`UPDATE webhooks SET last_fired_at=?, last_status=? WHERE id=?`,
+		at.Unix(), status, id)
+	return err
 }

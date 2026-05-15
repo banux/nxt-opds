@@ -25,6 +25,7 @@ A lightweight personal eBook library server written in Go, with an OPDS catalog 
 - **Two catalog backends**: in-memory (`fs`) or persistent SQLite (`sqlite`)
 - **Background refresh** — automatic rescan of the books directory
 - **Nightly SQLite backups** with configurable retention
+- **Webhooks** — admin-configured HTTP callbacks fired on book lifecycle events
 - **Single static binary** with embedded frontend; version shown in the UI footer
 
 ## Quick Start
@@ -209,8 +210,85 @@ Same paths under `/opds/v2` (JSON format).
 | `POST /api/restart`                         | Restart the server process         |
 | `POST /api/ai/chat`                         | AI assistant chat (Ollama)         |
 | `POST /mcp`                                 | MCP server endpoint                |
+| `GET /api/webhooks`                         | List webhooks (admin)              |
+| `POST /api/webhooks`                        | Create a webhook (admin)           |
+| `PATCH /api/webhooks/{id}`                  | Update a webhook (admin)           |
+| `DELETE /api/webhooks/{id}`                 | Delete a webhook (admin)           |
+| `POST /api/webhooks/{id}/test`              | Send a test ping to a webhook      |
 | `GET /health`                               | Health check                       |
 | `GET /covers/{id}`                          | Book cover image                   |
+
+## Webhooks
+
+Admins can register outbound HTTP callbacks from the admin page (`#/admin`).
+Each webhook subscribes to one or more events and receives a JSON POST whenever
+the matching event happens on the catalog.
+
+**Supported events**: `book.created`, `book.updated`, `book.deleted`, `book.read`.
+Leaving the subscription list empty subscribes the webhook to every event.
+
+**Request headers**
+
+| Header                  | Value                                                    |
+|-------------------------|----------------------------------------------------------|
+| `Content-Type`          | `application/json`                                       |
+| `User-Agent`            | `nxt-opds/webhook`                                       |
+| `X-NxtOpds-Event`       | The event name (e.g. `book.created`)                     |
+| `X-NxtOpds-Signature`   | `sha256=<hex>` HMAC of the body, only if a secret is set |
+
+**Envelope**
+
+```json
+{
+  "event": "book.created",
+  "timestamp": "2026-05-15T18:42:01Z",
+  "data": { ... event-specific payload ... }
+}
+```
+
+`book.created` / `book.updated` / `book.deleted` payloads carry the public book
+fields:
+
+```json
+{
+  "id": "a1b2c3d4...",
+  "title": "Le Petit Prince",
+  "authors": ["Antoine de Saint-Exupéry"],
+  "tags": ["jeunesse", "classique"],
+  "summary": "...",
+  "language": "fr",
+  "publisher": "Gallimard",
+  "series": "",
+  "seriesIndex": "",
+  "seriesTotal": "",
+  "collection": "Folio",
+  "collectionIndex": "",
+  "rating": 5,
+  "ageRating": 6,
+  "isRead": false,
+  "coverUrl": "/covers/a1b2c3d4",
+  "downloadUrl": "/opds/books/a1b2c3d4/download",
+  "fileType": "application/epub+zip",
+  "fileSize": 1843200
+}
+```
+
+`book.read` payload:
+
+```json
+{
+  "bookId": "a1b2c3d4...",
+  "title": "Le Petit Prince",
+  "isRead": true,
+  "userId": "u-uuid",
+  "userName": "Alice"
+}
+```
+
+Test deliveries (via the **Tester** button) use `event: "test"` with a simple
+`{ "message": "..." }` payload, bypassing the enabled flag and subscription
+list so admins can validate a fresh receiver. The last delivery status is
+recorded on the webhook row and shown back in the admin UI.
 
 ## Project Structure
 
@@ -229,6 +307,7 @@ Same paths under `/opds/v2` (JSON format).
 │   ├── opds/                 # OPDS/Atom feed types and XML serialisation
 │   ├── server/               # HTTP server, routing, handlers, auth
 │   ├── updater/              # Auto-update (GitHub releases)
+│   ├── webhooks/             # Async outbound webhook dispatcher (HMAC)
 │   └── backend/
 │       ├── fs/               # In-memory filesystem backend
 │       └── sqlite/           # SQLite-backed persistent backend
