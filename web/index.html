@@ -2905,14 +2905,30 @@
         </div>
       </div>
 
-      <!-- Thinking indicator: only before the first frame arrives -->
+      <!-- Thinking indicator with rotating label + Cancel button -->
       <div v-if="chatLoading" class="flex justify-start">
-        <div class="px-4 py-3 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700">
-          <div class="flex gap-1">
+        <div class="px-4 py-3 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700 max-w-[90%] flex items-center gap-3">
+          <div class="flex gap-1 shrink-0">
             <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay:0ms"></div>
             <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay:150ms"></div>
             <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay:300ms"></div>
           </div>
+          <span class="text-xs text-gray-600 dark:text-gray-300 italic flex-1 min-w-0">{{ chatThinkingLabel }}</span>
+          <button @click="cancelChatRequest" title="Annuler la requête"
+            class="shrink-0 text-xs text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 underline">
+            Annuler
+          </button>
+        </div>
+      </div>
+
+      <!-- Timeout banner -->
+      <div v-if="chatTimedOut && !chatLoading" class="flex justify-start">
+        <div class="px-3 py-2 rounded-2xl rounded-bl-sm bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm space-y-2">
+          <p class="text-amber-800 dark:text-amber-200">La requête a pris trop de temps.</p>
+          <button @click="retryChatMessage"
+            class="px-3 py-1 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors">
+            Réessayer
+          </button>
         </div>
       </div>
     </div>
@@ -2920,6 +2936,7 @@
     <!-- Input area -->
     <div class="shrink-0 border-t border-gray-200 dark:border-gray-700 px-3 py-3 flex gap-2">
       <input
+        ref="chatInputRef"
         v-model="chatInput"
         @keydown.enter.prevent="sendChatMessage"
         :disabled="chatLoading"
@@ -4721,6 +4738,20 @@ createApp({
     const chatInput    = ref('')
     const chatLoading  = ref(false)
     const chatScrollRef = ref(null)
+    const chatInputRef  = ref(null)
+    const chatThinkingLabel = ref('Le bibliothécaire consulte le catalogue…')
+    const chatTimedOut  = ref(false)
+    const chatRetryMessage = ref('')
+    let chatAbortController = null
+    let chatPhaseTimers = []
+
+    const CHAT_WAIT_PHRASES = [
+      'Toujours en train de chercher…',
+      'Croisement des métadonnées en cours…',
+      'Encore quelques secondes…',
+      'Analyse de votre bibliothèque…',
+    ]
+    const CHAT_TIMEOUT_MS = 60000
 
     function blocksToText(msg) {
       if (msg.content) return msg.content
@@ -4734,13 +4765,65 @@ createApp({
       })
     }
 
+    function focusChatInput() {
+      nextTick().then(() => {
+        if (chatInputRef.value) chatInputRef.value.focus()
+      })
+    }
+
+    function clearChatPhaseTimers() {
+      for (const t of chatPhaseTimers) clearTimeout(t)
+      chatPhaseTimers = []
+    }
+
+    function startChatPhaseRotation() {
+      chatThinkingLabel.value = 'Le bibliothécaire consulte le catalogue…'
+      clearChatPhaseTimers()
+      // After 8s, start rotating wait phrases every 7s.
+      let idx = 0
+      const firstDelay = setTimeout(() => {
+        chatThinkingLabel.value = CHAT_WAIT_PHRASES[idx % CHAT_WAIT_PHRASES.length]
+        idx++
+        const rotate = setInterval(() => {
+          chatThinkingLabel.value = CHAT_WAIT_PHRASES[idx % CHAT_WAIT_PHRASES.length]
+          idx++
+        }, 7000)
+        chatPhaseTimers.push(rotate)
+      }, 8000)
+      chatPhaseTimers.push(firstDelay)
+    }
+
+    function cancelChatRequest() {
+      if (chatAbortController) {
+        try { chatAbortController.abort() } catch {}
+      }
+      // Restore the original message in the input so the user can edit/resend.
+      if (chatRetryMessage.value) {
+        chatInput.value = chatRetryMessage.value
+        focusChatInput()
+      }
+    }
+
+    function retryChatMessage() {
+      if (!chatRetryMessage.value) return
+      const msg = chatRetryMessage.value
+      chatTimedOut.value = false
+      chatRetryMessage.value = ''
+      chatInput.value = msg
+      // Trigger send immediately.
+      sendChatMessage()
+    }
+
     async function sendChatMessage() {
       if (!chatInput.value.trim() || chatLoading.value) return
       const message = chatInput.value.trim()
       chatInput.value = ''
+      chatTimedOut.value = false
+      chatRetryMessage.value = message
       chatMessages.value.push({ role: 'user', blocks: [{ type: 'text', text: message }] })
       chatLoading.value = true
       scrollChatToEnd()
+      startChatPhaseRotation()
 
       // History excludes the just-pushed user message.
       const history = chatMessages.value.slice(0, -1).map(m => ({
@@ -4752,14 +4835,23 @@ createApp({
         chatMessages.value.push({ role: 'assistant', blocks: [{ type: 'text', text }] })
       }
 
+      chatAbortController = new AbortController()
+      const timeoutId = setTimeout(() => {
+        chatTimedOut.value = true
+        try { chatAbortController && chatAbortController.abort() } catch {}
+      }, CHAT_TIMEOUT_MS)
+
+      let aborted = false
       try {
         const res = await apiFetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({ message, history }),
+          signal: chatAbortController.signal,
         })
         if (res.status === 404) {
           pushAssistant('Aucun librarian appairé. Configure-le dans l\'administration.')
+          chatRetryMessage.value = ''
           return
         }
         if (!res.ok) {
@@ -4776,16 +4868,32 @@ createApp({
           return
         }
         pushAssistant((data && data.reply) || '')
+        chatRetryMessage.value = ''
       } catch (e) {
-        pushAssistant('Erreur : ' + e.message)
+        if (e && e.name === 'AbortError') {
+          aborted = true
+          if (chatTimedOut.value) {
+            // Timeout case: keep the timeout banner visible (handled by chatTimedOut).
+          } else {
+            // Manual cancel: silently abort, no message in the chat.
+          }
+        } else {
+          pushAssistant('Erreur : ' + e.message)
+        }
       } finally {
+        clearTimeout(timeoutId)
+        clearChatPhaseTimers()
+        chatAbortController = null
         chatLoading.value = false
         scrollChatToEnd()
+        if (!aborted) focusChatInput()
       }
     }
 
     function clearChat() {
       chatMessages.value = []
+      chatTimedOut.value = false
+      chatRetryMessage.value = ''
     }
 
     onMounted(async () => {
@@ -4866,7 +4974,8 @@ createApp({
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       mobileMenuOpen,
       librarianEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
-      sendChatMessage, clearChat,
+      chatInputRef, chatThinkingLabel, chatTimedOut, chatRetryMessage,
+      sendChatMessage, clearChat, cancelChatRequest, retryChatMessage,
       multiUser, currentUser,
       adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
       loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
