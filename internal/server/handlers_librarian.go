@@ -470,6 +470,68 @@ func (s *Server) handleAPILibrarianRotate(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// handleAPILibrarianForget handles POST /api/librarian/forget.
+//
+// Inbound endpoint called BY the remote librarian when it runs
+// `librarian unpair`.  The chat secret in the X-Librarian-Chat-Secret
+// header authenticates the caller; on success the local association is
+// cleared.
+//
+// Idempotent: a second call after the association is already gone returns
+// 204 No Content too — but only when the caller still presents the header
+// (so an unauthenticated probe can't differentiate "paired" vs "unpaired"
+// without trying actual secrets).
+//
+// Failure modes:
+//   - 401 missing X-Librarian-Chat-Secret header
+//   - 401 wrong secret (paired but value doesn't match stored chat_secret)
+//   - 500 backend read / clear failure
+//   - 501 catalog backend has no LibrarianAssociation impl
+func (s *Server) handleAPILibrarianForget(w http.ResponseWriter, r *http.Request) {
+	if s.librarianAssoc == nil {
+		writeJSONError(w, http.StatusNotImplemented,
+			"le backend de catalogue ne supporte pas l'appairage librarian")
+		return
+	}
+
+	// Always require the header — refuse to act as an "is anyone paired?"
+	// probe for unauthenticated callers.
+	presented := r.Header.Get(chatSecretHeader)
+	if presented == "" {
+		writeJSONError(w, http.StatusUnauthorized,
+			"en-tête "+chatSecretHeader+" manquant")
+		return
+	}
+
+	assoc, err := s.librarianAssoc.Get()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"lecture de l'association : "+err.Error())
+		return
+	}
+
+	if assoc == nil || assoc.ChatSecret == "" {
+		// No association → nothing to do.  Return 204 so the librarian's
+		// retry on a previously-handled unpair is a no-op.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Verify the secret in constant time, mirroring authenticateLibrarian.
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(assoc.ChatSecret)) != 1 {
+		writeJSONError(w, http.StatusUnauthorized,
+			"en-tête "+chatSecretHeader+" invalide")
+		return
+	}
+
+	if err := s.librarianAssoc.Clear(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"suppression de l'association : "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleAPILibrarianChat handles POST /api/ai/chat.
 //
 // It is an SSE-streaming relay to the paired librarian's /chat endpoint.

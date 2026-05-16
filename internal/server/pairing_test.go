@@ -1084,3 +1084,111 @@ func TestAPIConfig_LibrarianEnabled_TrueAfterPairing(t *testing.T) {
 		t.Errorf("librarianEnabled should be true once paired")
 	}
 }
+
+// ---- POST /api/librarian/forget (inbound) -------------------------------
+
+// TestHandleAPILibrarianForget_HappyPath verifies that with a matching
+// X-Librarian-Chat-Secret header the association is cleared and 204 is
+// returned.
+func TestHandleAPILibrarianForget_HappyPath(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst",
+		ChatSecret:        "the-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/forget", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "the-secret")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got, _ := backend.Get()
+	if got != nil {
+		t.Errorf("expected association cleared, got %+v", got)
+	}
+}
+
+// TestHandleAPILibrarianForget_IdempotentWhenAlreadyGone verifies the
+// librarian can retry forget after a previous success: with the header
+// still present, a missing association returns 204 too.
+func TestHandleAPILibrarianForget_IdempotentWhenAlreadyGone(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/forget", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "anything")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 when nothing to forget, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianForget_WrongSecret verifies a mismatched secret is
+// rejected with 401 and the association is preserved.
+func TestHandleAPILibrarianForget_WrongSecret(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst",
+		ChatSecret:        "the-real-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/forget", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "wrong")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got, _ := backend.Get()
+	if got == nil || got.ChatSecret != "the-real-secret" {
+		t.Errorf("association mutated despite 401: %+v", got)
+	}
+}
+
+// TestHandleAPILibrarianForget_MissingHeader verifies that an
+// unauthenticated probe (no header at all) is rejected even when nothing
+// is paired — refusing to act as a "is anyone paired?" oracle.
+func TestHandleAPILibrarianForget_MissingHeader(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/forget", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with no header, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianForget_PublicRoute verifies the endpoint is
+// reachable WITHOUT a session cookie / OPDS token — the librarian holds
+// only the chat secret.
+func TestHandleAPILibrarianForget_PublicRoute(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "shared-tok"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "valid",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/forget", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "valid")
+	// No cookies, no ?token=, no Basic Auth — only the header.
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("forget must be reachable without session/OPDS auth, got %d: %s",
+			rr.Code, rr.Body.String())
+	}
+}

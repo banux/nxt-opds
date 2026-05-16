@@ -206,6 +206,9 @@ func (s *Server) registerRoutes() {
 	// reason — the librarian has no session cookie.
 	r.HandleFunc("/api/librarian/rotate", s.handleAPILibrarianRotate).Methods(http.MethodPost)
 
+	// Librarian-initiated unpair: same auth as /rotate.  Public, idempotent.
+	r.HandleFunc("/api/librarian/forget", s.handleAPILibrarianForget).Methods(http.MethodPost)
+
 	// PWA assets must be publicly accessible for browser install flow
 	if s.opts.StaticFS != nil {
 		staticServer := http.FileServer(http.FS(s.opts.StaticFS))
