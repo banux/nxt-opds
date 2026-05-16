@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -527,6 +528,67 @@ func (s *Server) handleAPILibrarianForget(w http.ResponseWriter, r *http.Request
 	if err := s.librarianAssoc.Clear(); err != nil {
 		writeJSONError(w, http.StatusInternalServerError,
 			"suppression de l'association : "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPILibrarianAnnounce handles POST /api/librarian/announce.
+//
+// Inbound endpoint called BY the remote librarian whenever it starts up
+// (`librarian serve`).  Its purpose is to let a librarian that has changed
+// its public address (port flip, container relocation, hostname change)
+// re-align the LibrarianURL field of the existing association without
+// needing a full unpair / re-pair cycle.
+//
+// Authentication is via X-Librarian-Chat-Secret (same scheme as /rotate
+// and /forget).  Body: {"librarian_url":"http://..."}.
+//
+// On success the LibrarianURL is updated and the rest of the association
+// is preserved (instance, both secrets, CreatedAt) — only UpdatedAt
+// advances.  Idempotent: POSTing the same URL twice is a no-op past the
+// first call.  Returns 204 No Content.
+//
+// Failure modes:
+//   - 400 missing / malformed librarian_url (must parse as an absolute
+//     http(s):// URL)
+//   - 401 missing or wrong X-Librarian-Chat-Secret
+//   - 404 no association is currently paired
+//   - 500 backend read / write failure
+//   - 501 catalog backend has no LibrarianAssociation impl
+func (s *Server) handleAPILibrarianAnnounce(w http.ResponseWriter, r *http.Request) {
+	assoc := s.authenticateLibrarian(w, r)
+	if assoc == nil {
+		return
+	}
+
+	var req struct {
+		LibrarianURL string `json:"librarian_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "JSON invalide")
+		return
+	}
+	newURL := strings.TrimRight(strings.TrimSpace(req.LibrarianURL), "/")
+	if newURL == "" {
+		writeJSONError(w, http.StatusBadRequest, "champ requis : librarian_url")
+		return
+	}
+	parsed, err := url.Parse(newURL)
+	if err != nil || !parsed.IsAbs() || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		writeJSONError(w, http.StatusBadRequest,
+			"librarian_url doit être une URL http(s):// absolue")
+		return
+	}
+
+	if err := s.librarianAssoc.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      newURL,
+		LibrarianInstance: assoc.LibrarianInstance,
+		ChatSecret:        assoc.ChatSecret,
+		WebhookSecret:     assoc.WebhookSecret,
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"écriture de l'association : "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

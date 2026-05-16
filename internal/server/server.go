@@ -209,6 +209,11 @@ func (s *Server) registerRoutes() {
 	// Librarian-initiated unpair: same auth as /rotate.  Public, idempotent.
 	r.HandleFunc("/api/librarian/forget", s.handleAPILibrarianForget).Methods(http.MethodPost)
 
+	// Librarian-initiated URL re-announce on startup: same auth as /rotate.
+	// Lets a librarian that moved hostnames or ports realign the cached
+	// LibrarianURL without going through a full re-pair.
+	r.HandleFunc("/api/librarian/announce", s.handleAPILibrarianAnnounce).Methods(http.MethodPost)
+
 	// PWA assets must be publicly accessible for browser install flow
 	if s.opts.StaticFS != nil {
 		staticServer := http.FileServer(http.FS(s.opts.StaticFS))

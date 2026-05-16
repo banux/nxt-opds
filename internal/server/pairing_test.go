@@ -1192,3 +1192,255 @@ func TestHandleAPILibrarianForget_PublicRoute(t *testing.T) {
 			rr.Code, rr.Body.String())
 	}
 }
+
+// ---- POST /api/librarian/announce (inbound) -----------------------------
+
+// TestHandleAPILibrarianAnnounce_HappyPath verifies that with a matching
+// X-Librarian-Chat-Secret header and a well-formed librarian_url the stored
+// LibrarianURL is updated, all other fields (instance, both secrets,
+// CreatedAt) are preserved, and only UpdatedAt advances.
+func TestHandleAPILibrarianAnnounce_HappyPath(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://old.example",
+		LibrarianInstance: "inst-announce",
+		ChatSecret:        "the-secret",
+		WebhookSecret:     "the-webhook",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before, _ := backend.Get()
+	createdAt := before.CreatedAt.Unix()
+	// Sleep so UpdatedAt strictly advances (Unix-second resolution).
+	time.Sleep(1100 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+		strings.NewReader(`{"librarian_url":"http://new.example:9090"}`))
+	req.Header.Set("X-Librarian-Chat-Secret", "the-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	after, _ := backend.Get()
+	if after == nil {
+		t.Fatal("association should still exist after announce")
+	}
+	if after.LibrarianURL != "http://new.example:9090" {
+		t.Errorf("LibrarianURL should be updated: got %q", after.LibrarianURL)
+	}
+	if after.LibrarianInstance != "inst-announce" {
+		t.Errorf("instance should be preserved: got %q", after.LibrarianInstance)
+	}
+	if after.ChatSecret != "the-secret" {
+		t.Errorf("chat_secret should be preserved: got %q", after.ChatSecret)
+	}
+	if after.WebhookSecret != "the-webhook" {
+		t.Errorf("webhook_secret should be preserved: got %q", after.WebhookSecret)
+	}
+	if after.CreatedAt.Unix() != createdAt {
+		t.Errorf("CreatedAt should be preserved: was %d, now %d",
+			createdAt, after.CreatedAt.Unix())
+	}
+	if after.UpdatedAt.Unix() <= createdAt {
+		t.Errorf("UpdatedAt should advance after announce (createdAt=%d updatedAt=%d)",
+			createdAt, after.UpdatedAt.Unix())
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_TrimsTrailingSlash verifies the handler
+// strips a trailing slash from the inbound URL so callers can be sloppy
+// without producing double-slash webhook URLs later.
+func TestHandleAPILibrarianAnnounce_TrimsTrailingSlash(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://old.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "s",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+		strings.NewReader(`{"librarian_url":"https://new.example/  "}`))
+	req.Header.Set("X-Librarian-Chat-Secret", "s")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+	after, _ := backend.Get()
+	if after == nil || after.LibrarianURL != "https://new.example" {
+		t.Errorf("expected trailing slash trimmed, got %q", after.LibrarianURL)
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_Idempotent verifies that announcing the
+// same URL twice does not break anything (subsequent POST still 204) and
+// the second call still updates UpdatedAt (announce is a heartbeat-ish
+// signal; an exactly-same payload is not a hard no-op).
+func TestHandleAPILibrarianAnnounce_Idempotent(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "http://lib.example:9090",
+		LibrarianInstance: "inst",
+		ChatSecret:        "the-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	body := `{"librarian_url":"http://lib.example:9090"}`
+
+	for i, label := range []string{"first", "second"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+			strings.NewReader(body))
+		req.Header.Set("X-Librarian-Chat-Secret", "the-secret")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("call %d (%s): expected 204, got %d: %s", i, label, rr.Code, rr.Body.String())
+		}
+	}
+	after, _ := backend.Get()
+	if after == nil || after.LibrarianURL != "http://lib.example:9090" {
+		t.Errorf("URL should be unchanged after idempotent announce, got %+v", after)
+	}
+	if after.ChatSecret != "the-secret" {
+		t.Errorf("chat_secret should not have rotated: %q", after.ChatSecret)
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_MissingHeader verifies absence of the chat
+// secret header yields 401 and the stored association is untouched.
+func TestHandleAPILibrarianAnnounce_MissingHeader(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://before.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "the-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+		strings.NewReader(`{"librarian_url":"https://new.example"}`))
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with no header, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got, _ := backend.Get()
+	if got == nil || got.LibrarianURL != "https://before.example" {
+		t.Errorf("association mutated despite 401: %+v", got)
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_WrongHeader verifies a mismatched secret
+// yields 401 and the stored association is preserved verbatim.
+func TestHandleAPILibrarianAnnounce_WrongHeader(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://before.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "the-real-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+		strings.NewReader(`{"librarian_url":"https://new.example"}`))
+	req.Header.Set("X-Librarian-Chat-Secret", "wrong")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with wrong header, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got, _ := backend.Get()
+	if got == nil || got.LibrarianURL != "https://before.example" {
+		t.Errorf("association mutated despite 401: %+v", got)
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_NoAssociation verifies 404 when nothing is
+// currently paired.
+func TestHandleAPILibrarianAnnounce_NoAssociation(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+		strings.NewReader(`{"librarian_url":"https://new.example"}`))
+	req.Header.Set("X-Librarian-Chat-Secret", "anything")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when unpaired, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_BadURL verifies missing / malformed URLs
+// are rejected with 400 and the stored association is untouched.
+func TestHandleAPILibrarianAnnounce_BadURL(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"missing field", `{}`},
+		{"empty string", `{"librarian_url":""}`},
+		{"whitespace only", `{"librarian_url":"   "}`},
+		{"no scheme", `{"librarian_url":"new.example:9090"}`},
+		{"relative path", `{"librarian_url":"/instances/foo"}`},
+		{"wrong scheme", `{"librarian_url":"ftp://new.example"}`},
+		{"malformed", `{"librarian_url":"http://%zz"}`},
+		{"invalid json", `{"librarian_url":`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+			if err := backend.Set(catalog.LibrarianAssociationData{
+				LibrarianURL:      "https://before.example",
+				LibrarianInstance: "i",
+				ChatSecret:        "the-secret",
+				WebhookSecret:     "w",
+			}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+				strings.NewReader(tc.body))
+			req.Header.Set("X-Librarian-Chat-Secret", "the-secret")
+			rr := httptest.NewRecorder()
+			srv.ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+			}
+			got, _ := backend.Get()
+			if got == nil || got.LibrarianURL != "https://before.example" {
+				t.Errorf("association mutated on 400: %+v", got)
+			}
+		})
+	}
+}
+
+// TestHandleAPILibrarianAnnounce_PublicRoute verifies the endpoint is
+// reachable WITHOUT a session cookie / OPDS token — the librarian holds
+// only the chat secret.
+func TestHandleAPILibrarianAnnounce_PublicRoute(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "shared-tok"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://before.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "valid",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/announce",
+		strings.NewReader(`{"librarian_url":"http://new.example:9090"}`))
+	req.Header.Set("X-Librarian-Chat-Secret", "valid")
+	// No cookies, no ?token=, no Basic Auth — only the header.
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("announce must be reachable without session/OPDS auth, got %d: %s",
+			rr.Code, rr.Body.String())
+	}
+}

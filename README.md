@@ -184,6 +184,14 @@ button hits `DELETE /api/librarian/association`, which also best-effort
 notifies `${librarian_url}/instances/{instance}/forget` so both sides
 clean up.
 
+When the librarian process restarts (and especially when it has moved
+hostnames or ports — e.g. a container relocation), it POSTs
+`/api/librarian/announce` with `{"librarian_url":"http://..."}` and its
+`X-Librarian-Chat-Secret`. nxt-opds updates the stored `LibrarianURL`
+(preserving the instance and both secrets) so subsequent webhook fan-out
+and `/api/ai/chat` relays target the new address without any operator
+intervention.
+
 ### Librarian-related endpoints
 
 | Path                                | Auth                              | Purpose                                              |
@@ -194,6 +202,7 @@ clean up.
 | `DELETE /api/librarian/association` | admin session cookie              | Local unpair + best-effort POST `…/instances/{instance}/forget` |
 | `POST /api/librarian/rotate`        | `X-Librarian-Chat-Secret` header  | Roll both secrets without unpair/re-pair             |
 | `POST /api/librarian/forget`        | `X-Librarian-Chat-Secret` header  | Inbound unpair from the librarian side; idempotent   |
+| `POST /api/librarian/announce`      | `X-Librarian-Chat-Secret` header  | Realign `LibrarianURL` when the librarian moves host/port; preserves instance + secrets + `CreatedAt` |
 | `POST /api/ai/chat`                 | session cookie                    | SSE relay to `${librarian_url}/chat`; 404 when unpaired |
 
 The pairing-code mint and association view/delete deliberately require a
@@ -280,6 +289,7 @@ Same paths under `/opds/v2` (JSON format).
 | `DELETE /api/librarian/association`         | Unpair the librarian (admin)       |
 | `POST /api/librarian/rotate`                | Roll librarian secrets (librarian-side) |
 | `POST /api/librarian/forget`                | Inbound unpair (librarian-side)    |
+| `POST /api/librarian/announce`              | Realign LibrarianURL on librarian restart |
 | `POST /api/ai/chat`                         | SSE chat relay to the paired librarian |
 | `GET /api/webhooks`                         | List webhooks (admin)              |
 | `POST /api/webhooks`                        | Create a webhook (admin)           |
