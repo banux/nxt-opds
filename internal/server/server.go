@@ -190,6 +190,11 @@ func (s *Server) registerRoutes() {
 	r.HandleFunc("/login", s.handleLoginPost).Methods(http.MethodPost)
 	r.HandleFunc("/logout", s.handleLogout).Methods(http.MethodPost, http.MethodGet)
 
+	// Librarian pairing: authentication is provided by the one-time code in
+	// the request body, so this route must NOT be behind the session/OPDS-token
+	// auth middleware.
+	r.HandleFunc("/api/librarian/pair", s.handleAPILibrarianPair).Methods(http.MethodPost)
+
 	// PWA assets must be publicly accessible for browser install flow
 	if s.opts.StaticFS != nil {
 		staticServer := http.FileServer(http.FS(s.opts.StaticFS))

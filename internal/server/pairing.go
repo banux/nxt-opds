@@ -69,6 +69,24 @@ func (s *pairingCodeStore) Consume(code string) error {
 	return nil
 }
 
+// Validate checks the code without removing it.  Used to short-circuit the
+// pairing handshake before any side effects (DB writes, secret generation)
+// when the code is plainly wrong.  Comparison normalisation mirrors Consume.
+func (s *pairingCodeStore) Validate(code string) error {
+	normalised := normalisePairingCode(code)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune()
+	expiresAt, ok := s.codes[normalised]
+	if !ok {
+		return errPairingCodeInvalid
+	}
+	if time.Now().After(expiresAt) {
+		return errPairingCodeInvalid
+	}
+	return nil
+}
+
 // prune removes any expired entries.  Caller holds s.mu.
 func (s *pairingCodeStore) prune() {
 	now := time.Now()

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/banux/nxt-opds/internal/catalog"
 )
 
 // TestPairingCode_GenerateFormat verifies the generated code matches the
@@ -200,5 +202,246 @@ func TestHandleAPILibrarianPairingCode_NoAuth(t *testing.T) {
 	srv.ServeHTTP(rr, req)
 	if rr.Code == http.StatusOK {
 		t.Fatalf("expected non-200 for unauthenticated request, got 200: %s", rr.Body.String())
+	}
+}
+
+// ---- /api/librarian/pair endpoint ---------------------------------------
+
+// pairBody is a small helper to build a JSON pair request body.
+func pairBody(code, url, instance, label string, force bool) *strings.Reader {
+	b, _ := json.Marshal(map[string]any{
+		"code":          code,
+		"librarian_url": url,
+		"instance":      instance,
+		"label":         label,
+		"force":         force,
+	})
+	return strings.NewReader(string(b))
+}
+
+// TestHandleAPILibrarianPair_HappyPath drives a full pairing handshake on
+// a single-user server: a code is minted via the store, then exchanged via
+// POST /api/librarian/pair which must return both secrets, the mcp URL and
+// the existing OPDS token, persist the association in the catalog backend,
+// and invalidate the code.
+func TestHandleAPILibrarianPair_HappyPath(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "the-opds-tok"})
+
+	code, _, err := srv.pairingCodes.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody(code, "https://librarian.example/", "inst-7", "Salon", false))
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = "books.example.test:8080"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		MCPURL        string `json:"mcp_url"`
+		MCPToken      string `json:"mcp_token"`
+		ChatSecret    string `json:"chat_secret"`
+		WebhookSecret string `json:"webhook_secret"`
+		Instance      string `json:"instance"`
+		Label         string `json:"label"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.MCPURL != "http://books.example.test:8080/mcp" {
+		t.Errorf("mcp_url: got %q", resp.MCPURL)
+	}
+	if resp.MCPToken != "the-opds-tok" {
+		t.Errorf("mcp_token: got %q", resp.MCPToken)
+	}
+	if len(resp.ChatSecret) != 64 {
+		t.Errorf("chat_secret should be 64 hex chars, got %d (%q)", len(resp.ChatSecret), resp.ChatSecret)
+	}
+	if len(resp.WebhookSecret) != 64 {
+		t.Errorf("webhook_secret should be 64 hex chars, got %d (%q)", len(resp.WebhookSecret), resp.WebhookSecret)
+	}
+	if resp.ChatSecret == resp.WebhookSecret {
+		t.Errorf("the two secrets must differ (got same value %q)", resp.ChatSecret)
+	}
+	if resp.Instance != "inst-7" || resp.Label != "Salon" {
+		t.Errorf("instance/label echo: got %+v", resp)
+	}
+
+	// Association must be persisted with both secrets and the trimmed URL.
+	got, err := backend.Get()
+	if err != nil || got == nil {
+		t.Fatalf("association not persisted: err=%v got=%v", err, got)
+	}
+	if got.LibrarianURL != "https://librarian.example" {
+		t.Errorf("librarian_url should be trim-right-slashed: got %q", got.LibrarianURL)
+	}
+	if got.ChatSecret != resp.ChatSecret || got.WebhookSecret != resp.WebhookSecret {
+		t.Errorf("persisted secrets diverge from response")
+	}
+	if got.LibrarianInstance != "inst-7" {
+		t.Errorf("instance: got %q", got.LibrarianInstance)
+	}
+
+	// Code must be single-use: a second pair attempt with the same code
+	// should now fail with 401.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody(code, "https://librarian.example/", "inst-7", "Salon", true))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for replayed code, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianPair_NoAuthMiddleware verifies that the endpoint is
+// reachable without any login cookie or OPDS token — only the body code
+// authenticates the call.  This is critical: a librarian host pairing for
+// the first time has nothing else to present.
+func TestHandleAPILibrarianPair_NoAuthMiddleware(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "tok"})
+
+	// Bad code → still returns a JSON 401 (proves we reached the handler,
+	// the auth middleware did not redirect us to /login).
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody("XXXX-YYYY", "https://librarian.example", "inst", "", false))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid code (handler reached), got %d: %s",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianPair_MissingFields verifies field validation.
+func TestHandleAPILibrarianPair_MissingFields(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "tok"})
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"empty code", `{"code":"","librarian_url":"https://x","instance":"i"}`},
+		{"empty url", `{"code":"AAAA-BBBB","librarian_url":"","instance":"i"}`},
+		{"empty instance", `{"code":"AAAA-BBBB","librarian_url":"https://x","instance":""}`},
+		{"malformed json", `not-json`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+				strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			srv.ServeHTTP(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 for %s, got %d: %s", tc.name, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandleAPILibrarianPair_ConflictWithoutForce verifies that a second
+// pairing attempt against a server that already has an association returns
+// 409 unless `force:true` is set; force=true must replace the previous
+// secrets and URL.
+func TestHandleAPILibrarianPair_ConflictWithoutForce(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "tok"})
+
+	// Seed an existing association.
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://old.example",
+		LibrarianInstance: "old-inst",
+		ChatSecret:        "old-chat",
+		WebhookSecret:     "old-webhook",
+	}); err != nil {
+		t.Fatalf("seed association: %v", err)
+	}
+
+	code, _, _ := srv.pairingCodes.Generate()
+
+	// First attempt without force → 409.
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody(code, "https://new.example", "new-inst", "", false))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 without force, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Code must NOT have been consumed (since pairing failed before Consume).
+	if err := srv.pairingCodes.Validate(code); err != nil {
+		t.Errorf("code should still be valid after a 409, got %v", err)
+	}
+
+	// Existing association unchanged.
+	got, _ := backend.Get()
+	if got.ChatSecret != "old-chat" {
+		t.Errorf("association mutated despite 409: chat_secret=%q", got.ChatSecret)
+	}
+
+	// Second attempt WITH force → 200, association replaced.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody(code, "https://new.example", "new-inst", "", true))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 with force, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+	got, _ = backend.Get()
+	if got.LibrarianURL != "https://new.example" || got.LibrarianInstance != "new-inst" {
+		t.Errorf("force should replace the association: %+v", got)
+	}
+	if got.ChatSecret == "old-chat" || got.WebhookSecret == "old-webhook" {
+		t.Errorf("force should mint new secrets, but old ones survived")
+	}
+}
+
+// TestHandleAPILibrarianPair_NoOPDSToken verifies the endpoint refuses to
+// hand out an empty mcp_token (which would leave the librarian unable to
+// authenticate to /mcp).
+func TestHandleAPILibrarianPair_NoOPDSToken(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw" /* no OPDSToken */})
+	code, _, _ := srv.pairingCodes.Generate()
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody(code, "https://librarian.example", "i", "", false))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 with no OPDSToken, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianPair_RespectsForwardedHeaders verifies that the
+// returned mcp_url honours X-Forwarded-Proto / X-Forwarded-Host so a
+// reverse-proxy setup returns the right public URL.
+func TestHandleAPILibrarianPair_RespectsForwardedHeaders(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "tok"})
+	code, _, _ := srv.pairingCodes.Generate()
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/pair",
+		pairBody(code, "https://librarian.example", "inst", "", false))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "public.example.com")
+	req.Host = "internal:8080"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		MCPURL string `json:"mcp_url"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.MCPURL != "https://public.example.com/mcp" {
+		t.Errorf("X-Forwarded-* not honoured: mcp_url=%q", resp.MCPURL)
 	}
 }
