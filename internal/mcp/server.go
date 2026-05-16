@@ -269,7 +269,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.124.0",
+			"version": "1.125.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},

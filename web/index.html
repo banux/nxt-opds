@@ -876,7 +876,7 @@
           class="group cursor-pointer"
         >
           <!-- Cover -->
-          <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover"
+          <div class="shadow-md hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-700 book-cover relative"
                :class="showReadBanner(book) ? 'rounded-t-lg mb-0' : 'rounded-lg mb-2'">
             <img
               v-if="book.coverUrl"
@@ -893,6 +893,13 @@
               </svg>
               <span class="text-white/80 text-xs text-center leading-tight line-clamp-2 font-medium">{{ book.title }}</span>
             </div>
+            <!-- Spice mini-indicator (top-right) -->
+            <span v-if="book.spiceRating > 0"
+                  class="absolute top-1 right-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shadow-sm leading-none"
+                  :class="spiceBadgeClass(book.spiceRating)"
+                  :title="'Piment : ' + spiceLabel(book.spiceRating)">
+              🌶 {{ book.spiceRating }}
+            </span>
           </div>
           <!-- Read banner (below cover) -->
           <div v-if="showReadBanner(book)"
@@ -1112,12 +1119,15 @@
           </div>
 
           <!-- Age rating badge -->
-          <div v-if="currentBook.ageRating > 0" class="flex items-center gap-2 mb-4 flex-wrap">
-            <span class="text-xs font-semibold px-2.5 py-1 rounded-full" :class="ageRatingBadgeClass(currentBook.ageRating)">
-              {{ ageRatingLabel(currentBook.ageRating) }}
-            </span>
-            <span class="text-xs text-gray-400 dark:text-gray-500">Classification d'âge</span>
-            <span v-if="currentBook.ageRating >= 16 && currentBook.spiceRating > 0"
+          <div v-if="currentBook.ageRating > 0 || currentBook.spiceRating > 0"
+               class="flex items-center gap-2 mb-4 flex-wrap">
+            <template v-if="currentBook.ageRating > 0">
+              <span class="text-xs font-semibold px-2.5 py-1 rounded-full" :class="ageRatingBadgeClass(currentBook.ageRating)">
+                {{ ageRatingLabel(currentBook.ageRating) }}
+              </span>
+              <span class="text-xs text-gray-400 dark:text-gray-500">Classification d'âge</span>
+            </template>
+            <span v-if="currentBook.spiceRating > 0"
               class="text-xs font-semibold px-2.5 py-1 rounded-full"
               :class="spiceBadgeClass(currentBook.spiceRating)"
               :title="spiceLabel(currentBook.spiceRating)">
@@ -2671,7 +2681,7 @@
           </select>
         </div>
 
-        <div v-if="editForm.ageRating >= 16">
+        <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             <span class="mr-1">🌶</span>Intensité (contenu sexuel)
           </label>
@@ -2684,6 +2694,12 @@
             <option :value="4">4 – Explicite récurrent</option>
             <option :value="5">5 – Très explicite / érotique</option>
           </select>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Plus pertinent sur les livres 16+/18+.
+            <span v-if="editForm.spiceRating >= 3 && editForm.ageRating < 16" class="text-amber-600 dark:text-amber-400 font-medium">
+              Conseil : classer ce livre en 16+ ou 18+.
+            </span>
+          </p>
         </div>
       </div>
 
@@ -3859,7 +3875,7 @@ createApp({
           collection:      editForm.value.collection,
           collectionIndex: editForm.value.collectionIndex,
           ageRating:       editForm.value.ageRating,
-          spiceRating:     editForm.value.ageRating >= 16 ? editForm.value.spiceRating : 0,
+          spiceRating:     editForm.value.spiceRating,
         }
         const res = await apiFetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',
