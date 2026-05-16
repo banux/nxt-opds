@@ -17,6 +17,7 @@ A lightweight personal eBook library server written in Go, with an OPDS catalog 
 - **Wishlist** — personal reading wish list, exposed in OPDS feeds
 - **Recommendations** — send a book recommendation to another user
 - **Integrated EPUB reader** with prev/next book navigation and swipe/keyboard support
+- **Librarian pairing** — pair an external "librarian" service to enable an SSE-streaming chat assistant (uses the MCP server under the hood)
 - **MCP server** — AI agent access to the catalog over the Model Context Protocol
 - **Auto-update** — download and apply a new binary from GitHub releases in one click
 - **PWA** — installable as a web app with offline service worker
@@ -130,6 +131,75 @@ nxt-opds exposes a [Model Context Protocol](https://modelcontextprotocol.io) end
 
 Authentication uses the same OPDS bearer token (`?token=<value>` or `Authorization: Bearer` header).
 
+## Librarian
+
+nxt-opds has no embedded LLM. The chat assistant in the UI is a thin SSE
+proxy in front of a **librarian** — a separate service you run somewhere
+(typically next to a model provider). Once paired, the librarian gets
+authenticated access to this server's MCP endpoint and can manipulate the
+catalog on your behalf.
+
+### Topology
+
+```
+┌──────────────┐   POST /api/ai/chat       ┌──────────────┐
+│ Vue chat box │ ────────────────────────► │   nxt-opds   │
+│ (SSE reader) │ ◄──── text/event-stream ──│  (this app)  │
+└──────────────┘                           └──────┬───────┘
+                                                  │
+                  Bearer chat_secret              │  Bearer chat_secret
+                  POST ${librarian_url}/chat ◄────┤
+                                                  │
+                  X-Signature HMAC(webhook_secret)│  X-NxtOpds-Event book.*
+                  POST ${librarian_url}/webhooks/ │
+                       ${instance}/book-event ◄───┘
+```
+
+Two parallel channels: the chat relay is request-driven (a user types →
+SSE response streamed back); the webhook fan-out is push-driven (every
+`book.created` / `book.updated` / `book.deleted` / `book.read` event also
+hits the librarian alongside any admin-configured webhooks).
+
+### Pairing flow
+
+1. An admin opens **Administration → Librarian → Associer un librarian** in
+   the web UI. nxt-opds mints a single-use code (`XXXX-XXXX`, ~40 bits
+   entropy, 10-minute TTL) and shows it in a modal.
+2. On the librarian host, run the bundled CLI:
+   ```bash
+   librarian pair --nxt-opds https://books.example --code ABCD-1234
+   ```
+3. The CLI hits `POST /api/librarian/pair` with the code. nxt-opds mints
+   two 32-byte hex secrets, persists the association, invalidates the
+   code, and returns `{mcp_url, mcp_token, chat_secret, webhook_secret,
+   instance, label}`. The librarian stores those.
+4. After pairing, `/api/config` flips `librarianEnabled` to `true` and the
+   chat box appears in the SPA. Book lifecycle events start fanning out
+   to the librarian automatically.
+
+To rotate the secrets the librarian POSTs `/api/librarian/rotate` with
+its current `X-Librarian-Chat-Secret`; to unpair from the librarian side
+it POSTs `/api/librarian/forget`; from the admin UI a **Désappairer**
+button hits `DELETE /api/librarian/association`, which also best-effort
+notifies `${librarian_url}/instances/{instance}/forget` so both sides
+clean up.
+
+### Librarian-related endpoints
+
+| Path                                | Auth                              | Purpose                                              |
+|-------------------------------------|-----------------------------------|------------------------------------------------------|
+| `POST /api/librarian/pairing-code`  | admin session cookie              | Mint a one-time `XXXX-XXXX` pairing code (10-min TTL) |
+| `POST /api/librarian/pair`          | body `code`                       | Exchange the code for secrets + mcp_url + mcp_token  |
+| `GET  /api/librarian/association`   | admin session cookie              | View paired librarian (URL + instance only — no secrets); 204 when unpaired |
+| `DELETE /api/librarian/association` | admin session cookie              | Local unpair + best-effort POST `…/instances/{instance}/forget` |
+| `POST /api/librarian/rotate`        | `X-Librarian-Chat-Secret` header  | Roll both secrets without unpair/re-pair             |
+| `POST /api/librarian/forget`        | `X-Librarian-Chat-Secret` header  | Inbound unpair from the librarian side; idempotent   |
+| `POST /api/ai/chat`                 | session cookie                    | SSE relay to `${librarian_url}/chat`; 404 when unpaired |
+
+The pairing-code mint and association view/delete deliberately require a
+real **session cookie** so a leaked OPDS reader URL or shared token
+cannot start, view or break a pairing.
+
 ## API Endpoints
 
 ### Web UI
@@ -204,6 +274,13 @@ Same paths under `/opds/v2` (JSON format).
 | `POST /api/update/apply`                    | Download and apply the new binary  |
 | `POST /api/restart`                         | Restart the server process         |
 | `POST /mcp`                                 | MCP server endpoint                |
+| `POST /api/librarian/pairing-code`          | Mint a one-time pairing code (admin) |
+| `POST /api/librarian/pair`                  | Exchange a pairing code for secrets |
+| `GET  /api/librarian/association`           | View paired librarian (admin)      |
+| `DELETE /api/librarian/association`         | Unpair the librarian (admin)       |
+| `POST /api/librarian/rotate`                | Roll librarian secrets (librarian-side) |
+| `POST /api/librarian/forget`                | Inbound unpair (librarian-side)    |
+| `POST /api/ai/chat`                         | SSE chat relay to the paired librarian |
 | `GET /api/webhooks`                         | List webhooks (admin)              |
 | `POST /api/webhooks`                        | Create a webhook (admin)           |
 | `PATCH /api/webhooks/{id}`                  | Update a webhook (admin)           |
@@ -283,6 +360,15 @@ Test deliveries (via the **Tester** button) use `event: "test"` with a simple
 `{ "message": "..." }` payload, bypassing the enabled flag and subscription
 list so admins can validate a fresh receiver. The last delivery status is
 recorded on the webhook row and shown back in the admin UI.
+
+### Librarian fan-out
+
+When a librarian is paired, the same envelope is also POSTed to
+`${librarian_url}/webhooks/${librarian_instance}/book-event` with
+`X-NxtOpds-Event` and an `X-Signature` HMAC computed using the
+`webhook_secret` minted at pairing time. This target is **not** part of
+the admin webhooks list — it is wired by the pairing handshake and is
+hidden from the admin UI on purpose. To stop it, unpair the librarian.
 
 ## Project Structure
 
