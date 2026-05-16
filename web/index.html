@@ -2895,12 +2895,43 @@
         :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
         <div :class="msg.role === 'user'
           ? 'max-w-[80%] px-3 py-2 rounded-2xl rounded-br-sm bg-violet-600 text-white text-sm'
-          : 'max-w-[90%] px-3 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm'">
-          <pre class="whitespace-pre-wrap font-sans">{{ msg.content }}</pre>
+          : 'max-w-[90%] px-3 py-2 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm space-y-1.5'">
+          <template v-for="(b, j) in (msg.blocks && msg.blocks.length ? msg.blocks : [{type:'text', text: msg.content || ''}])" :key="j">
+            <pre v-if="b.type === 'text'" class="whitespace-pre-wrap font-sans">{{ b.text }}</pre>
+            <div v-else-if="b.type === 'tool_call'"
+              class="text-xs border border-violet-300/40 dark:border-violet-700/40 bg-violet-50/60 dark:bg-violet-900/20 rounded-lg overflow-hidden">
+              <button @click="b.open = !b.open"
+                class="w-full flex items-center justify-between px-2 py-1 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  </svg>
+                  <span class="font-mono">{{ b.name || 'tool' }}</span>
+                </span>
+                <span>{{ b.open ? '▾' : '▸' }}</span>
+              </button>
+              <pre v-if="b.open" class="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 whitespace-pre-wrap font-mono overflow-x-auto">{{ formatToolPayload(b.input) }}</pre>
+            </div>
+            <div v-else-if="b.type === 'tool_result'"
+              class="text-xs border border-emerald-300/40 dark:border-emerald-700/40 bg-emerald-50/60 dark:bg-emerald-900/20 rounded-lg overflow-hidden">
+              <button @click="b.open = !b.open"
+                class="w-full flex items-center justify-between px-2 py-1 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+                  </svg>
+                  <span class="font-mono">résultat{{ b.name ? ' · ' + b.name : '' }}</span>
+                </span>
+                <span>{{ b.open ? '▾' : '▸' }}</span>
+              </button>
+              <pre v-if="b.open" class="px-2 py-1 text-[10px] bg-white dark:bg-gray-800 whitespace-pre-wrap font-mono overflow-x-auto">{{ formatToolPayload(b.output) }}</pre>
+            </div>
+          </template>
         </div>
       </div>
 
-      <!-- Thinking indicator -->
+      <!-- Thinking indicator: only before the first frame arrives -->
       <div v-if="chatLoading" class="flex justify-start">
         <div class="px-4 py-3 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-700">
           <div class="flex gap-1">
@@ -4667,38 +4698,177 @@ createApp({
       updateError.value = 'Le serveur ne répond pas après le redémarrage. Veuillez recharger la page manuellement.'
     }
 
-    // ---- AI Chat ----
+    // ---- AI Chat (librarian SSE relay) ----
+    // Message shape:
+    //   { role: 'user' | 'assistant', blocks: [{type, ...}] }
+    // Block types:
+    //   { type:'text', text:'…' }
+    //   { type:'tool_call', name:'…', input:any, open:bool }
+    //   { type:'tool_result', name:'…', output:any, open:bool }
     const aiEnabled    = ref(false)
     const chatOpen     = ref(false)
-    const chatMessages = ref([]) // [{role:'user'|'assistant', content:string}]
+    const chatMessages = ref([])
     const chatInput    = ref('')
     const chatLoading  = ref(false)
     const chatScrollRef = ref(null)
 
+    function blocksToText(msg) {
+      if (msg.content) return msg.content
+      if (!msg.blocks) return ''
+      return msg.blocks.filter(b => b.type === 'text').map(b => b.text).join('')
+    }
+
+    function formatToolPayload(v) {
+      if (v == null) return ''
+      if (typeof v === 'string') return v
+      try { return JSON.stringify(v, null, 2) } catch { return String(v) }
+    }
+
+    function scrollChatToEnd() {
+      nextTick().then(() => {
+        if (chatScrollRef.value) chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
+      })
+    }
+
+    function pushAssistantText(asst, text) {
+      const last = asst.blocks[asst.blocks.length - 1]
+      if (last && last.type === 'text') {
+        last.text += text
+      } else {
+        asst.blocks.push({ type: 'text', text })
+      }
+    }
+
+    function safeParseJSON(s) {
+      try { return JSON.parse(s) } catch { return null }
+    }
+
+    // parseSSEStream reads `response.body` as a stream of SSE frames and calls
+    // onFrame(event, data) for each one.  Returning 'stop' from onFrame
+    // cancels the reader.  Handles split chunks (an event boundary can fall
+    // mid-chunk) and CRLF / LF separators.
+    async function parseSSEStream(response, onFrame) {
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          // Normalise CRLF → LF so the boundary detection stays simple.
+          buffer = buffer.replace(/\r\n/g, '\n')
+          let idx
+          while ((idx = buffer.indexOf('\n\n')) >= 0) {
+            const raw = buffer.slice(0, idx)
+            buffer = buffer.slice(idx + 2)
+            let evt = 'message'
+            const dataLines = []
+            for (const line of raw.split('\n')) {
+              if (line.startsWith('event:'))      evt = line.slice(6).trim()
+              else if (line.startsWith('data:'))  dataLines.push(line.slice(5).replace(/^ /, ''))
+              // Comments and other field types ignored.
+            }
+            if (dataLines.length === 0 && evt === 'message') continue
+            const result = onFrame(evt, dataLines.join('\n'))
+            if (result === 'stop') {
+              try { await reader.cancel() } catch {}
+              return
+            }
+          }
+        }
+      } finally {
+        try { reader.releaseLock() } catch {}
+      }
+    }
+
     async function sendChatMessage() {
       if (!chatInput.value.trim() || chatLoading.value) return
-      const prompt = chatInput.value.trim()
+      const message = chatInput.value.trim()
       chatInput.value = ''
-      chatMessages.value.push({ role: 'user', content: prompt })
+      chatMessages.value.push({ role: 'user', blocks: [{ type: 'text', text: message }] })
+      // Pre-allocate the assistant message; text frames will stream into it.
+      const asst = { role: 'assistant', blocks: [] }
+      chatMessages.value.push(asst)
+      const assistantIndex = chatMessages.value.length - 1
       chatLoading.value = true
+      scrollChatToEnd()
+
+      // History excludes the just-pushed user message and the empty assistant.
+      const history = chatMessages.value.slice(0, -2).map(m => ({
+        role: m.role,
+        content: blocksToText(m),
+      }))
+
+      const liveAsst = () => chatMessages.value[assistantIndex]
+
       try {
-        // Build history excluding the latest user message we just pushed.
-        const history = chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
         const res = await apiFetch('/api/ai/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, history }),
+          headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+          body: JSON.stringify({ message, history }),
         })
-        if (!res.ok) throw new Error('HTTP ' + res.status)
-        const data = await res.json()
-        if (data.error) throw new Error(data.error)
-        chatMessages.value.push({ role: 'assistant', content: data.response })
+        if (res.status === 404) {
+          chatLoading.value = false
+          pushAssistantText(liveAsst(), 'Aucun librarian appairé. Configure-le dans l\'administration.')
+          return
+        }
+        if (!res.ok || !res.body) {
+          chatLoading.value = false
+          pushAssistantText(liveAsst(), 'Erreur : HTTP ' + res.status)
+          return
+        }
+
+        await parseSSEStream(res, (evt, data) => {
+          // First frame: dismiss the typing indicator.
+          if (chatLoading.value) chatLoading.value = false
+
+          const target = liveAsst()
+          switch (evt) {
+            case 'text': {
+              pushAssistantText(target, data)
+              break
+            }
+            case 'tool_call': {
+              const parsed = safeParseJSON(data) || { input: data }
+              target.blocks.push({
+                type:  'tool_call',
+                name:  parsed.name  || parsed.tool || 'tool',
+                input: parsed.input != null ? parsed.input : parsed,
+                open:  false,
+              })
+              break
+            }
+            case 'tool_result': {
+              const parsed = safeParseJSON(data) || { output: data }
+              target.blocks.push({
+                type:   'tool_result',
+                name:   parsed.name || parsed.tool || '',
+                output: parsed.output != null ? parsed.output
+                      : parsed.result != null ? parsed.result
+                      : parsed,
+                open:   false,
+              })
+              break
+            }
+            case 'error': {
+              const parsed = safeParseJSON(data) || {}
+              pushAssistantText(target, 'Erreur : ' + (parsed.error || data))
+              return 'stop'
+            }
+            case 'done':
+              return 'stop'
+            default:
+              // Unknown event: render as text so nothing is silently dropped.
+              if (data) pushAssistantText(target, data)
+          }
+          scrollChatToEnd()
+        })
       } catch (e) {
-        chatMessages.value.push({ role: 'assistant', content: 'Erreur : ' + e.message })
+        pushAssistantText(liveAsst(), 'Erreur : ' + e.message)
       } finally {
         chatLoading.value = false
-        await nextTick()
-        if (chatScrollRef.value) chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
+        scrollChatToEnd()
       }
     }
 
@@ -4784,7 +4954,7 @@ createApp({
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       mobileMenuOpen,
       aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
-      sendChatMessage, clearChat,
+      sendChatMessage, clearChat, formatToolPayload,
       multiUser, currentUser,
       adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
       loadAdminUsers, saveAdminUser, editAdminUser, deleteAdminUser, resetAdminUserForm,
