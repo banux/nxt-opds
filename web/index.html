@@ -720,118 +720,193 @@
 
       <!-- Filter bar -->
       <div class="mb-4">
-        <!-- Count text + sort: always two-item row on mobile, inline on sm+ -->
-        <div class="flex items-center justify-between mb-2 sm:hidden">
-          <p class="text-sm text-gray-500 dark:text-gray-400">
+        <!-- Row 1 — pinned essentials: sort + filters button (search is in the header) -->
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <!-- Count text -->
+          <p class="text-sm text-gray-500 dark:text-gray-400 mr-auto">
             <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
             <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
             <span v-else-if="notIndexedOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non indexé{{ total !== 1 ? 's' : '' }}</span>
             <span v-else-if="ageRatingFilter.length > 0">{{ total }} livre{{ total !== 1 ? 's' : '' }} classifiés</span>
             <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }}</span>
           </p>
+
+          <!-- Tags management link -->
+          <a @click="navigateTo('/tags')"
+            class="hidden sm:flex shrink-0 items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+            </svg>
+            <span>Étiquettes</span>
+          </a>
+
+          <!-- Sort selector -->
           <select v-model="sortOrder" @change="onSortChange"
-            class="text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer">
-            <option value="added_desc">Récent</option>
-            <option value="added_asc">Ancien</option>
-            <option value="title_asc">A→Z</option>
-            <option value="title_desc">Z→A</option>
-          </select>
-        </div>
-
-        <!-- Pills row: scrollable on mobile, wraps on sm+ -->
-        <div class="pills-scroll flex overflow-x-auto sm:flex-wrap sm:items-center gap-3 pb-2 sm:pb-0 -mx-4 sm:mx-0 px-4 sm:px-0">
-        <p class="text-sm text-gray-500 dark:text-gray-400 shrink-0 hidden sm:block">
-          <span v-if="searchQuery">{{ total }} résultat{{ total !== 1 ? 's' : '' }} pour « <strong>{{ searchQuery }}</strong> »</span>
-          <span v-else-if="unreadOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non lu{{ total !== 1 ? 's' : '' }}</span>
-          <span v-else-if="notIndexedOnly">{{ total }} livre{{ total !== 1 ? 's' : '' }} non indexé{{ total !== 1 ? 's' : '' }}</span>
-          <span v-else-if="ageRatingFilter.length > 0">{{ total }} livre{{ total !== 1 ? 's' : '' }} dans cette classification</span>
-          <span v-else>{{ total }} livre{{ total !== 1 ? 's' : '' }} dans la bibliothèque</span>
-        </p>
-
-        <!-- Unread filter toggle -->
-        <button @click="toggleUnreadFilter"
-          :class="unreadOnly
-            ? 'bg-brand-600 text-white border-brand-600'
-            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-600 hover:text-brand-600'"
-          class="flex shrink-0 items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
-          </svg>
-          <span class="whitespace-nowrap">Non lus</span>
-        </button>
-
-        <!-- Not-indexed filter toggle -->
-        <button @click="toggleNotIndexedFilter"
-          :class="notIndexedOnly
-            ? 'bg-orange-500 text-white border-orange-500'
-            : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-orange-500 hover:text-orange-500'"
-          class="flex shrink-0 items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          <span class="whitespace-nowrap">Non indexés</span>
-        </button>
-
-        <!-- Age rating filter chips -->
-        <template v-for="ar in [{v:-1,l:'?'},{v:3,l:'3+'},{v:6,l:'6+'},{v:10,l:'10+'},{v:12,l:'12+'},{v:16,l:'16+'},{v:18,l:'18+'}]" :key="ar.v">
-          <button @click="toggleAgeRating(ar.v)"
-            :class="ageRatingFilter.includes(ar.v)
-              ? 'bg-pink-500 text-white border-pink-500'
-              : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-pink-500 hover:text-pink-500'"
-            class="shrink-0 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
-            {{ ar.l }}
-          </button>
-        </template>
-
-        <!-- Series size filter chips -->
-        <template v-for="ss in [{v:'standalone',l:'Tome unique'},{v:'short',l:'Saga 2-3'},{v:'medium',l:'Saga 4-7'},{v:'long',l:'Saga 8+'}]" :key="ss.v">
-          <button @click="setSeriesSizeFilter(ss.v)"
-            :class="seriesSizeFilter === ss.v
-              ? 'bg-indigo-500 text-white border-indigo-500'
-              : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-500'"
-            class="shrink-0 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
-            {{ ss.l }}
-          </button>
-        </template>
-
-        <!-- Spice exact filter — hidden for child profiles -->
-        <template v-if="!(currentUser && currentUser.isChild)">
-          <template v-for="sm in [{v:0,l:'🌶 0 Sans'},{v:1,l:'🌶 1 Suggestif'},{v:2,l:'🌶 2 Sensuel'},{v:3,l:'🌶 3 Explicite'},{v:4,l:'🌶 4 Récurrent'},{v:5,l:'🌶 5 Érotique'}]" :key="sm.v">
-            <button @click="setSpiceExactFilter(sm.v)"
-              :title="'Filtre exact 16+/18+ : intensité ' + sm.v"
-              :class="spiceExactFilter === sm.v
-                ? 'bg-red-500 text-white border-red-500'
-                : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-red-500 hover:text-red-500'"
-              class="shrink-0 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
-              {{ sm.l }}
-            </button>
-          </template>
-        </template>
-
-        <!-- Tags management link -->
-        <a @click="navigateTo('/tags')"
-          class="flex shrink-0 items-center gap-1 px-3 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
-          </svg>
-          <span class="whitespace-nowrap">Étiquettes</span>
-        </a>
-
-        <!-- Sort selector (hidden on mobile — shown in the row above) -->
-        <div class="hidden sm:flex ml-auto items-center gap-1.5 shrink-0">
-          <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9M3 12h5m10 4l-4-4 4-4"/>
-          </svg>
-          <select v-model="sortOrder" @change="onSortChange"
-            class="text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer">
+            aria-label="Trier"
+            class="text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer">
             <option value="added_desc">Ajout récent</option>
             <option value="added_asc">Ajout ancien</option>
             <option value="title_asc">Titre A→Z</option>
             <option value="title_desc">Titre Z→A</option>
           </select>
+
+          <!-- Filters button with active count badge -->
+          <button @click="filtersOpen = true"
+            class="relative flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+            </svg>
+            <span>Filtres</span>
+            <span v-if="activeFilterCount > 0"
+              class="ml-0.5 min-w-[1.25rem] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-brand-600 text-white text-xs font-semibold">
+              {{ activeFilterCount }}
+            </span>
+          </button>
         </div>
-        </div><!-- end pills row -->
+
+        <!-- Row 2 — active filter chips (only when at least one filter is active) -->
+        <div v-if="activeFilterChips.length > 0" class="flex flex-wrap items-center gap-1.5 mb-2">
+          <span v-for="chip in activeFilterChips" :key="chip.key"
+            class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 text-xs font-medium border border-brand-200 dark:border-brand-800">
+            {{ chip.label }}
+            <button @click="removeFilter(chip.key)"
+              class="ml-0.5 p-0.5 rounded-full hover:bg-brand-100 dark:hover:bg-brand-800/40"
+              :aria-label="'Retirer ' + chip.label">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </span>
+          <button @click="clearAllFilters"
+            class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline ml-1">
+            Tout effacer
+          </button>
+        </div>
       </div><!-- end filter bar -->
+
+      <!-- Filter drawer / popover -->
+      <div v-if="filtersOpen"
+        @click.self="filtersOpen = false"
+        class="fixed inset-0 z-40 bg-black/40 sm:bg-black/20 flex items-end sm:items-start justify-center sm:justify-end p-0 sm:p-6">
+        <div class="w-full sm:w-[28rem] max-h-[88vh] sm:max-h-[80vh] bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl flex flex-col"
+             @click.stop>
+          <!-- Header (sticky) -->
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">Filtres</h2>
+            <button @click="filtersOpen = false"
+              class="p-1 -mr-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" aria-label="Fermer">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Body (scrollable) -->
+          <div class="flex-1 overflow-y-auto">
+            <!-- Section: Lecture -->
+            <div class="px-4 py-4 border-b border-gray-100 dark:border-gray-700">
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3">Lecture</h3>
+              <div class="grid grid-cols-2 gap-2">
+                <button @click="toggleUnreadFilter"
+                  :class="unreadOnly
+                    ? 'bg-brand-600 text-white border-brand-600'
+                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-brand-600 hover:text-brand-600 dark:hover:text-brand-300'"
+                  class="px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors text-left">
+                  Non lus seulement
+                </button>
+                <button @click="toggleNotIndexedFilter"
+                  :class="notIndexedOnly
+                    ? 'bg-orange-500 text-white border-orange-500'
+                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-orange-500 hover:text-orange-500'"
+                  class="px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors text-left">
+                  Non indexés
+                </button>
+              </div>
+            </div>
+
+            <!-- Section: Classification d'âge -->
+            <div class="px-4 py-4 border-b border-gray-100 dark:border-gray-700">
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3">Classification d'âge</h3>
+              <div class="flex flex-wrap gap-1.5">
+                <button v-for="ar in ageRatingsForUser" :key="ar.v"
+                  @click="toggleAgeRating(ar.v)"
+                  :class="ageRatingFilter.includes(ar.v)
+                    ? 'bg-pink-500 text-white border-pink-500'
+                    : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-pink-500 hover:text-pink-500'"
+                  class="px-3 py-1.5 rounded-full text-xs font-medium border transition-colors">
+                  {{ ar.l }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Section: Avancé (collapsible) -->
+            <div class="px-4 py-3">
+              <button @click="toggleAdvancedExpanded"
+                class="w-full flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                <span>Avancé</span>
+                <svg class="w-4 h-4 transition-transform" :class="advancedExpanded ? 'rotate-180' : ''"
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </button>
+              <div v-if="advancedExpanded" class="mt-3 space-y-4">
+                <!-- Taille de série -->
+                <div>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Taille de série</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button v-for="ss in seriesSizes" :key="ss.v"
+                      @click="setSeriesSizeFilter(ss.v)"
+                      :class="seriesSizeFilter === ss.v
+                        ? 'bg-indigo-500 text-white border-indigo-500'
+                        : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-indigo-500 hover:text-indigo-500'"
+                      class="px-3 py-1.5 rounded-full text-xs font-medium border transition-colors">
+                      {{ ss.l }}
+                    </button>
+                  </div>
+                </div>
+                <!-- Piment (caché pour profil enfant) -->
+                <div v-if="!(currentUser && currentUser.isChild)">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Piment (intensité exacte)</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button v-for="sp in [0,1,2,3,4,5]" :key="sp"
+                      @click="setSpiceExactFilter(sp)"
+                      :title="spiceLabel(sp)"
+                      :class="spiceExactFilter === sp
+                        ? 'bg-red-500 text-white border-red-500'
+                        : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-red-500 hover:text-red-500'"
+                      class="px-3 py-1.5 rounded-full text-xs font-medium border transition-colors">
+                      🌶 {{ sp }}
+                    </button>
+                  </div>
+                </div>
+                <!-- Étiquettes (mobile only — desktop has the link in row 1) -->
+                <div class="sm:hidden">
+                  <a @click="filtersOpen = false; navigateTo('/tags')"
+                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                    </svg>
+                    Gérer les étiquettes
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer (sticky) -->
+          <div class="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <button @click="clearAllFilters"
+              :disabled="activeFilterCount === 0"
+              class="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">
+              Tout effacer
+            </button>
+            <button @click="filtersOpen = false"
+              class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg">
+              Voir les résultats
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- Loading spinner -->
       <div v-if="loading" class="flex justify-center items-center py-24">
@@ -3054,6 +3129,34 @@ createApp({
     const sortOrder         = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
+    // ---- Filter drawer ----
+    const filtersOpen = ref(false)
+    const advancedExpanded = ref(localStorage.getItem('nxt-filters-advanced') === '1')
+    function toggleAdvancedExpanded() {
+      advancedExpanded.value = !advancedExpanded.value
+      localStorage.setItem('nxt-filters-advanced', advancedExpanded.value ? '1' : '0')
+    }
+
+    const seriesSizes = [
+      { v: 'standalone', l: 'Tome unique' },
+      { v: 'short',      l: 'Saga 2-3' },
+      { v: 'medium',     l: 'Saga 4-7' },
+      { v: 'long',       l: 'Saga 8+' },
+    ]
+    const seriesSizeLabel = (v) => {
+      const s = seriesSizes.find(x => x.v === v)
+      return s ? s.l : v
+    }
+    const _ageRatings = [
+      { v: -1, l: 'Non classifié' },
+      { v: 3,  l: '3+' },
+      { v: 6,  l: '6+' },
+      { v: 10, l: '10+' },
+      { v: 12, l: '12+' },
+      { v: 16, l: '16+' },
+      { v: 18, l: '18+' },
+    ]
+
     const totalPages = computed(() => Math.ceil(total.value / PAGE_SIZE))
 
     // Page numbers with ellipsis
@@ -3154,6 +3257,74 @@ createApp({
       } else {
         localStorage.removeItem('nxt-spice')
       }
+      page.value = 1
+      loadBooks()
+    }
+
+    // Age rating options available to the current viewer — child profiles
+    // never see 16+/18+ because those values are masked server-side anyway.
+    const ageRatingsForUser = computed(() => {
+      const max = currentUser.value?.isChild ? (currentUser.value?.maxAge || 12) : 18
+      return _ageRatings.filter(ar => ar.v === -1 || ar.v <= max)
+    })
+
+    // Number of non-empty filters (excludes search and sort — they live in
+    // the pinned row and are not "filters" per se).
+    const activeFilterCount = computed(() => {
+      let n = 0
+      if (unreadOnly.value) n++
+      if (notIndexedOnly.value) n++
+      n += ageRatingFilter.value.length
+      if (seriesSizeFilter.value) n++
+      if (spiceExactFilter.value >= 0) n++
+      return n
+    })
+
+    // Removable chips representing each active filter.
+    // For age-rating (multi-select), emit one chip per selected value so each
+    // can be removed individually with key "age:<v>".
+    const activeFilterChips = computed(() => {
+      const chips = []
+      if (unreadOnly.value) chips.push({ key: 'unread', label: 'Non lus seulement' })
+      if (notIndexedOnly.value) chips.push({ key: 'notIndexed', label: 'Non indexés' })
+      for (const v of ageRatingFilter.value) {
+        chips.push({ key: 'age:' + v, label: 'Âge : ' + ageRatingLabel(v) })
+      }
+      if (seriesSizeFilter.value) {
+        chips.push({ key: 'series', label: 'Saga : ' + seriesSizeLabel(seriesSizeFilter.value) })
+      }
+      if (spiceExactFilter.value >= 0) {
+        chips.push({ key: 'spice', label: '🌶 ' + spiceExactFilter.value + ' ' + spiceLabel(spiceExactFilter.value) })
+      }
+      return chips
+    })
+
+    function removeFilter(key) {
+      if (key === 'unread') {
+        unreadOnly.value = false
+      } else if (key === 'notIndexed') {
+        notIndexedOnly.value = false
+      } else if (key.startsWith('age:')) {
+        const v = parseInt(key.slice(4), 10)
+        ageRatingFilter.value = ageRatingFilter.value.filter(x => x !== v)
+      } else if (key === 'series') {
+        seriesSizeFilter.value = ''
+      } else if (key === 'spice') {
+        spiceExactFilter.value = -1
+        localStorage.removeItem('nxt-spice')
+      }
+      page.value = 1
+      loadBooks()
+    }
+
+    function clearAllFilters() {
+      // Reset every filter but preserve search query and sort order.
+      unreadOnly.value = false
+      notIndexedOnly.value = false
+      ageRatingFilter.value = []
+      seriesSizeFilter.value = ''
+      spiceExactFilter.value = -1
+      localStorage.removeItem('nxt-spice')
       page.value = 1
       loadBooks()
     }
@@ -3637,6 +3808,11 @@ createApp({
 
     // ---- Keyboard arrow navigation (book detail page + reader) ----
     function onKeyDown(e) {
+      // Escape closes the filter drawer regardless of current view
+      if (e.key === 'Escape' && filtersOpen.value) {
+        filtersOpen.value = false
+        return
+      }
       if (currentView.value === 'reader') {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
         if (e.key === 'ArrowLeft') readerPrev()
@@ -5057,6 +5233,8 @@ createApp({
       isDark, toggleDark,
       books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, seriesSizeFilter, spiceExactFilter, sortOrder, totalPages, pageNumbers,
       loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, setSeriesSizeFilter, setSpiceExactFilter, onSortChange, goPage, coverGradient,
+      filtersOpen, advancedExpanded, toggleAdvancedExpanded, seriesSizes, ageRatingsForUser,
+      activeFilterCount, activeFilterChips, removeFilter, clearAllFilters,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
       onBookTouchStart, onBookTouchEnd,
