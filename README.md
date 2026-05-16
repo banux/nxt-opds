@@ -17,7 +17,6 @@ A lightweight personal eBook library server written in Go, with an OPDS catalog 
 - **Wishlist** — personal reading wish list, exposed in OPDS feeds
 - **Recommendations** — send a book recommendation to another user
 - **Integrated EPUB reader** with prev/next book navigation and swipe/keyboard support
-- **AI assistant** (Ollama) — metadata enrichment via chat UI
 - **MCP server** — AI agent access to the catalog over the Model Context Protocol
 - **Auto-update** — download and apply a new binary from GitHub releases in one click
 - **PWA** — installable as a web app with offline service worker
@@ -83,8 +82,6 @@ Configuration is loaded in this order (later sources override earlier ones):
 | `BACKUP_DIR`        | `{books_dir}/.backups` | Directory for nightly SQLite backups                        |
 | `BACKUP_KEEP`       | `7`                 | Number of backup files to retain                               |
 | `OPDS_TOKEN`        | *(derived)*         | Bearer token for OPDS reader auth (derived from password if unset) |
-| `OLLAMA_URL`        | `http://localhost:11434` | Ollama instance URL for the AI assistant                  |
-| `OLLAMA_MODEL`      | `qwen2.5:7b`        | Ollama model to use for the AI assistant                       |
 | `NXT_OPDS_CONFIG`   | *(search path)*     | Explicit path to config YAML file                              |
 
 ### YAML Config File
@@ -98,8 +95,6 @@ auth_password: "mysecretpassword"
 backend: "sqlite"
 refresh_interval: "5m"
 backup_keep: 7
-ollama_url: "http://localhost:11434"
-ollama_model: "qwen2.5:7b"
 ```
 
 ## Catalog Backends
@@ -208,7 +203,6 @@ Same paths under `/opds/v2` (JSON format).
 | `GET /api/update/check`                     | Check for a new release on GitHub  |
 | `POST /api/update/apply`                    | Download and apply the new binary  |
 | `POST /api/restart`                         | Restart the server process         |
-| `POST /api/ai/chat`                         | AI assistant chat (Ollama)         |
 | `POST /mcp`                                 | MCP server endpoint                |
 | `GET /api/webhooks`                         | List webhooks (admin)              |
 | `POST /api/webhooks`                        | Create a webhook (admin)           |
@@ -299,7 +293,6 @@ recorded on the webhook row and shown back in the admin UI.
 ├── docker-compose.yml
 ├── nxt-opds.service          # systemd unit file
 ├── internal/
-│   ├── ai/                   # Ollama AI assistant agent
 │   ├── catalog/              # Catalog interface and core data types
 │   ├── config/               # YAML config loading
 │   ├── epub/                 # EPUB/PDF metadata extraction

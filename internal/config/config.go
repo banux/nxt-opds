@@ -70,16 +70,6 @@ type Config struct {
 	// Set explicitly via OPDS_TOKEN env var or opds_token config key.
 	OPDSToken string `yaml:"opds_token"`
 
-	// OllamaURL is the base URL of the Ollama instance used for the AI chat feature.
-	// Defaults to http://localhost:11434.
-	// Set via OLLAMA_URL env var or ollama_url config key.
-	OllamaURL string `yaml:"ollama_url"`
-
-	// OllamaModel is the Ollama model name to use for the AI chat feature.
-	// Defaults to qwen2.5:7b.
-	// Set via OLLAMA_MODEL env var or ollama_model config key.
-	OllamaModel string `yaml:"ollama_model"`
-
 	// Debug enables verbose logging across the HTTP server (auth decisions,
 	// MCP JSON-RPC requests/responses, etc.).  Useful when diagnosing why a
 	// client cannot connect.  Off by default.
@@ -142,12 +132,6 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("OPDS_TOKEN"); v != "" {
 		cfg.OPDSToken = v
-	}
-	if v := os.Getenv("OLLAMA_URL"); v != "" {
-		cfg.OllamaURL = v
-	}
-	if v := os.Getenv("OLLAMA_MODEL"); v != "" {
-		cfg.OllamaModel = v
 	}
 	if v := os.Getenv("DEBUG"); v != "" {
 		switch strings.ToLower(v) {

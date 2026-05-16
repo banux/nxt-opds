@@ -76,23 +76,14 @@ func main() {
 	log.Printf("catalog loaded from %q", cfg.BooksDir)
 
 	opts := server.Options{
-		Password:    cfg.Password,
-		OPDSToken:   cfg.OPDSToken,
-		StaticFS:    web.FS,
-		OllamaURL:   cfg.OllamaURL,
-		OllamaModel: cfg.OllamaModel,
-		Version:     version,
-		Debug:       cfg.Debug,
+		Password:  cfg.Password,
+		OPDSToken: cfg.OPDSToken,
+		StaticFS:  web.FS,
+		Version:   version,
+		Debug:     cfg.Debug,
 	}
 	if cfg.Debug {
 		log.Printf("DEBUG mode enabled — verbose auth and /mcp logging")
-	}
-	if cfg.OllamaURL != "" {
-		model := cfg.OllamaModel
-		if model == "" {
-			model = "glm5.1:cloud"
-		}
-		log.Printf("AI assistant enabled (Ollama: %s, model: %s)", cfg.OllamaURL, model)
 	}
 	srv := server.New(cat, opts)
 

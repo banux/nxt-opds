@@ -37,9 +37,6 @@ Environment=BACKUP_DIR=/var/lib/nxt-opds/backups
 # Token OPDS (laisser vide pour dérivation automatique depuis AUTH_PASSWORD)
 # Environment=OPDS_TOKEN=
 
-# Clé API Anthropic pour l'assistant IA (optionnel)
-# Environment=ANTHROPIC_API_KEY=
-
 # Chemin vers le fichier de configuration YAML (optionnel)
 # Environment=NXT_OPDS_CONFIG=/etc/nxt-opds/config.yaml
 

@@ -1458,7 +1458,7 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := configJSON{
 		OPDSToken: s.opdsToken,
-		AIEnabled: s.aiAgent != nil,
+		AIEnabled: false,
 		MultiUser: s.userManager != nil,
 		Version:   s.opts.Version,
 	}

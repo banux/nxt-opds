@@ -8,7 +8,6 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/banux/nxt-opds/internal/ai"
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/mcp"
 	"github.com/banux/nxt-opds/internal/webhooks"
@@ -28,13 +27,6 @@ type Options struct {
 	// StaticFS is the filesystem containing the frontend static assets.
 	// If nil, the frontend is not served.
 	StaticFS fs.FS
-
-	// OllamaURL is the base URL of the Ollama instance for the AI chat feature.
-	// If empty, the /api/ai/chat endpoint returns 503.
-	OllamaURL string
-
-	// OllamaModel is the Ollama model name to use for the AI chat feature.
-	OllamaModel string
 
 	// Version is the current binary version (e.g. "v1.52.0" or "dev").
 	// Used by the update-check endpoint.
@@ -66,7 +58,6 @@ type Server struct {
 	webhookManager catalog.WebhookManager // optional; nil if backend doesn't store webhooks
 	webhooks       *webhooks.Dispatcher  // dispatches catalog events to webhooks (no-op when webhookManager is nil)
 	mcpServer     *mcp.Server           // MCP server for AI agent access
-	aiAgent       *ai.Agent             // optional; nil if no Anthropic API key configured
 	sessions      *sessionStore
 	opts          Options
 	opdsToken string    // token for OPDS route authentication
@@ -146,9 +137,6 @@ func New(cat catalog.Catalog, opts Options) *Server {
 
 	s.mcpServer = mcp.New(cat)
 	s.mcpServer.SetDebug(opts.Debug)
-	if opts.OllamaURL != "" {
-		s.aiAgent = ai.New(opts.OllamaURL, opts.OllamaModel, cat)
-	}
 	s.registerRoutes()
 	return s
 }
@@ -352,9 +340,6 @@ func (s *Server) registerRoutes() {
 	// from the catch-all SPA fallback.
 	protected.Handle("/mcp", s.mcpServer).Methods(http.MethodPost)
 	protected.HandleFunc("/mcp", s.handleMCPInfo).Methods(http.MethodGet)
-
-	// AI: conversational assistant endpoint
-	protected.HandleFunc("/api/ai/chat", s.handleAIChat).Methods(http.MethodPost)
 
 	// Cover image endpoint
 	protected.HandleFunc("/covers/{id}", s.handleCover).Methods(http.MethodGet)
