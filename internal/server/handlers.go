@@ -965,6 +965,7 @@ type bookJSON struct {
 	CollectionIndex string   `json:"collectionIndex,omitempty"`
 	IsRead          bool     `json:"isRead"`       // current user's read status
 	ReadColors      []string `json:"readColors"`   // hex colors of all users who have read it
+	ReadAt          int64    `json:"readAt,omitempty"` // Unix ms, when the current user marked it as read (0 = unknown / not read)
 	Rating          int      `json:"rating"`
 	AgeRating       int      `json:"ageRating"`
 	SpiceRating     int      `json:"spiceRating"`
@@ -1301,12 +1302,20 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 	userID := currentUserID(r)
 	isRead := bk.IsRead
 	colors := []string{}
+	var readAtMs int64
 	if s.userReadManager != nil {
 		rm, _ := s.userReadManager.UserReadStatuses(userID, []string{bk.ID})
 		isRead = rm[bk.ID]
 		cm, _ := s.userReadManager.BookReadColors([]string{bk.ID})
 		if c := cm[bk.ID]; c != nil {
 			colors = c
+		}
+		if isRead && userID != "" {
+			if rp, ok := s.userReadManager.(catalog.UserReadAtProvider); ok {
+				if t, err := rp.UserReadAt(userID, bk.ID); err == nil && !t.IsZero() {
+					readAtMs = t.UnixMilli()
+				}
+			}
 		}
 	}
 
@@ -1325,6 +1334,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		CollectionIndex: bk.CollectionIndex,
 		IsRead:          isRead,
 		ReadColors:      colors,
+		ReadAt:          readAtMs,
 		Rating:          bk.Rating,
 		AgeRating:       bk.AgeRating,
 		SpiceRating:     bk.SpiceRating,
@@ -1427,12 +1437,20 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 	// Enrich response with per-user read status.
 	isRead := bk.IsRead
 	colors := []string{}
+	var readAtMs int64
 	if s.userReadManager != nil {
 		rm, _ := s.userReadManager.UserReadStatuses(userID, []string{bk.ID})
 		isRead = rm[bk.ID]
 		cm, _ := s.userReadManager.BookReadColors([]string{bk.ID})
 		if c := cm[bk.ID]; c != nil {
 			colors = c
+		}
+		if isRead && userID != "" {
+			if rp, ok := s.userReadManager.(catalog.UserReadAtProvider); ok {
+				if t, err := rp.UserReadAt(userID, bk.ID); err == nil && !t.IsZero() {
+					readAtMs = t.UnixMilli()
+				}
+			}
 		}
 	}
 
@@ -1451,6 +1469,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		CollectionIndex: bk.CollectionIndex,
 		IsRead:          isRead,
 		ReadColors:      colors,
+		ReadAt:          readAtMs,
 		Rating:          bk.Rating,
 		AgeRating:       bk.AgeRating,
 		SpiceRating:     bk.SpiceRating,

@@ -1101,6 +1101,12 @@
                 <dd class="text-gray-900 dark:text-gray-100 font-medium">{{ formatMaintenanceDate(new Date(currentBook.lastMaintenanceAt)) }}</dd>
               </div>
             </template>
+            <template v-if="currentBook.isRead && currentBook.readAt">
+              <div class="flex gap-2">
+                <dt class="text-gray-500 dark:text-gray-400">Lu le</dt>
+                <dd class="text-green-700 dark:text-green-400 font-medium">{{ formatReadDate(new Date(currentBook.readAt)) }}</dd>
+              </div>
+            </template>
           </dl>
 
           <!-- Tags -->
@@ -3958,6 +3964,14 @@ createApp({
       })
     }
 
+    // ---- Read timestamp (current user's read date — shown on the book detail page) ----
+    function formatReadDate(d) {
+      if (!d) return ''
+      return d.toLocaleDateString('fr-FR', {
+        day: '2-digit', month: 'long', year: 'numeric'
+      })
+    }
+
     // ---- Refresh catalog ----
     const refreshing = ref(false)
 
@@ -5063,7 +5077,7 @@ createApp({
       tagsSuggestions, tagsSuggestionsVisible, onTagsInput, hideTagsSuggestions, selectTag,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
-      formatMaintenanceDate,
+      formatMaintenanceDate, formatReadDate,
       refreshing, doRefresh,
       appVersion, latestVersion, updateAvailable, updateReleaseURL, updateReleaseNotes,
       showUpdateDialog, updating, updateError, updateApplied, restarting,

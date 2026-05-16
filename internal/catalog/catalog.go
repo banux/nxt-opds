@@ -273,6 +273,17 @@ type UserReadManager interface {
 	BookReadColors(bookIDs []string) (map[string][]string, error)
 }
 
+// UserReadAtProvider is an optional interface for catalog backends that
+// store the timestamp at which a user marked a book as read.  Zero time
+// is returned when the book is not marked as read for that user (or the
+// timestamp is unknown — e.g. rows predating the read_at column).
+type UserReadAtProvider interface {
+	// UserReadAt returns the time the user marked the book as read.
+	// Returns the zero time.Time (with nil error) when no read record
+	// exists or no timestamp was recorded for that record.
+	UserReadAt(userID, bookID string) (time.Time, error)
+}
+
 // LabelCount is a generic "label with associated count" row used for stats aggregates.
 type LabelCount struct {
 	Label string

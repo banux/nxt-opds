@@ -1721,6 +1721,31 @@ func (b *Backend) UserReadStatuses(userID string, bookIDs []string) (map[string]
 	return result, rows.Err()
 }
 
+// UserReadAt returns the timestamp at which the user marked the book as read.
+// Returns the zero time.Time (with nil error) when the user has not marked the
+// book as read or when no read_at timestamp was stored for that row (rows
+// predating migration v11 keep read_at = 0).
+func (b *Backend) UserReadAt(userID, bookID string) (time.Time, error) {
+	if userID == "" || bookID == "" {
+		return time.Time{}, nil
+	}
+	var readAt int64
+	err := b.db.QueryRow(
+		`SELECT read_at FROM user_read_status WHERE user_id = ? AND book_id = ? AND is_read = 1`,
+		userID, bookID,
+	).Scan(&readAt)
+	if err == sql.ErrNoRows {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if readAt <= 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(readAt, 0), nil
+}
+
 // BookReadColors returns for each supplied bookID the hex colours of all users
 // who have marked that book as read.
 func (b *Backend) BookReadColors(bookIDs []string) (map[string][]string, error) {

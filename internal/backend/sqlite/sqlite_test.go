@@ -1488,6 +1488,63 @@ func TestSQLiteBackend_SpiceRating_PersistAndFilter(t *testing.T) {
 	}
 }
 
+// TestUserReadAt_RecordedAndReturned exercises the new UserReadAt method:
+// after SetUserRead(true), the timestamp should round-trip; when the row
+// does not exist the method returns the zero time without error.
+func TestUserReadAt_RecordedAndReturned(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "a.epub"), "Alpha", "Jane Doe", "SF")
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	u, err := b.CreateUser("Alice", "#ff00ff", false, false, 0)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	books, _, _ := b.AllBooks(0, 10)
+	if len(books) == 0 {
+		t.Fatal("no books")
+	}
+	id := books[0].ID
+
+	// Unread → zero time, no error.
+	got, err := b.UserReadAt(u.ID, id)
+	if err != nil {
+		t.Fatalf("UserReadAt before SetUserRead: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("unread book should return zero time, got %v", got)
+	}
+
+	before := time.Now().Add(-time.Second)
+	if err := b.SetUserRead(u.ID, id, true); err != nil {
+		t.Fatalf("SetUserRead: %v", err)
+	}
+	after := time.Now().Add(time.Second)
+
+	got, err = b.UserReadAt(u.ID, id)
+	if err != nil {
+		t.Fatalf("UserReadAt after SetUserRead: %v", err)
+	}
+	if got.IsZero() {
+		t.Fatal("expected non-zero ReadAt after SetUserRead")
+	}
+	if got.Before(before) || got.After(after) {
+		t.Errorf("ReadAt %v outside window [%v, %v]", got, before, after)
+	}
+
+	// Empty arguments must not error.
+	if got, err := b.UserReadAt("", id); err != nil || !got.IsZero() {
+		t.Errorf("UserReadAt with empty userID: got (%v, %v), want (zero, nil)", got, err)
+	}
+	if got, err := b.UserReadAt(u.ID, ""); err != nil || !got.IsZero() {
+		t.Errorf("UserReadAt with empty bookID: got (%v, %v), want (zero, nil)", got, err)
+	}
+}
+
 // TestSQLiteBackend_MigrateSchema_Has18 verifies migration18 brings a database
 // up to currentSchemaVersion=18 by ensuring spice_rating column exists.
 func TestSQLiteBackend_MigrateSchema_Has18(t *testing.T) {
