@@ -17,7 +17,7 @@ A lightweight personal eBook library server written in Go, with an OPDS catalog 
 - **Wishlist** — personal reading wish list, exposed in OPDS feeds
 - **Recommendations** — send a book recommendation to another user
 - **Integrated EPUB reader** with prev/next book navigation and swipe/keyboard support
-- **Librarian pairing** — pair an external "librarian" service to enable an SSE-streaming chat assistant (uses the MCP server under the hood)
+- **Librarian pairing** — pair an external "librarian" service to enable a chat assistant (uses the MCP server under the hood)
 - **MCP server** — AI agent access to the catalog over the Model Context Protocol
 - **Auto-update** — download and apply a new binary from GitHub releases in one click
 - **PWA** — installable as a web app with offline service worker
@@ -133,7 +133,7 @@ Authentication uses the same OPDS bearer token (`?token=<value>` or `Authorizati
 
 ## Librarian
 
-nxt-opds has no embedded LLM. The chat assistant in the UI is a thin SSE
+nxt-opds has no embedded LLM. The chat assistant in the UI is a thin
 proxy in front of a **librarian** — a separate service you run somewhere
 (typically next to a model provider). Once paired, the librarian gets
 authenticated access to this server's MCP endpoint and can manipulate the
@@ -144,7 +144,7 @@ catalog on your behalf.
 ```
 ┌──────────────┐   POST /api/ai/chat       ┌──────────────┐
 │ Vue chat box │ ────────────────────────► │   nxt-opds   │
-│ (SSE reader) │ ◄──── text/event-stream ──│  (this app)  │
+│              │ ◄──── {reply,error} JSON ─│  (this app)  │
 └──────────────┘                           └──────┬───────┘
                                                   │
                   Bearer chat_secret              │  Bearer chat_secret
@@ -156,9 +156,11 @@ catalog on your behalf.
 ```
 
 Two parallel channels: the chat relay is request-driven (a user types →
-SSE response streamed back); the webhook fan-out is push-driven (every
-`book.created` / `book.updated` / `book.deleted` / `book.read` event also
-hits the librarian alongside any admin-configured webhooks).
+the librarian runs its agent loop → it returns a single JSON
+`{"reply":"...","error":"..."}` once the loop terminates; nxt-opds
+forwards the body bytes verbatim); the webhook fan-out is push-driven
+(every `book.created` / `book.updated` / `book.deleted` / `book.read`
+event also hits the librarian alongside any admin-configured webhooks).
 
 ### Pairing flow
 
@@ -211,7 +213,7 @@ past 15 min, grey when no heartbeat has ever been received.
 | `POST /api/librarian/forget`        | `X-Librarian-Chat-Secret` header  | Inbound unpair from the librarian side; idempotent   |
 | `POST /api/librarian/announce`      | `X-Librarian-Chat-Secret` header  | Realign `LibrarianURL` when the librarian moves host/port; preserves instance + secrets + `CreatedAt` |
 | `POST /api/librarian/heartbeat`     | `X-Librarian-Chat-Secret` header  | Liveness ping (~60 s); stamps `LastSeenAt` only, does not advance `UpdatedAt` |
-| `POST /api/ai/chat`                 | session cookie                    | SSE relay to `${librarian_url}/chat`; 404 when unpaired |
+| `POST /api/ai/chat`                 | session cookie                    | Body-relay to `${librarian_url}/chat` (JSON `{reply,error}` upstream); 404 when unpaired |
 
 The pairing-code mint and association view/delete deliberately require a
 real **session cookie** so a leaked OPDS reader URL or shared token
@@ -299,7 +301,7 @@ Same paths under `/opds/v2` (JSON format).
 | `POST /api/librarian/forget`                | Inbound unpair (librarian-side)    |
 | `POST /api/librarian/announce`              | Realign LibrarianURL on librarian restart |
 | `POST /api/librarian/heartbeat`             | Liveness ping from `librarian serve` (~60 s) |
-| `POST /api/ai/chat`                         | SSE chat relay to the paired librarian |
+| `POST /api/ai/chat`                         | Chat relay to the paired librarian (JSON `{reply,error}`) |
 | `GET /api/webhooks`                         | List webhooks (admin)              |
 | `POST /api/webhooks`                        | Create a webhook (admin)           |
 | `PATCH /api/webhooks/{id}`                  | Update a webhook (admin)           |
