@@ -282,7 +282,7 @@ func (s *Server) registerRoutes() {
 	// Unread books feed
 	protected.HandleFunc("/opds/unread", s.handleUnreadBooks).Methods(http.MethodGet)
 
-	// Spice-intensity navigation feed (links to /opds/books?spice_max=N)
+	// Spice-intensity navigation feed (links to /opds/books?spice=N)
 	protected.HandleFunc("/opds/spice", s.handleSpiceLevels).Methods(http.MethodGet)
 
 	// Wishlist feed

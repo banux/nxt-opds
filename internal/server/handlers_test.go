@@ -1245,16 +1245,16 @@ func TestHandleAPIUpdateBook_SpiceRating_ValidAndInvalid(t *testing.T) {
 	}
 }
 
-// TestHandleAPIBooks_SpiceMaxFilter verifies the ?spice_max= query parameter
-// filters out 16+/18+ books whose SpiceRating exceeds the cap while leaving
-// books under 16 untouched.
-func TestHandleAPIBooks_SpiceMaxFilter(t *testing.T) {
+// TestHandleAPIBooks_SpiceMaxIgnored verifies the deprecated ?spice_max=
+// query parameter is now silently ignored (no error, no filtering applied).
+// Clients that bookmarked the v1.122–v1.127 URL still get a valid response;
+// they just need to migrate to ?spice=N to keep filtering.
+func TestHandleAPIBooks_SpiceMaxIgnored(t *testing.T) {
 	srv := newTestServer(t, Options{})
 	spicy := uploadBook(t, srv, "spicy.epub", "Spicy Book", "Author A")
 	mild := uploadBook(t, srv, "mild.epub", "Mild Book", "Author B")
 	child := uploadBook(t, srv, "child.epub", "Child Book", "Author C")
 
-	// Spicy: ageRating=18, spiceRating=4.
 	patch := func(id, body string) {
 		req := httptest.NewRequest(http.MethodPatch, "/api/books/"+id, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1268,6 +1268,7 @@ func TestHandleAPIBooks_SpiceMaxFilter(t *testing.T) {
 	patch(mild.ID, `{"ageRating":16,"spiceRating":1}`)
 	patch(child.ID, `{"ageRating":6}`)
 
+	// ?spice_max=2 should be ignored — the Spicy 18+ book stays visible.
 	req := httptest.NewRequest(http.MethodGet, "/api/books?spice_max=2", nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, req)
@@ -1284,16 +1285,12 @@ func TestHandleAPIBooks_SpiceMaxFilter(t *testing.T) {
 	titles := map[string]bool{}
 	for _, b := range resp.Books {
 		titles[b.Title] = true
-		t.Logf("book: title=%q age=%d spice=%d", b.Title, b.AgeRating, b.SpiceRating)
 	}
-	if titles["Spicy Book"] {
-		t.Error("?spice_max=2 must exclude Spicy Book (spice 4)")
+	if !titles["Spicy Book"] {
+		t.Error("?spice_max=2 is now a no-op; Spicy Book should remain visible")
 	}
-	if !titles["Mild Book"] {
-		t.Error("?spice_max=2 must include Mild Book (spice 1)")
-	}
-	if !titles["Child Book"] {
-		t.Error("?spice_max=2 must include Child Book (under 16, exempt)")
+	if !titles["Mild Book"] || !titles["Child Book"] {
+		t.Error("?spice_max=2 is now a no-op; all books should remain visible")
 	}
 }
 
@@ -1466,10 +1463,10 @@ func TestHandleOPDS2SpiceLevels_SixItems(t *testing.T) {
 	}
 }
 
-// TestHandleAllBooks_OPDS_SpiceMaxFilter verifies the ?spice_max= query
-// parameter is honoured on /opds/books — the 18+/spice=4 book is filtered
-// out while the 16+/spice=1 and the youth book remain visible.
-func TestHandleAllBooks_OPDS_SpiceMaxFilter(t *testing.T) {
+// TestHandleAllBooks_OPDS_SpiceExactFilter verifies the new ?spice=N (exact)
+// query parameter is honoured on /opds/books — only the 18+/spice=4 book is
+// returned for ?spice=4, and sub-16 titles are excluded.
+func TestHandleAllBooks_OPDS_SpiceExactFilter(t *testing.T) {
 	srv := newTestServer(t, Options{})
 	spicy := uploadBook(t, srv, "spicy.epub", "Spicy Book", "Author A")
 	mild := uploadBook(t, srv, "mild.epub", "Mild Book", "Author B")
@@ -1488,11 +1485,11 @@ func TestHandleAllBooks_OPDS_SpiceMaxFilter(t *testing.T) {
 	patch(mild.ID, `{"ageRating":16,"spiceRating":1}`)
 	patch(child.ID, `{"ageRating":6}`)
 
-	req := httptest.NewRequest(http.MethodGet, "/opds/books?spice_max=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/opds/books?spice=4", nil)
 	rr := httptest.NewRecorder()
 	srv.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /opds/books?spice_max=2: %d", rr.Code)
+		t.Fatalf("GET /opds/books?spice=4: %d", rr.Code)
 	}
 	var feed opds.Feed
 	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
@@ -1502,14 +1499,14 @@ func TestHandleAllBooks_OPDS_SpiceMaxFilter(t *testing.T) {
 	for _, e := range feed.Entries {
 		titles[e.Title.Value] = true
 	}
-	if titles["Spicy Book"] {
-		t.Error("OPDS ?spice_max=2 must exclude Spicy Book (spice 4)")
+	if !titles["Spicy Book"] {
+		t.Error("OPDS ?spice=4 must include Spicy Book (18+/spice=4)")
 	}
-	if !titles["Mild Book"] {
-		t.Error("OPDS ?spice_max=2 must include Mild Book (spice 1)")
+	if titles["Mild Book"] {
+		t.Error("OPDS ?spice=4 must exclude Mild Book (spice=1)")
 	}
-	if !titles["Child Book"] {
-		t.Error("OPDS ?spice_max=2 must include Child Book (under 16)")
+	if titles["Child Book"] {
+		t.Error("OPDS ?spice=4 must exclude Child Book (sub-16)")
 	}
 }
 

@@ -257,7 +257,7 @@ cannot start, view or break a pairing.
 | `GET /opds/recommendations`        | Recommendations feed           |
 | `GET /opds/spice`                  | Spice-level navigation feed (6 exact buckets 0–5 → `/opds/books?spice=N`; hidden for child profiles) |
 
-Most book-listing feeds accept `?spice=N` (0–5, **exact** spice rating scoped to 16+/18+ titles); the older `?spice_max=N` parameter (≤N range) is still honoured for one release but will be removed. Both filters automatically exclude sub-16 titles since the spice axis is undefined for them. The OPDS v2 counterparts honour the same query parameters.
+Most book-listing feeds accept `?spice=N` (0–5, **exact** spice rating scoped to 16+/18+ titles); sub-16 titles are excluded since the spice axis is undefined for them. The same parameter is honoured on the OPDS v2 counterparts. (The legacy `?spice_max=N` parameter accepted in v1.122–v1.127 is no longer interpreted — clients still hitting it receive an unfiltered list. For multi-value range filters, use the MCP `search_books` tool's `spice_min`/`spice_max` arguments.)
 
 ### OPDS 2.0
 Same paths under `/opds/v2` (JSON format).

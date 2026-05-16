@@ -311,7 +311,6 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 		SortBy:       "added",
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
-		SpiceMax:     parseSpiceMaxQuery(r),
 		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
@@ -335,8 +334,8 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAllBooks serves the acquisition feed with all books.
-// Honours ?spice_max=N and the child profile MaxAgeRating filter so external
-// OPDS clients see the same content the web UI filters down to.
+// Honours ?spice=N (exact) and the child profile MaxAgeRating filter so
+// external OPDS clients see the same content the web UI filters down to.
 func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
@@ -349,7 +348,6 @@ func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 		SortBy:       "added",
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
-		SpiceMax:     parseSpiceMaxQuery(r),
 		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
@@ -413,7 +411,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Limit:        limit,
 		UserID:       userID,
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
-		SpiceMax:     parseSpiceMaxQuery(r),
 		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
@@ -481,7 +478,6 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 	author, _ := url.PathUnescape(vars["author"])
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
@@ -490,14 +486,13 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
+	if spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Author:       author,
 			Offset:       offset,
 			Limit:        limit,
 			UserID:       userID,
 			MaxAgeRating: maxAge,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 	} else {
@@ -568,7 +563,6 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 	tag, _ := url.PathUnescape(vars["tag"])
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
@@ -577,14 +571,13 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
+	if spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Tag:          tag,
 			Offset:       offset,
 			Limit:        limit,
 			UserID:       userID,
 			MaxAgeRating: maxAge,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 	} else {
@@ -739,7 +732,6 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 	publisher, _ := url.PathUnescape(vars["publisher"])
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
@@ -748,14 +740,13 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
+	if spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Publisher:    publisher,
 			Offset:       offset,
 			Limit:        limit,
 			UserID:       userID,
 			MaxAgeRating: maxAge,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 	} else {
@@ -1055,37 +1046,10 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 	}
 }
 
-// parseSpiceMaxQuery reads ?spice_max=N from the request and returns a
-// clamped pointer to its value (0..5), or nil when the parameter is absent
-// or unparseable.  Shared by /api/books and every OPDS feed that builds a
-// SearchQuery so external OPDS clients can restrict spicy content the same
-// way the web UI does.
-//
-// Deprecated: prefer parseSpiceExactQuery (?spice=N) — kept for one release
-// so OPDS clients that bookmarked the older URL keep working.
-func parseSpiceMaxQuery(r *http.Request) *int {
-	raw := r.URL.Query().Get("spice_max")
-	if raw == "" {
-		return nil
-	}
-	v, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil {
-		return nil
-	}
-	if v < 0 {
-		v = 0
-	}
-	if v > 5 {
-		v = 5
-	}
-	return &v
-}
-
 // parseSpiceExactQuery reads ?spice=N (exact spice rating match, 0..5) and
-// returns a clamped pointer or nil when absent / unparseable.  This is the
-// preferred filter going forward — the older ?spice_max= range filter is
-// still parsed for backward compatibility but exposes a confusing semantic
-// ("≤N" ranges) so the UI and OPDS navigation feed now emit ?spice=N.
+// returns a clamped pointer or nil when absent / unparseable.  Shared by
+// /api/books and every OPDS feed that builds a SearchQuery so external
+// clients can restrict spicy content the same way the web UI does.
 func parseSpiceExactQuery(r *http.Request) *int {
 	raw := r.URL.Query().Get("spice")
 	if raw == "" {
@@ -1131,7 +1095,6 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
@@ -1157,7 +1120,6 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			SortOrder:    sortOrder,
 			MaxAgeRating: maxAge,
 			AgeRatings:   ageRatingFilters,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 		if err != nil {
@@ -1192,7 +1154,6 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    sortOrder,
 		MaxAgeRating: maxAge,
 		AgeRatings:   ageRatingFilters,
-		SpiceMax:     spiceMax,
 		SpiceExact:   spiceExact,
 	})
 	if err != nil {
@@ -3117,7 +3078,6 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 		SortBy:       "added",
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
-		SpiceMax:     parseSpiceMaxQuery(r),
 		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
@@ -3145,7 +3105,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOPDS2Publications serves the OPDS 2.0 acquisition feed with all books.
-// Honours ?spice_max=N and the child profile MaxAgeRating filter.
+// Honours ?spice=N (exact) and the child profile MaxAgeRating filter.
 func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
@@ -3158,7 +3118,7 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 		SortBy:       "added",
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
-		SpiceMax:     parseSpiceMaxQuery(r),
+		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -3202,7 +3162,7 @@ func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 		Limit:        limit,
 		UserID:       userID,
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
-		SpiceMax:     parseSpiceMaxQuery(r),
+		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "search error", http.StatusInternalServerError)
@@ -3270,7 +3230,6 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 	author, _ := url.PathUnescape(vars["author"])
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
@@ -3279,14 +3238,13 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 		total int
 		err   error
 	)
-	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
+	if spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Author:       author,
 			Offset:       offset,
 			Limit:        limit,
 			UserID:       userID,
 			MaxAgeRating: maxAge,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 	} else {
@@ -3358,7 +3316,6 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 	tag, _ := url.PathUnescape(vars["tag"])
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
@@ -3367,14 +3324,13 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
+	if spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Tag:          tag,
 			Offset:       offset,
 			Limit:        limit,
 			UserID:       userID,
 			MaxAgeRating: maxAge,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 	} else {
@@ -3446,7 +3402,6 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 	publisher, _ := url.PathUnescape(vars["publisher"])
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
-	spiceMax := parseSpiceMaxQuery(r)
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
@@ -3455,14 +3410,13 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 		total int
 		err   error
 	)
-	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
+	if spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Publisher:    publisher,
 			Offset:       offset,
 			Limit:        limit,
 			UserID:       userID,
 			MaxAgeRating: maxAge,
-			SpiceMax:     spiceMax,
 			SpiceExact:   spiceExact,
 		})
 	} else {
