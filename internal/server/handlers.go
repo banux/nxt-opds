@@ -1450,17 +1450,26 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 		Token   string `json:"token,omitempty"`
 	}
 	type configJSON struct {
-		OPDSToken   string    `json:"opdsToken"`
-		AIEnabled   bool      `json:"aiEnabled"`
-		MultiUser   bool      `json:"multiUser"`
-		CurrentUser *userJSON `json:"currentUser,omitempty"`
-		Version     string    `json:"version"`
+		OPDSToken        string    `json:"opdsToken"`
+		LibrarianEnabled bool      `json:"librarianEnabled"`
+		MultiUser        bool      `json:"multiUser"`
+		CurrentUser      *userJSON `json:"currentUser,omitempty"`
+		Version          string    `json:"version"`
+	}
+	// librarianEnabled is true only when an association row actually exists
+	// in the catalog backend — the SPA hides the chat box otherwise.
+	librarianPaired := false
+	if s.librarianAssoc != nil {
+		if assoc, err := s.librarianAssoc.Get(); err == nil &&
+			assoc != nil && assoc.LibrarianURL != "" {
+			librarianPaired = true
+		}
 	}
 	cfg := configJSON{
-		OPDSToken: s.opdsToken,
-		AIEnabled: false,
-		MultiUser: s.userManager != nil,
-		Version:   s.opts.Version,
+		OPDSToken:        s.opdsToken,
+		LibrarianEnabled: librarianPaired,
+		MultiUser:        s.userManager != nil,
+		Version:          s.opts.Version,
 	}
 	if s.userManager != nil {
 		uid := currentUserID(r)

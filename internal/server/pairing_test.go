@@ -1019,3 +1019,68 @@ func TestHandleAPILibrarianChat_PropagatesUpstreamStatus(t *testing.T) {
 		t.Errorf("upstream body not forwarded: %q", rr.Body.String())
 	}
 }
+
+// ---- /api/config librarianEnabled --------------------------------------
+
+// TestAPIConfig_LibrarianEnabled_FalseWithoutAssociation verifies that
+// /api/config reports librarianEnabled=false on a fresh server, so the SPA
+// hides the chat box until pairing happens.
+func TestAPIConfig_LibrarianEnabled_FalseWithoutAssociation(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("", "pw")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		LibrarianEnabled bool `json:"librarianEnabled"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.LibrarianEnabled {
+		t.Errorf("librarianEnabled should be false when no association exists")
+	}
+
+	// Defence-in-depth: the deprecated key must NOT appear in the response
+	// (otherwise an old SPA build could keep showing the chat button).
+	if strings.Contains(rr.Body.String(), `"aiEnabled"`) {
+		t.Errorf("legacy aiEnabled key should be gone: %s", rr.Body.String())
+	}
+}
+
+// TestAPIConfig_LibrarianEnabled_TrueAfterPairing verifies that
+// /api/config flips librarianEnabled to true once an association is stored.
+func TestAPIConfig_LibrarianEnabled_TrueAfterPairing(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst",
+		ChatSecret:        "c",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("", "pw")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		LibrarianEnabled bool `json:"librarianEnabled"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.LibrarianEnabled {
+		t.Errorf("librarianEnabled should be true once paired")
+	}
+}

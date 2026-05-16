@@ -496,7 +496,7 @@
         </template>
 
         <!-- AI Chat button (only when API key configured) — hidden on mobile -->
-        <button v-if="aiEnabled" @click="chatOpen = !chatOpen"
+        <button v-if="librarianEnabled" @click="chatOpen = !chatOpen"
           :title="chatOpen ? 'Fermer l\'assistant IA' : 'Assistant IA'"
           class="hidden sm:flex p-2 rounded-lg transition-colors"
           :class="chatOpen
@@ -664,7 +664,7 @@
           <div class="border-t border-gray-100 dark:border-gray-700/50 my-1"></div>
 
           <!-- AI Chat -->
-          <button v-if="aiEnabled" @click.stop="chatOpen = !chatOpen; mobileMenuOpen = false"
+          <button v-if="librarianEnabled" @click.stop="chatOpen = !chatOpen; mobileMenuOpen = false"
             class="flex items-center gap-3 px-4 py-3 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             :class="chatOpen ? 'text-violet-600 dark:text-violet-400' : ''">
             <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2852,7 +2852,7 @@
   </div>
 
   <!-- ===== AI Chat Panel ===== -->
-  <div v-if="aiEnabled && chatOpen"
+  <div v-if="librarianEnabled && chatOpen"
     class="fixed bottom-0 right-0 z-40 w-full sm:w-96 h-[32rem] flex flex-col bg-white dark:bg-gray-800 border-t sm:border border-gray-200 dark:border-gray-700 sm:rounded-tl-2xl shadow-2xl">
 
     <!-- Chat header -->
@@ -4705,7 +4705,7 @@ createApp({
     //   { type:'text', text:'…' }
     //   { type:'tool_call', name:'…', input:any, open:bool }
     //   { type:'tool_result', name:'…', output:any, open:bool }
-    const aiEnabled    = ref(false)
+    const librarianEnabled    = ref(false)
     const chatOpen     = ref(false)
     const chatMessages = ref([])
     const chatInput    = ref('')
@@ -4886,7 +4886,7 @@ createApp({
         if (res.ok) {
           const cfg = await res.json()
           opdsToken.value = cfg.opdsToken || ''
-          aiEnabled.value = !!cfg.aiEnabled
+          librarianEnabled.value = !!cfg.librarianEnabled
           multiUser.value = !!cfg.multiUser
           currentUser.value = cfg.currentUser || null
           appVersion.value = cfg.version || 'dev'
@@ -4953,7 +4953,7 @@ createApp({
       checkForUpdate, applyUpdate, restartServer,
       opdsToken, opdsUrlCopied, opdsReaderUrl, copyOPDSUrl,
       mobileMenuOpen,
-      aiEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
+      librarianEnabled, chatOpen, chatMessages, chatInput, chatLoading, chatScrollRef,
       sendChatMessage, clearChat, formatToolPayload,
       multiUser, currentUser,
       adminUsers, adminUsersLoading, adminEditingUserId, adminUserForm, adminUserFormSaving,
