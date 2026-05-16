@@ -130,6 +130,12 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	}
 	s.pairingCodes = newPairingCodeStore()
 	s.webhooks = webhooks.New(s.webhookManager)
+	// Fan-out catalog events to the paired librarian (if any) alongside any
+	// admin-configured webhooks.  The dispatcher re-reads the association on
+	// every Fire(), so pair/unpair takes effect immediately without restart.
+	if s.librarianAssoc != nil {
+		s.webhooks.SetLibrarianTarget(s.librarianAssoc)
+	}
 	// If the catalog backend supports session persistence, wire it up and load
 	// any sessions that survived the previous process run.
 	if sp, ok := cat.(catalog.SessionPersistence); ok {
