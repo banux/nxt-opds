@@ -195,6 +195,11 @@ func (s *Server) registerRoutes() {
 	// auth middleware.
 	r.HandleFunc("/api/librarian/pair", s.handleAPILibrarianPair).Methods(http.MethodPost)
 
+	// Librarian credential rotation: called BY the librarian; authentication
+	// is via the X-Librarian-Chat-Secret header.  Public route for the same
+	// reason — the librarian has no session cookie.
+	r.HandleFunc("/api/librarian/rotate", s.handleAPILibrarianRotate).Methods(http.MethodPost)
+
 	// PWA assets must be publicly accessible for browser install flow
 	if s.opts.StaticFS != nil {
 		staticServer := http.FileServer(http.FS(s.opts.StaticFS))

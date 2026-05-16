@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/banux/nxt-opds/internal/catalog"
 )
+
+// chatSecretHeader is the HTTP header the remote librarian sends to
+// authenticate against the inbound rotation and unpair endpoints.  Its
+// value must match the chat_secret persisted in the local association.
+const chatSecretHeader = "X-Librarian-Chat-Secret"
 
 // forgetTimeout caps the best-effort outgoing call to the librarian on
 // DELETE /api/librarian/association.  The local row is already cleared
@@ -360,4 +366,98 @@ func unixMilliOrZero(t time.Time) int64 {
 		return 0
 	}
 	return t.UnixMilli()
+}
+
+// authenticateLibrarian verifies the X-Librarian-Chat-Secret header against
+// the stored chat_secret using constant-time comparison.  Returns the
+// matched association on success; on failure it writes a JSON error to w
+// and returns nil so the caller should return immediately.
+//
+// Used by endpoints that the *remote* librarian calls into nxt-opds —
+// /api/librarian/rotate and /api/librarian/forget — where the chat secret
+// is the only credential the librarian holds.
+func (s *Server) authenticateLibrarian(w http.ResponseWriter, r *http.Request) *catalog.LibrarianAssociationData {
+	if s.librarianAssoc == nil {
+		writeJSONError(w, http.StatusNotImplemented,
+			"le backend de catalogue ne supporte pas l'appairage librarian")
+		return nil
+	}
+	assoc, err := s.librarianAssoc.Get()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"lecture de l'association : "+err.Error())
+		return nil
+	}
+	if assoc == nil || assoc.ChatSecret == "" {
+		// No association → no credential to verify against.  Return 404 so
+		// the librarian knows the pairing is gone (it can stop retrying).
+		writeJSONError(w, http.StatusNotFound, "aucune association librarian")
+		return nil
+	}
+	presented := r.Header.Get(chatSecretHeader)
+	if presented == "" {
+		writeJSONError(w, http.StatusUnauthorized,
+			"en-tête "+chatSecretHeader+" manquant")
+		return nil
+	}
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(assoc.ChatSecret)) != 1 {
+		writeJSONError(w, http.StatusUnauthorized,
+			"en-tête "+chatSecretHeader+" invalide")
+		return nil
+	}
+	return assoc
+}
+
+// handleAPILibrarianRotate handles POST /api/librarian/rotate.
+//
+// This is an inbound endpoint called BY the remote librarian when it wants
+// to roll its credentials without going through a full unpair / re-pair
+// cycle.  Authentication is via the X-Librarian-Chat-Secret header (which
+// the librarian still holds from the original pairing or from the
+// previous rotation).
+//
+// On success it generates a fresh 32-byte hex chat_secret and a fresh
+// 32-byte hex webhook_secret, writes them to the local association
+// (preserving URL / instance / created_at), and returns {chat_secret,
+// webhook_secret, instance} so the librarian can adopt the new keys.
+//
+// Failure modes:
+//   - 401 missing or wrong X-Librarian-Chat-Secret
+//   - 404 no association is currently paired
+//   - 500 secret generation or DB write failure
+//   - 501 catalog backend has no LibrarianAssociation impl
+func (s *Server) handleAPILibrarianRotate(w http.ResponseWriter, r *http.Request) {
+	assoc := s.authenticateLibrarian(w, r)
+	if assoc == nil {
+		return
+	}
+
+	newChat, err := randomHexSecret(32)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "génération du chat_secret : "+err.Error())
+		return
+	}
+	newWebhook, err := randomHexSecret(32)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "génération du webhook_secret : "+err.Error())
+		return
+	}
+
+	if err := s.librarianAssoc.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      assoc.LibrarianURL,
+		LibrarianInstance: assoc.LibrarianInstance,
+		ChatSecret:        newChat,
+		WebhookSecret:     newWebhook,
+	}); err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"écriture de l'association : "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"chat_secret":    newChat,
+		"webhook_secret": newWebhook,
+		"instance":       assoc.LibrarianInstance,
+	})
 }

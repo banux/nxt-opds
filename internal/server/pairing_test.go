@@ -681,3 +681,175 @@ func TestHandleAPILibrarianDeleteAssociation_RemoteFailureStillSucceeds(t *testi
 		t.Fatal("forget goroutine did not complete in time")
 	}
 }
+
+// ---- POST /api/librarian/rotate -----------------------------------------
+
+// TestHandleAPILibrarianRotate_HappyPath verifies the rotate endpoint:
+// with a matching X-Librarian-Chat-Secret it returns fresh secrets and
+// persists them (CreatedAt preserved, URL / instance untouched).
+func TestHandleAPILibrarianRotate_HappyPath(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst-rot",
+		ChatSecret:        "old-chat-secret",
+		WebhookSecret:     "old-webhook-secret",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before, _ := backend.Get()
+	createdAt := before.CreatedAt.Unix()
+	// Sleep so UpdatedAt strictly advances (Unix-second resolution).
+	time.Sleep(1100 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "old-chat-secret")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		ChatSecret    string `json:"chat_secret"`
+		WebhookSecret string `json:"webhook_secret"`
+		Instance      string `json:"instance"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.ChatSecret) != 64 || len(resp.WebhookSecret) != 64 {
+		t.Errorf("secrets should be 64 hex chars: chat=%d webhook=%d",
+			len(resp.ChatSecret), len(resp.WebhookSecret))
+	}
+	if resp.ChatSecret == "old-chat-secret" || resp.WebhookSecret == "old-webhook-secret" {
+		t.Errorf("rotation did not actually mint new secrets")
+	}
+	if resp.ChatSecret == resp.WebhookSecret {
+		t.Errorf("the two new secrets must differ")
+	}
+	if resp.Instance != "inst-rot" {
+		t.Errorf("instance should be preserved: got %q", resp.Instance)
+	}
+
+	// Persisted state matches the response, and only the two secret fields +
+	// UpdatedAt changed; URL / instance / CreatedAt stayed.
+	after, _ := backend.Get()
+	if after == nil {
+		t.Fatal("association should still exist after rotate")
+	}
+	if after.ChatSecret != resp.ChatSecret || after.WebhookSecret != resp.WebhookSecret {
+		t.Errorf("persisted secrets diverge from response")
+	}
+	if after.LibrarianURL != before.LibrarianURL || after.LibrarianInstance != before.LibrarianInstance {
+		t.Errorf("URL/instance should not change: %+v vs %+v", before, after)
+	}
+	if after.CreatedAt.Unix() != createdAt {
+		t.Errorf("CreatedAt should be preserved on rotate: was %d, now %d",
+			createdAt, after.CreatedAt.Unix())
+	}
+	if after.UpdatedAt.Unix() <= createdAt {
+		t.Errorf("UpdatedAt should advance after rotate (createdAt=%d updatedAt=%d)",
+			createdAt, after.UpdatedAt.Unix())
+	}
+
+	// The old chat_secret is now stale — a second rotation with it must 401.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	req2.Header.Set("X-Librarian-Chat-Secret", "old-chat-secret")
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusUnauthorized {
+		t.Errorf("old secret should not work after rotation, got %d", rr2.Code)
+	}
+
+	// The new chat_secret rotates again successfully.
+	req3 := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	req3.Header.Set("X-Librarian-Chat-Secret", resp.ChatSecret)
+	rr3 := httptest.NewRecorder()
+	srv.ServeHTTP(rr3, req3)
+	if rr3.Code != http.StatusOK {
+		t.Errorf("new secret should work, got %d: %s", rr3.Code, rr3.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianRotate_MissingHeader verifies absence of the chat
+// secret header yields 401.
+func TestHandleAPILibrarianRotate_MissingHeader(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "the-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with no header, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianRotate_WrongHeader verifies a mismatched chat secret
+// yields 401 and does NOT mutate the stored association.
+func TestHandleAPILibrarianRotate_WrongHeader(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "the-real-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "wrong-secret")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with wrong header, got %d: %s", rr.Code, rr.Body.String())
+	}
+	after, _ := backend.Get()
+	if after == nil || after.ChatSecret != "the-real-secret" {
+		t.Errorf("association mutated despite 401: %+v", after)
+	}
+}
+
+// TestHandleAPILibrarianRotate_NoAssociation verifies 404 when nothing is
+// currently paired.
+func TestHandleAPILibrarianRotate_NoAssociation(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "anything")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when unpaired, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianRotate_PublicRoute verifies the rotate endpoint is
+// reachable WITHOUT a session cookie / OPDS token — the librarian holds
+// only the chat secret.
+func TestHandleAPILibrarianRotate_PublicRoute(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "shared-tok"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "valid",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/rotate", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "valid")
+	// No cookies, no ?token=, no Basic Auth — only the header.
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("rotate must be reachable without session/OPDS auth, got %d: %s",
+			rr.Code, rr.Body.String())
+	}
+}
