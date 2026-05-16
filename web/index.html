@@ -1883,6 +1883,69 @@
           </ul>
         </div>
 
+        <!-- ===== Librarian pairing section ===== -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-8 overflow-hidden mt-8">
+          <div class="px-5 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+              Librarian
+            </h3>
+            <button @click="openPairingDialog"
+              class="text-xs px-2 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded-md transition-colors">
+              Associer un librarian
+            </button>
+          </div>
+          <div class="px-5 py-4 text-sm text-gray-600 dark:text-gray-400">
+            Génère un code à usage unique (valide 10 minutes) à coller dans la
+            commande <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">librarian pair</code>
+            pour appairer un service librarian distant à cette bibliothèque.
+          </div>
+        </div>
+
+        <!-- Librarian pairing modal -->
+        <div v-if="pairingDialog.open" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-0 sm:px-4">
+          <div class="bg-white dark:bg-gray-800 w-full sm:max-w-md rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden">
+            <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h3 class="font-semibold text-gray-900 dark:text-gray-100">Code d'appairage librarian</h3>
+              <button @click="closePairingDialog" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div class="px-5 py-5 space-y-4">
+              <p v-if="pairingDialog.loading" class="text-sm text-gray-500 dark:text-gray-400 text-center">
+                Génération en cours…
+              </p>
+              <p v-else-if="pairingDialog.error" class="text-sm text-red-600 dark:text-red-400 text-center">
+                {{ pairingDialog.error }}
+              </p>
+              <template v-else>
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  Copie ce code et lance-le sur le hôte librarian :
+                </p>
+                <div class="flex items-center gap-2">
+                  <code class="flex-1 text-center text-2xl font-mono font-bold tracking-widest text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg py-3 select-all">
+                    {{ pairingDialog.code }}
+                  </code>
+                  <button @click="copyPairingCode"
+                    class="px-3 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors text-sm font-medium">
+                    {{ pairingDialog.copied ? 'Copié !' : 'Copier' }}
+                  </button>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  Expire dans {{ pairingDialog.remaining }}. Le code n'est valable qu'une seule fois.
+                </p>
+              </template>
+            </div>
+            <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end">
+              <button @click="closePairingDialog"
+                class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Webhook edit modal -->
         <div v-if="webhookForm.open" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-0 sm:px-4">
           <div class="bg-white dark:bg-gray-800 w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden">
@@ -4060,6 +4123,73 @@ createApp({
       }
     }
 
+    // ---- Librarian pairing (admin) ----
+    const pairingDialog = ref({
+      open: false,
+      loading: false,
+      error: '',
+      code: '',
+      expiresAt: 0, // Unix ms
+      copied: false,
+      remaining: '—',
+    })
+    let pairingTimer = null
+
+    function formatPairingRemaining() {
+      if (!pairingDialog.value.expiresAt) {
+        pairingDialog.value.remaining = '—'
+        return
+      }
+      const ms = pairingDialog.value.expiresAt - Date.now()
+      if (ms <= 0) {
+        pairingDialog.value.remaining = 'expiré'
+        pairingDialog.value.error = 'Le code a expiré, génère-en un nouveau.'
+        pairingDialog.value.code = ''
+        if (pairingTimer) { clearInterval(pairingTimer); pairingTimer = null }
+        return
+      }
+      const m = Math.floor(ms / 60000)
+      const s = Math.floor((ms % 60000) / 1000)
+      pairingDialog.value.remaining = m + ' min ' + (s < 10 ? '0' + s : s) + ' s'
+    }
+
+    async function openPairingDialog() {
+      pairingDialog.value = {
+        open: true, loading: true, error: '',
+        code: '', expiresAt: 0, copied: false, remaining: '—',
+      }
+      try {
+        const res = await apiFetch('/api/librarian/pairing-code', { method: 'POST' })
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        const data = await res.json()
+        pairingDialog.value.code      = data.code
+        pairingDialog.value.expiresAt = data.expiresAt
+        pairingDialog.value.loading   = false
+        formatPairingRemaining()
+        if (pairingTimer) clearInterval(pairingTimer)
+        pairingTimer = setInterval(formatPairingRemaining, 1000)
+      } catch (e) {
+        pairingDialog.value.loading = false
+        pairingDialog.value.error   = 'Impossible de générer un code : ' + e.message
+      }
+    }
+
+    function closePairingDialog() {
+      pairingDialog.value.open = false
+      if (pairingTimer) { clearInterval(pairingTimer); pairingTimer = null }
+    }
+
+    async function copyPairingCode() {
+      if (!pairingDialog.value.code) return
+      try {
+        await navigator.clipboard.writeText(pairingDialog.value.code)
+        pairingDialog.value.copied = true
+        setTimeout(() => { pairingDialog.value.copied = false }, 2000)
+      } catch {
+        showToast('Impossible de copier le code', 'error')
+      }
+    }
+
     // ---- Seen tracking (localStorage) ----
     const wishlistSeenCount         = ref(parseInt(localStorage.getItem('wishlist_seen_count') || '0', 10))
     const recommendationsSeenCount  = ref(parseInt(localStorage.getItem('recommendations_seen_count') || '0', 10))
@@ -4589,6 +4719,7 @@ createApp({
       qrModalUser, qrModalUrl, showQRForUser, closeQRModal,
       webhooks, webhooksLoading, webhookForm, webhookFormSaving, webhookEventOptions,
       loadWebhooks, openWebhookForm, closeWebhookForm, saveWebhook, deleteWebhook, testWebhook,
+      pairingDialog, openPairingDialog, closePairingDialog, copyPairingCode,
       wishlistHasNew, recommendationsHasNew,
       myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,

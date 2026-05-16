@@ -57,6 +57,8 @@ type Server struct {
 	readStats       catalog.ReadStatsProvider // optional; nil if backend doesn't expose reading statistics
 	webhookManager catalog.WebhookManager // optional; nil if backend doesn't store webhooks
 	webhooks       *webhooks.Dispatcher  // dispatches catalog events to webhooks (no-op when webhookManager is nil)
+	librarianAssoc catalog.LibrarianAssociation // optional; nil if backend doesn't persist the librarian pairing
+	pairingCodes   *pairingCodeStore     // in-memory single-use codes for admin → librarian pairing
 	mcpServer     *mcp.Server           // MCP server for AI agent access
 	sessions      *sessionStore
 	opts          Options
@@ -123,6 +125,10 @@ func New(cat catalog.Catalog, opts Options) *Server {
 	if wm, ok := cat.(catalog.WebhookManager); ok {
 		s.webhookManager = wm
 	}
+	if la, ok := cat.(catalog.LibrarianAssociation); ok {
+		s.librarianAssoc = la
+	}
+	s.pairingCodes = newPairingCodeStore()
 	s.webhooks = webhooks.New(s.webhookManager)
 	// If the catalog backend supports session persistence, wire it up and load
 	// any sessions that survived the previous process run.
@@ -327,6 +333,12 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/webhooks/{id}", s.requireAdmin(s.handleAPIUpdateWebhook)).Methods(http.MethodPatch)
 	protected.HandleFunc("/api/webhooks/{id}", s.requireAdmin(s.handleAPIDeleteWebhook)).Methods(http.MethodDelete)
 	protected.HandleFunc("/api/webhooks/{id}/test", s.requireAdmin(s.handleAPITestWebhook)).Methods(http.MethodPost)
+
+	// API: librarian pairing.  Generating a code is restricted to admins who
+	// authenticated with a session cookie so a leaked OPDS/per-user token can
+	// never start a pairing handshake.
+	protected.HandleFunc("/api/librarian/pairing-code",
+		s.requireSessionAdmin(s.handleAPILibrarianPairingCode)).Methods(http.MethodPost)
 
 	// API: auto-update check (read-only) is open to all logged-in users so the
 	// SPA can show the "update available" badge.  Apply and restart are admin-only.
