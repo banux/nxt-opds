@@ -35,6 +35,14 @@ var librarianForgetClient = func(req *http.Request) (*http.Response, error) {
 	return client.Do(req)
 }
 
+// librarianChatClient is overridable from tests to intercept the SSE relay
+// without requiring a real librarian.  No timeout — the chat is long-lived;
+// the inbound request's context cancels the upstream call on client
+// disconnect.
+var librarianChatClient = func(req *http.Request) (*http.Response, error) {
+	return http.DefaultClient.Do(req)
+}
+
 // requireSessionAdmin wraps a handler so it only runs for callers who
 // authenticated with the session cookie AND whose user record has IsAdmin =
 // true.  Per-user OPDS/MCP tokens and the shared OPDS token are explicitly
@@ -460,4 +468,87 @@ func (s *Server) handleAPILibrarianRotate(w http.ResponseWriter, r *http.Request
 		"webhook_secret": newWebhook,
 		"instance":       assoc.LibrarianInstance,
 	})
+}
+
+// handleAPILibrarianChat handles POST /api/ai/chat.
+//
+// It is an SSE-streaming relay to the paired librarian's /chat endpoint.
+// The handler reads the persisted association; if none exists it returns
+// 404 (so the SPA can hide the chat box).  Otherwise it forwards the
+// inbound JSON body (e.g. {message, history}) to
+// ${librarian_url}/chat with Authorization: Bearer ${chat_secret} and
+// streams the upstream text/event-stream response back to the client.
+//
+// The inbound request's context is plumbed into the upstream call so a
+// client disconnect tears the proxied request down.  No total timeout
+// here — chat sessions are intentionally long-lived.
+func (s *Server) handleAPILibrarianChat(w http.ResponseWriter, r *http.Request) {
+	if s.librarianAssoc == nil {
+		writeJSONError(w, http.StatusNotFound, "aucune association librarian")
+		return
+	}
+	assoc, err := s.librarianAssoc.Get()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"lecture de l'association : "+err.Error())
+		return
+	}
+	if assoc == nil || assoc.LibrarianURL == "" || assoc.ChatSecret == "" {
+		writeJSONError(w, http.StatusNotFound, "aucune association librarian")
+		return
+	}
+
+	upstreamURL := strings.TrimRight(assoc.LibrarianURL, "/") + "/chat"
+	upstreamReq, err := http.NewRequestWithContext(r.Context(),
+		http.MethodPost, upstreamURL, r.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"construction requête : "+err.Error())
+		return
+	}
+	// Carry over the inbound content type so the librarian sees the same JSON.
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		upstreamReq.Header.Set("Content-Type", ct)
+	} else {
+		upstreamReq.Header.Set("Content-Type", "application/json")
+	}
+	upstreamReq.Header.Set("Accept", "text/event-stream")
+	upstreamReq.Header.Set("Authorization", "Bearer "+assoc.ChatSecret)
+
+	resp, err := librarianChatClient(upstreamReq)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway,
+			"librarian injoignable : "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	// Mirror the upstream content type (event-stream by default) and disable
+	// any intermediate buffering so events surface in real time.
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	} else {
+		w.Header().Set("Content-Type", "text/event-stream")
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(resp.StatusCode)
+
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 4096)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if rerr != nil {
+			return
+		}
+	}
 }

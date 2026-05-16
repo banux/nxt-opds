@@ -361,6 +361,12 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/api/librarian/association",
 		s.requireSessionAdmin(s.handleAPILibrarianDeleteAssociation)).Methods(http.MethodDelete)
 
+	// AI chat: SSE-streaming relay to the paired librarian's /chat endpoint.
+	// Available to any logged-in user — the chat is a user feature, not an
+	// admin one.  Returns 404 when no librarian is paired so the SPA can
+	// hide the chat box.
+	protected.HandleFunc("/api/ai/chat", s.handleAPILibrarianChat).Methods(http.MethodPost)
+
 	// API: auto-update check (read-only) is open to all logged-in users so the
 	// SPA can show the "update available" badge.  Apply and restart are admin-only.
 	protected.HandleFunc("/api/update/check", s.handleAPIUpdateCheck).Methods(http.MethodGet)

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -851,5 +852,170 @@ func TestHandleAPILibrarianRotate_PublicRoute(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("rotate must be reachable without session/OPDS auth, got %d: %s",
 			rr.Code, rr.Body.String())
+	}
+}
+
+// ---- POST /api/ai/chat (librarian SSE relay) -----------------------------
+
+// TestHandleAPILibrarianChat_NoAssociationReturns404 verifies that the
+// endpoint short-circuits with 404 (so the SPA hides the chat box) when no
+// librarian is currently paired.
+func TestHandleAPILibrarianChat_NoAssociationReturns404(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat",
+		strings.NewReader(`{"message":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("", "pw")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 with no association, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianChat_RelaysSSEResponse verifies the full relay flow:
+// the upstream librarian's /chat endpoint receives the inbound body + Bearer
+// chat_secret, and its text/event-stream body is forwarded to the client
+// verbatim (including the Content-Type header).
+func TestHandleAPILibrarianChat_RelaysSSEResponse(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+
+	// Fake librarian: records the inbound body+auth, then emits a
+	// multi-frame SSE payload.
+	type capturedCall struct {
+		method string
+		path   string
+		auth   string
+		body   string
+	}
+	var got capturedCall
+	librarian := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.method = r.Method
+		got.path = r.URL.Path
+		got.auth = r.Header.Get("Authorization")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		got.body = string(bodyBytes)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: text\ndata: hello\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		_, _ = w.Write([]byte("event: done\ndata: {}\n\n"))
+	}))
+	defer librarian.Close()
+
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      librarian.URL,
+		LibrarianInstance: "inst",
+		ChatSecret:        "the-bearer-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat",
+		strings.NewReader(`{"message":"bonjour","history":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("", "pw")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got.method != http.MethodPost {
+		t.Errorf("upstream method = %q, want POST", got.method)
+	}
+	if got.path != "/chat" {
+		t.Errorf("upstream path = %q, want /chat", got.path)
+	}
+	if got.auth != "Bearer the-bearer-secret" {
+		t.Errorf("upstream Authorization = %q", got.auth)
+	}
+	if got.body != `{"message":"bonjour","history":[]}` {
+		t.Errorf("upstream body = %q", got.body)
+	}
+
+	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("relay Content-Type = %q, want text/event-stream", ct)
+	}
+	if ab := rr.Header().Get("X-Accel-Buffering"); ab != "no" {
+		t.Errorf("X-Accel-Buffering = %q, want \"no\"", ab)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "event: text") || !strings.Contains(body, "data: hello") {
+		t.Errorf("relayed body missing the text frame: %q", body)
+	}
+	if !strings.Contains(body, "event: done") {
+		t.Errorf("relayed body missing the done frame: %q", body)
+	}
+}
+
+// TestHandleAPILibrarianChat_UpstreamFailureBadGateway verifies that a
+// transport-level failure surfaces as 502 Bad Gateway (not a generic 500).
+func TestHandleAPILibrarianChat_UpstreamFailureBadGateway(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "http://unreachable.example",
+		LibrarianInstance: "inst",
+		ChatSecret:        "tok",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	prev := librarianChatClient
+	defer func() { librarianChatClient = prev }()
+	librarianChatClient = func(req *http.Request) (*http.Response, error) {
+		return nil, errors.New("synthetic dial failure")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat",
+		strings.NewReader(`{"message":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("", "pw")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianChat_PropagatesUpstreamStatus verifies a non-2xx
+// upstream status is mirrored back to the client (e.g. librarian returns
+// 503 → client sees 503).
+func TestHandleAPILibrarianChat_PropagatesUpstreamStatus(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+
+	librarian := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"librarian busy"}`))
+	}))
+	defer librarian.Close()
+
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      librarian.URL,
+		LibrarianInstance: "inst",
+		ChatSecret:        "tok",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat",
+		strings.NewReader(`{"message":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("", "pw")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected upstream 503 mirrored, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "librarian busy") {
+		t.Errorf("upstream body not forwarded: %q", rr.Body.String())
 	}
 }
