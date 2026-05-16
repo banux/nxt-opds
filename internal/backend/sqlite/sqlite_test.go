@@ -1305,3 +1305,101 @@ func TestWebhook_CRUD(t *testing.T) {
 		t.Errorf("expected error after delete")
 	}
 }
+
+func TestLibrarianAssociation_Singleton(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+
+	// Initial state: no association.
+	got, err := b.Get()
+	if err != nil {
+		t.Fatalf("Get (empty): %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil association on fresh DB, got %+v", got)
+	}
+
+	// Set a first association.
+	first := catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example/",
+		LibrarianInstance: "inst-42",
+		ChatSecret:        "chat-secret-aaaa",
+		WebhookSecret:     "webhook-secret-bbbb",
+	}
+	if err := b.Set(first); err != nil {
+		t.Fatalf("Set (first): %v", err)
+	}
+
+	got, err = b.Get()
+	if err != nil || got == nil {
+		t.Fatalf("Get after Set: err=%v got=%v", err, got)
+	}
+	if got.LibrarianURL != first.LibrarianURL ||
+		got.LibrarianInstance != first.LibrarianInstance ||
+		got.ChatSecret != first.ChatSecret ||
+		got.WebhookSecret != first.WebhookSecret {
+		t.Errorf("association mismatch after Set: %+v", got)
+	}
+	if got.CreatedAt.IsZero() {
+		t.Errorf("CreatedAt should be set")
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Errorf("UpdatedAt should be set")
+	}
+	createdAt1 := got.CreatedAt.Unix()
+
+	// Replace with a second association: CreatedAt must be preserved.
+	time.Sleep(1100 * time.Millisecond) // ensure Unix-second-resolution UpdatedAt advances
+	second := catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example/v2",
+		LibrarianInstance: "inst-43",
+		ChatSecret:        "rotated-chat",
+		WebhookSecret:     "rotated-webhook",
+	}
+	if err := b.Set(second); err != nil {
+		t.Fatalf("Set (second): %v", err)
+	}
+	got, err = b.Get()
+	if err != nil || got == nil {
+		t.Fatalf("Get after second Set: err=%v got=%v", err, got)
+	}
+	if got.LibrarianURL != second.LibrarianURL || got.ChatSecret != "rotated-chat" {
+		t.Errorf("replacement did not stick: %+v", got)
+	}
+	if got.CreatedAt.Unix() != createdAt1 {
+		t.Errorf("CreatedAt should be preserved across Set: was %d, now %d", createdAt1, got.CreatedAt.Unix())
+	}
+	if got.UpdatedAt.Unix() <= createdAt1 {
+		t.Errorf("UpdatedAt should advance after a Set: createdAt=%d updatedAt=%d", createdAt1, got.UpdatedAt.Unix())
+	}
+
+	// Confirm the table really is a singleton — no second row.
+	var n int
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM librarian_association`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected exactly 1 row in librarian_association, got %d", n)
+	}
+
+	// Clear removes it.
+	if err := b.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	got, err = b.Get()
+	if err != nil {
+		t.Fatalf("Get after Clear: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil after Clear, got %+v", got)
+	}
+
+	// Clear is idempotent: calling it again must not error.
+	if err := b.Clear(); err != nil {
+		t.Errorf("Clear (second call) should be idempotent, got: %v", err)
+	}
+}

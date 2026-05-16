@@ -722,3 +722,49 @@ type WebhookManager interface {
 	// RecordWebhookFire stores the outcome of an HTTP delivery attempt.
 	RecordWebhookFire(id, status string, at time.Time) error
 }
+
+// LibrarianAssociationData represents the persisted pairing with a remote
+// "librarian" service.  Only one association can exist at a time per
+// nxt-opds instance; storing a new one replaces the previous record.
+type LibrarianAssociationData struct {
+	// LibrarianURL is the base HTTP(S) URL of the librarian service
+	// (e.g. "https://librarian.example.com"), no trailing slash.
+	LibrarianURL string
+
+	// LibrarianInstance is the identifier the librarian assigned to this
+	// nxt-opds instance during the pairing handshake.
+	LibrarianInstance string
+
+	// ChatSecret is the bearer token nxt-opds sends in the Authorization
+	// header when relaying chat requests to the librarian.
+	ChatSecret string
+
+	// WebhookSecret is the HMAC-SHA256 key nxt-opds uses to sign the
+	// X-Signature header on outgoing book-event webhooks fired toward the
+	// librarian.
+	WebhookSecret string
+
+	// CreatedAt is when the association was first paired.
+	CreatedAt time.Time
+
+	// UpdatedAt is when the association was last modified (e.g. secret rotation).
+	UpdatedAt time.Time
+}
+
+// LibrarianAssociation is an optional interface for catalog backends that
+// persist the pairing with a remote librarian service.  The association is a
+// singleton — there is at most one record at any time.
+type LibrarianAssociation interface {
+	// Get returns the current association, or (nil, nil) if no association
+	// has been stored yet.
+	Get() (*LibrarianAssociationData, error)
+
+	// Set upserts the association.  CreatedAt is preserved when an existing
+	// record is replaced; UpdatedAt is set to time.Now() by the
+	// implementation.  ChatSecret / WebhookSecret are required.
+	Set(data LibrarianAssociationData) error
+
+	// Clear removes the association.  Idempotent — no error when nothing
+	// is stored.
+	Clear() error
+}

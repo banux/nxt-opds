@@ -44,9 +44,10 @@ type metaOverride struct {
 // Backend is a filesystem-based catalog backend.
 // It scans a root directory for EPUB/PDF files on creation (or on Refresh).
 type Backend struct {
-	root         string
-	coversDir    string // {root}/.covers – extracted cover images
-	metadataPath string // {root}/.metadata.json – user metadata overrides
+	root          string
+	coversDir     string // {root}/.covers – extracted cover images
+	metadataPath  string // {root}/.metadata.json – user metadata overrides
+	librarianPath string // {root}/.librarian.json – librarian association singleton
 
 	mu         sync.RWMutex
 	books      []catalog.Book
@@ -64,14 +65,15 @@ func New(dir string) (*Backend, error) {
 		return nil, fmt.Errorf("create covers dir: %w", err)
 	}
 	b := &Backend{
-		root:         dir,
-		coversDir:    coversDir,
-		metadataPath: filepath.Join(dir, ".metadata.json"),
-		byID:         make(map[string]*catalog.Book),
-		authors:      make(map[string][]string),
-		tags:         make(map[string][]string),
-		publishers:   make(map[string][]string),
-		overrides:    make(map[string]metaOverride),
+		root:          dir,
+		coversDir:     coversDir,
+		metadataPath:  filepath.Join(dir, ".metadata.json"),
+		librarianPath: filepath.Join(dir, ".librarian.json"),
+		byID:          make(map[string]*catalog.Book),
+		authors:       make(map[string][]string),
+		tags:          make(map[string][]string),
+		publishers:    make(map[string][]string),
+		overrides:     make(map[string]metaOverride),
 	}
 	// Load persisted metadata overrides (ignore error if file doesn't exist yet)
 	_ = b.loadOverrides()
@@ -973,4 +975,83 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	b.mu.Unlock()
 
 	return bk, nil
+}
+
+// librarianFile is the on-disk shape of the librarian association singleton.
+// Timestamps are stored as Unix seconds so the file is portable and easy to
+// inspect with `cat`.  Zero values are treated as "absent".
+type librarianFile struct {
+	LibrarianURL      string `json:"librarianUrl"`
+	LibrarianInstance string `json:"librarianInstance"`
+	ChatSecret        string `json:"chatSecret"`
+	WebhookSecret     string `json:"webhookSecret"`
+	CreatedAt         int64  `json:"createdAt"`
+	UpdatedAt         int64  `json:"updatedAt"`
+}
+
+// Get returns the current librarian association, or (nil, nil) when the file
+// does not exist yet.  Implements catalog.LibrarianAssociation.
+func (b *Backend) Get() (*catalog.LibrarianAssociationData, error) {
+	data, err := os.ReadFile(b.librarianPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read librarian association: %w", err)
+	}
+	var f librarianFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parse librarian association: %w", err)
+	}
+	// A file that exists but only contains zero values means "cleared" — keep
+	// returning the record so callers can detect a partial state, but allow an
+	// empty URL to round-trip cleanly.
+	return &catalog.LibrarianAssociationData{
+		LibrarianURL:      f.LibrarianURL,
+		LibrarianInstance: f.LibrarianInstance,
+		ChatSecret:        f.ChatSecret,
+		WebhookSecret:     f.WebhookSecret,
+		CreatedAt:         time.Unix(f.CreatedAt, 0),
+		UpdatedAt:         time.Unix(f.UpdatedAt, 0),
+	}, nil
+}
+
+// Set upserts the librarian association.  CreatedAt is preserved from the
+// existing file when present; UpdatedAt is always stamped to time.Now().
+// Implements catalog.LibrarianAssociation.
+func (b *Backend) Set(data catalog.LibrarianAssociationData) error {
+	now := time.Now().Unix()
+	createdAt := now
+	// Preserve the original creation timestamp on update.
+	if existing, err := b.Get(); err == nil && existing != nil && !existing.CreatedAt.IsZero() && existing.CreatedAt.Unix() > 0 {
+		createdAt = existing.CreatedAt.Unix()
+	} else if !data.CreatedAt.IsZero() && data.CreatedAt.Unix() > 0 {
+		createdAt = data.CreatedAt.Unix()
+	}
+	f := librarianFile{
+		LibrarianURL:      data.LibrarianURL,
+		LibrarianInstance: data.LibrarianInstance,
+		ChatSecret:        data.ChatSecret,
+		WebhookSecret:     data.WebhookSecret,
+		CreatedAt:         createdAt,
+		UpdatedAt:         now,
+	}
+	out, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal librarian association: %w", err)
+	}
+	// Secrets live in this file; restrict perms to 0600.
+	if err := os.WriteFile(b.librarianPath, out, 0600); err != nil {
+		return fmt.Errorf("write librarian association: %w", err)
+	}
+	return nil
+}
+
+// Clear deletes the librarian association file.  Idempotent — a missing file
+// is not an error.  Implements catalog.LibrarianAssociation.
+func (b *Backend) Clear() error {
+	if err := os.Remove(b.librarianPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove librarian association: %w", err)
+	}
+	return nil
 }

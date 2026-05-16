@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/epub"
@@ -347,5 +348,99 @@ func TestPathToID_Stable(t *testing.T) {
 	id3 := epub.PathToID("/other/path/book.epub")
 	if id1 == id3 {
 		t.Error("different paths produced same ID")
+	}
+}
+
+func TestLibrarianAssociation_FS(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Initial state: no association.
+	got, err := b.Get()
+	if err != nil {
+		t.Fatalf("Get (empty): %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil association on fresh dir, got %+v", got)
+	}
+
+	// Set a first association.
+	first := catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example/",
+		LibrarianInstance: "inst-fs",
+		ChatSecret:        "chat-aaa",
+		WebhookSecret:     "hook-bbb",
+	}
+	if err := b.Set(first); err != nil {
+		t.Fatalf("Set (first): %v", err)
+	}
+
+	// File must exist with 0600 perms (secrets-on-disk).
+	st, err := os.Stat(filepath.Join(dir, ".librarian.json"))
+	if err != nil {
+		t.Fatalf("stat .librarian.json: %v", err)
+	}
+	if perm := st.Mode().Perm(); perm != 0600 {
+		t.Errorf("expected 0600 perms on .librarian.json, got %o", perm)
+	}
+
+	got, err = b.Get()
+	if err != nil || got == nil {
+		t.Fatalf("Get after Set: err=%v got=%v", err, got)
+	}
+	if got.LibrarianURL != first.LibrarianURL ||
+		got.LibrarianInstance != first.LibrarianInstance ||
+		got.ChatSecret != first.ChatSecret ||
+		got.WebhookSecret != first.WebhookSecret {
+		t.Errorf("association mismatch after Set: %+v", got)
+	}
+	createdAt1 := got.CreatedAt.Unix()
+
+	// Replace: CreatedAt must be preserved.
+	time.Sleep(1100 * time.Millisecond)
+	second := catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example/v2",
+		LibrarianInstance: "inst-fs-v2",
+		ChatSecret:        "rotated-chat",
+		WebhookSecret:     "rotated-hook",
+	}
+	if err := b.Set(second); err != nil {
+		t.Fatalf("Set (second): %v", err)
+	}
+	got, err = b.Get()
+	if err != nil || got == nil {
+		t.Fatalf("Get after second Set: err=%v got=%v", err, got)
+	}
+	if got.LibrarianURL != second.LibrarianURL || got.ChatSecret != "rotated-chat" {
+		t.Errorf("replacement did not stick: %+v", got)
+	}
+	if got.CreatedAt.Unix() != createdAt1 {
+		t.Errorf("CreatedAt should be preserved: was %d, now %d", createdAt1, got.CreatedAt.Unix())
+	}
+	if got.UpdatedAt.Unix() <= createdAt1 {
+		t.Errorf("UpdatedAt should advance: createdAt=%d updatedAt=%d", createdAt1, got.UpdatedAt.Unix())
+	}
+
+	// Clear removes the file.
+	if err := b.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".librarian.json")); !os.IsNotExist(err) {
+		t.Errorf("expected file removed, got err=%v", err)
+	}
+	got, err = b.Get()
+	if err != nil {
+		t.Fatalf("Get after Clear: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil after Clear, got %+v", got)
+	}
+
+	// Clear is idempotent.
+	if err := b.Clear(); err != nil {
+		t.Errorf("Clear (second call) should be idempotent, got: %v", err)
 	}
 }

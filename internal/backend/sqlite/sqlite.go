@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 15
+const currentSchemaVersion = 16
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -97,6 +97,24 @@ var schemaMigrations = []schemaMigration{
 	{version: 13, apply: migration13},
 	{version: 14, apply: migration14},
 	{version: 15, apply: migration15},
+	{version: 16, apply: migration16},
+}
+
+// migration16 adds the librarian_association singleton table that stores the
+// pairing with a remote "librarian" service (version 15 → 16).  The id PK is
+// pinned to 1 so there is at most one row at any time.
+func migration16(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS librarian_association (
+    id                 INTEGER PRIMARY KEY CHECK (id = 1),
+    librarian_url      TEXT NOT NULL DEFAULT '',
+    librarian_instance TEXT NOT NULL DEFAULT '',
+    chat_secret        TEXT NOT NULL DEFAULT '',
+    webhook_secret     TEXT NOT NULL DEFAULT '',
+    created_at         INTEGER NOT NULL DEFAULT 0,
+    updated_at         INTEGER NOT NULL DEFAULT 0
+);`)
+	return err
 }
 
 // migration15 adds the webhooks table for admin-configured HTTP callbacks
@@ -2595,5 +2613,69 @@ func (b *Backend) DeleteWebhook(id string) error {
 func (b *Backend) RecordWebhookFire(id, status string, at time.Time) error {
 	_, err := b.db.Exec(`UPDATE webhooks SET last_fired_at=?, last_status=? WHERE id=?`,
 		at.Unix(), status, id)
+	return err
+}
+
+// Get returns the current librarian association, or (nil, nil) if the
+// singleton row has never been written.
+func (b *Backend) Get() (*catalog.LibrarianAssociationData, error) {
+	var (
+		url, instance, chatSecret, webhookSecret string
+		createdAt, updatedAt                     int64
+	)
+	err := b.db.QueryRow(`
+SELECT librarian_url, librarian_instance, chat_secret, webhook_secret, created_at, updated_at
+FROM librarian_association WHERE id = 1`).
+		Scan(&url, &instance, &chatSecret, &webhookSecret, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &catalog.LibrarianAssociationData{
+		LibrarianURL:      url,
+		LibrarianInstance: instance,
+		ChatSecret:        chatSecret,
+		WebhookSecret:     webhookSecret,
+		CreatedAt:         time.Unix(createdAt, 0),
+		UpdatedAt:         time.Unix(updatedAt, 0),
+	}, nil
+}
+
+// Set upserts the librarian association singleton.  CreatedAt is preserved
+// from the existing row when present; UpdatedAt is set to time.Now() here.
+func (b *Backend) Set(data catalog.LibrarianAssociationData) error {
+	now := time.Now().Unix()
+	createdAt := now
+	// Preserve the original creation timestamp on update.
+	var existing int64
+	if err := b.db.QueryRow(`SELECT created_at FROM librarian_association WHERE id = 1`).Scan(&existing); err == nil {
+		if existing > 0 {
+			createdAt = existing
+		}
+	}
+	if !data.CreatedAt.IsZero() && data.CreatedAt.Unix() > 0 {
+		// Honour an explicit caller-supplied CreatedAt only on first write.
+		if existing == 0 {
+			createdAt = data.CreatedAt.Unix()
+		}
+	}
+	_, err := b.db.Exec(`
+INSERT INTO librarian_association (id, librarian_url, librarian_instance, chat_secret, webhook_secret, created_at, updated_at)
+VALUES (1, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    librarian_url      = excluded.librarian_url,
+    librarian_instance = excluded.librarian_instance,
+    chat_secret        = excluded.chat_secret,
+    webhook_secret     = excluded.webhook_secret,
+    updated_at         = excluded.updated_at`,
+		data.LibrarianURL, data.LibrarianInstance, data.ChatSecret, data.WebhookSecret, createdAt, now)
+	return err
+}
+
+// Clear removes the librarian association singleton.  Idempotent.
+func (b *Backend) Clear() error {
+	_, err := b.db.Exec(`DELETE FROM librarian_association WHERE id = 1`)
 	return err
 }
