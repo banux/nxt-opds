@@ -14,6 +14,7 @@ import (
 	fsbackend "github.com/banux/nxt-opds/internal/backend/fs"
 	"github.com/banux/nxt-opds/internal/catalog"
 	"github.com/banux/nxt-opds/internal/opds"
+	"github.com/banux/nxt-opds/internal/opds2"
 )
 
 // ---- mock types for refresh tests ----
@@ -1293,5 +1294,219 @@ func TestHandleAPIBooks_SpiceMaxFilter(t *testing.T) {
 	}
 	if !titles["Child Book"] {
 		t.Error("?spice_max=2 must include Child Book (under 16, exempt)")
+	}
+}
+
+// ---- OPDS spice navigation ----
+
+// TestHandleRoot_HasSpiceNavEntry verifies that GET /opds advertises a
+// "Niveaux de piment" navigation entry that links to /opds/spice.
+func TestHandleRoot_HasSpiceNavEntry(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var feed opds.Feed
+	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+	var found *opds.Entry
+	for i, e := range feed.Entries {
+		if e.ID == "urn:nxt-opds:spice" {
+			found = &feed.Entries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("root feed missing urn:nxt-opds:spice entry; entries=%+v", feed.Entries)
+	}
+	if found.Title.Value != "Niveaux de piment" {
+		t.Errorf("spice title: got %q", found.Title.Value)
+	}
+	if len(found.Links) == 0 || !strings.Contains(found.Links[0].Href, "/opds/spice") {
+		t.Errorf("spice entry should link to /opds/spice; got %+v", found.Links)
+	}
+}
+
+// TestHandleOPDS2Root_HasSpiceNavItem verifies the OPDS v2 root JSON exposes
+// a "Niveaux de piment" navigation item.
+func TestHandleOPDS2Root_HasSpiceNavItem(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	var found *opds2.NavItem
+	for i, nv := range feed.Navigation {
+		if nv.Title == "Niveaux de piment" {
+			found = &feed.Navigation[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("OPDS v2 root missing 'Niveaux de piment' nav item; got %+v", feed.Navigation)
+	}
+	if !strings.Contains(found.Href, "/opds/v2/spice") {
+		t.Errorf("nav item href should point to /opds/v2/spice; got %q", found.Href)
+	}
+}
+
+// TestHandleSpiceLevels_FiveEntries verifies GET /opds/spice returns a
+// 5-entry navigation feed whose links carry ?spice_max=0..4 against
+// /opds/books.
+func TestHandleSpiceLevels_FiveEntries(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds/spice", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var feed opds.Feed
+	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+	if len(feed.Entries) != 5 {
+		t.Fatalf("expected 5 spice entries, got %d", len(feed.Entries))
+	}
+	for i, e := range feed.Entries {
+		expectedHref := fmt.Sprintf("/opds/books?spice_max=%d", i)
+		if len(e.Links) == 0 || !strings.Contains(e.Links[0].Href, expectedHref) {
+			t.Errorf("entry %d: expected href to contain %q, got %+v", i, expectedHref, e.Links)
+		}
+	}
+}
+
+// TestHandleOPDS2SpiceLevels_FiveItems verifies the OPDS v2 spice feed.
+func TestHandleOPDS2SpiceLevels_FiveItems(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/spice", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(feed.Navigation) != 5 {
+		t.Fatalf("expected 5 nav items, got %d", len(feed.Navigation))
+	}
+	for i, nv := range feed.Navigation {
+		expectedHref := fmt.Sprintf("/opds/v2/publications?spice_max=%d", i)
+		if !strings.Contains(nv.Href, expectedHref) {
+			t.Errorf("nav item %d: expected href to contain %q, got %q", i, expectedHref, nv.Href)
+		}
+	}
+}
+
+// TestHandleAllBooks_OPDS_SpiceMaxFilter verifies the ?spice_max= query
+// parameter is honoured on /opds/books — the 18+/spice=4 book is filtered
+// out while the 16+/spice=1 and the youth book remain visible.
+func TestHandleAllBooks_OPDS_SpiceMaxFilter(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	spicy := uploadBook(t, srv, "spicy.epub", "Spicy Book", "Author A")
+	mild := uploadBook(t, srv, "mild.epub", "Mild Book", "Author B")
+	child := uploadBook(t, srv, "child.epub", "Child Book", "Author C")
+
+	patch := func(id, body string) {
+		req := httptest.NewRequest(http.MethodPatch, "/api/books/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("patch %s: %d - %s", id, rr.Code, rr.Body.String())
+		}
+	}
+	patch(spicy.ID, `{"ageRating":18,"spiceRating":4}`)
+	patch(mild.ID, `{"ageRating":16,"spiceRating":1}`)
+	patch(child.ID, `{"ageRating":6}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/books?spice_max=2", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/books?spice_max=2: %d", rr.Code)
+	}
+	var feed opds.Feed
+	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+	titles := map[string]bool{}
+	for _, e := range feed.Entries {
+		titles[e.Title.Value] = true
+	}
+	if titles["Spicy Book"] {
+		t.Error("OPDS ?spice_max=2 must exclude Spicy Book (spice 4)")
+	}
+	if !titles["Mild Book"] {
+		t.Error("OPDS ?spice_max=2 must include Mild Book (spice 1)")
+	}
+	if !titles["Child Book"] {
+		t.Error("OPDS ?spice_max=2 must include Child Book (under 16)")
+	}
+}
+
+// TestHandleSpiceLevels_HiddenForChildProfile verifies that when the request
+// is authenticated as a child profile, /opds/spice returns an empty list and
+// the root feed omits the spice nav entry — the maxAgeRating already strips
+// the relevant titles anyway.
+func TestHandleSpiceLevels_HiddenForChildProfile(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if _, err := backend.CreateUser("Admin", "#000", true, false, 0); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	kid, err := backend.CreateUser("Kid", "#0f0", false, true, 6)
+	if err != nil {
+		t.Fatalf("kid: %v", err)
+	}
+	cookies := loginAsHelper(t, srv, kid.ID)
+
+	// Root feed — spice entry must be absent for the child.
+	rootReq := httptest.NewRequest(http.MethodGet, "/opds", nil)
+	for _, c := range cookies {
+		rootReq.AddCookie(c)
+	}
+	rootRR := httptest.NewRecorder()
+	srv.ServeHTTP(rootRR, rootReq)
+	if rootRR.Code != http.StatusOK {
+		t.Fatalf("GET /opds: %d", rootRR.Code)
+	}
+	var rootFeed opds.Feed
+	if err := xml.Unmarshal(rootRR.Body.Bytes(), &rootFeed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+	for _, e := range rootFeed.Entries {
+		if e.ID == "urn:nxt-opds:spice" {
+			t.Fatalf("root feed should hide spice entry for child profile; got %+v", e)
+		}
+	}
+
+	// /opds/spice — should return an empty navigation feed (no levels).
+	spiceReq := httptest.NewRequest(http.MethodGet, "/opds/spice", nil)
+	for _, c := range cookies {
+		spiceReq.AddCookie(c)
+	}
+	spiceRR := httptest.NewRecorder()
+	srv.ServeHTTP(spiceRR, spiceReq)
+	if spiceRR.Code != http.StatusOK {
+		t.Fatalf("GET /opds/spice: %d", spiceRR.Code)
+	}
+	var spiceFeed opds.Feed
+	if err := xml.Unmarshal(spiceRR.Body.Bytes(), &spiceFeed); err != nil {
+		t.Fatalf("invalid XML: %v", err)
+	}
+	if len(spiceFeed.Entries) != 0 {
+		t.Errorf("child profile should see no spice entries; got %d", len(spiceFeed.Entries))
 	}
 }

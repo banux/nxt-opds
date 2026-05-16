@@ -211,6 +211,20 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	// "Niveaux de piment" — hide entirely for child profiles, the upstream
+	// MaxAgeRating filter already prevents them from accessing 16+/18+ titles.
+	if s.maxAgeRatingForUser(currentUserID(r)) == 0 {
+		feed.AddEntry(opds.Entry{
+			ID:      "urn:nxt-opds:spice",
+			Title:   opds.Text{Value: "Niveaux de piment"},
+			Updated: opds.AtomDate{Time: now},
+			Content: &opds.Content{Type: "text", Value: "Filtrer par intensité (🌶 0 à 4)"},
+			Links: []opds.Link{
+				{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/spice", tok), Type: opds.MIMENavigationFeed},
+			},
+		})
+	}
+
 	if s.wishlistManager != nil {
 		feed.AddEntry(opds.Entry{
 			ID:      "urn:nxt-opds:wishlist",
@@ -290,12 +304,14 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
-		UnreadOnly: true,
-		UserID:     userID,
-		Offset:     offset,
-		Limit:      limit,
-		SortBy:     "added",
-		SortOrder:  "desc",
+		UnreadOnly:   true,
+		UserID:       userID,
+		Offset:       offset,
+		Limit:        limit,
+		SortBy:       "added",
+		SortOrder:    "desc",
+		MaxAgeRating: s.maxAgeRatingForUser(userID),
+		SpiceMax:     parseSpiceMaxQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -318,11 +334,22 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAllBooks serves the acquisition feed with all books.
+// Honours ?spice_max=N and the child profile MaxAgeRating filter so external
+// OPDS clients see the same content the web UI filters down to.
 func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
 
-	books, total, err := s.catalog.AllBooks(offset, limit)
+	books, total, err := s.catalog.Search(catalog.SearchQuery{
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		SortBy:       "added",
+		SortOrder:    "desc",
+		MaxAgeRating: s.maxAgeRatingForUser(userID),
+		SpiceMax:     parseSpiceMaxQuery(r),
+	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -376,11 +403,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
-		Query:  q,
-		Offset: offset,
-		Limit:  limit,
+		Query:        q,
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		MaxAgeRating: s.maxAgeRatingForUser(userID),
+		SpiceMax:     parseSpiceMaxQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "search error", http.StatusInternalServerError)
@@ -446,8 +477,27 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	author, _ := url.PathUnescape(vars["author"])
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
+	spiceMax := parseSpiceMaxQuery(r)
+	maxAge := s.maxAgeRatingForUser(userID)
 
-	books, total, err := s.catalog.BooksByAuthor(author, offset, limit)
+	var (
+		books []catalog.Book
+		total int
+		err   error
+	)
+	if spiceMax != nil || maxAge > 0 {
+		books, total, err = s.catalog.Search(catalog.SearchQuery{
+			Author:       author,
+			Offset:       offset,
+			Limit:        limit,
+			UserID:       userID,
+			MaxAgeRating: maxAge,
+			SpiceMax:     spiceMax,
+		})
+	} else {
+		books, total, err = s.catalog.BooksByAuthor(author, offset, limit)
+	}
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -512,8 +562,27 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	tag, _ := url.PathUnescape(vars["tag"])
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
+	spiceMax := parseSpiceMaxQuery(r)
+	maxAge := s.maxAgeRatingForUser(userID)
 
-	books, total, err := s.catalog.BooksByTag(tag, offset, limit)
+	var (
+		books []catalog.Book
+		total int
+		err   error
+	)
+	if spiceMax != nil || maxAge > 0 {
+		books, total, err = s.catalog.Search(catalog.SearchQuery{
+			Tag:          tag,
+			Offset:       offset,
+			Limit:        limit,
+			UserID:       userID,
+			MaxAgeRating: maxAge,
+			SpiceMax:     spiceMax,
+		})
+	} else {
+		books, total, err = s.catalog.BooksByTag(tag, offset, limit)
+	}
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -532,6 +601,89 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeOPDS(w, http.StatusOK, feed)
+}
+
+// spiceLevels defines the entries shown in the "Niveaux de piment" OPDS
+// navigation feeds.  Each entry points to /opds/books?spice_max=N (or its
+// OPDS v2 equivalent) so that age-classified books with spice <= N are
+// surfaced while younger-audience books remain visible (the backend filter
+// is `age_rating < 16 OR spice <= N`).
+var spiceLevels = []struct {
+	N        int
+	Title    string
+	Subtitle string
+}{
+	{0, "Sans piment", "Uniquement les livres notés 🌶 0 (ou jeune public)"},
+	{1, "Doux (≤ 1)", "Livres au plus 🌶 1 sur les titres 16+ et 18+"},
+	{2, "Modéré (≤ 2)", "Livres au plus 🌶 2 sur les titres 16+ et 18+"},
+	{3, "Épicé (≤ 3)", "Livres au plus 🌶 3 sur les titres 16+ et 18+"},
+	{4, "Très épicé (≤ 4)", "Livres au plus 🌶 4 sur les titres 16+ et 18+"},
+}
+
+// handleSpiceLevels serves the OPDS 1.x navigation feed listing the spice
+// intensity buckets.  Each entry links to /opds/books?spice_max=N.  For child
+// profiles (maxAgeRatingForUser > 0), the feed returns an empty list — the
+// spice levels are irrelevant since their age filter already strips 16+/18+.
+func (s *Server) handleSpiceLevels(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
+
+	feed := opds.NewNavigationFeed(
+		"urn:nxt-opds:spice",
+		"Niveaux de piment",
+	)
+	feed.AddLink(opds.RelSelf, withToken("/opds/spice", tok), opds.MIMENavigationFeed)
+	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
+
+	if s.maxAgeRatingForUser(currentUserID(r)) > 0 {
+		writeOPDS(w, http.StatusOK, feed)
+		return
+	}
+
+	now := time.Now()
+	for _, lvl := range spiceLevels {
+		href := fmt.Sprintf("/opds/books?spice_max=%d", lvl.N)
+		feed.AddEntry(opds.Entry{
+			ID:      fmt.Sprintf("urn:nxt-opds:spice:%d", lvl.N),
+			Title:   opds.Text{Value: lvl.Title},
+			Updated: opds.AtomDate{Time: now},
+			Content: &opds.Content{Type: "text", Value: lvl.Subtitle},
+			Links: []opds.Link{
+				{Rel: opds.RelCatalogNavigation, Href: withToken(href, tok), Type: opds.MIMEAcquisitionFeed},
+			},
+		})
+	}
+
+	writeOPDS(w, http.StatusOK, feed)
+}
+
+// handleOPDS2SpiceLevels is the OPDS 2.0 counterpart of handleSpiceLevels.
+func (s *Server) handleOPDS2SpiceLevels(w http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
+
+	feed := &opds2.Feed{
+		Metadata: opds2.FeedMetadata{Title: "Niveaux de piment"},
+		Links: []opds2.Link{
+			{Rel: "self", Href: withToken("/opds/v2/spice", tok), Type: opds2.MIMEFeed},
+			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+		},
+	}
+
+	if s.maxAgeRatingForUser(currentUserID(r)) > 0 {
+		writeOPDS2(w, http.StatusOK, feed)
+		return
+	}
+
+	for _, lvl := range spiceLevels {
+		href := fmt.Sprintf("/opds/v2/publications?spice_max=%d", lvl.N)
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: lvl.Title,
+			Href:  withToken(href, tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "subsection",
+		})
+	}
+
+	writeOPDS2(w, http.StatusOK, feed)
 }
 
 // handlePublishers serves the publisher navigation feed (OPDS 1.x).
@@ -578,8 +730,27 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	publisher, _ := url.PathUnescape(vars["publisher"])
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
+	spiceMax := parseSpiceMaxQuery(r)
+	maxAge := s.maxAgeRatingForUser(userID)
 
-	books, total, err := s.catalog.BooksByPublisher(publisher, offset, limit)
+	var (
+		books []catalog.Book
+		total int
+		err   error
+	)
+	if spiceMax != nil || maxAge > 0 {
+		books, total, err = s.catalog.Search(catalog.SearchQuery{
+			Publisher:    publisher,
+			Offset:       offset,
+			Limit:        limit,
+			UserID:       userID,
+			MaxAgeRating: maxAge,
+			SpiceMax:     spiceMax,
+		})
+	} else {
+		books, total, err = s.catalog.BooksByPublisher(publisher, offset, limit)
+	}
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -873,6 +1044,29 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 	}
 }
 
+// parseSpiceMaxQuery reads ?spice_max=N from the request and returns a
+// clamped pointer to its value (0..5), or nil when the parameter is absent
+// or unparseable.  Shared by /api/books and every OPDS feed that builds a
+// SearchQuery so external OPDS clients can restrict spicy content the same
+// way the web UI does.
+func parseSpiceMaxQuery(r *http.Request) *int {
+	raw := r.URL.Query().Get("spice_max")
+	if raw == "" {
+		return nil
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return nil
+	}
+	if v < 0 {
+		v = 0
+	}
+	if v > 5 {
+		v = 5
+	}
+	return &v
+}
+
 // handleAPIBooks serves the full book list as JSON for the web frontend.
 // Supports optional ?q= search query, ?series= series filter, ?author= author filter,
 // ?tag= tag filter, ?publisher= publisher filter, ?collection= collection filter,
@@ -900,18 +1094,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	var spiceMax *int
-	if raw := r.URL.Query().Get("spice_max"); raw != "" {
-		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
-			if v < 0 {
-				v = 0
-			}
-			if v > 5 {
-				v = 5
-			}
-			spiceMax = &v
-		}
-	}
+	spiceMax := parseSpiceMaxQuery(r)
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
 
@@ -2803,6 +2986,14 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 			{Title: "Non lus", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed, Rel: "current"},
 		},
 	}
+	if s.maxAgeRatingForUser(currentUserID(r)) == 0 {
+		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+			Title: "Niveaux de piment",
+			Href:  withToken("/opds/v2/spice", tok),
+			Type:  opds2.MIMEFeed,
+			Rel:   "current",
+		})
+	}
 	if s.wishlistManager != nil {
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: "Liste de souhaits",
@@ -2861,12 +3052,14 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
-		UnreadOnly: true,
-		UserID:     userID,
-		Offset:     offset,
-		Limit:      limit,
-		SortBy:     "added",
-		SortOrder:  "desc",
+		UnreadOnly:   true,
+		UserID:       userID,
+		Offset:       offset,
+		Limit:        limit,
+		SortBy:       "added",
+		SortOrder:    "desc",
+		MaxAgeRating: s.maxAgeRatingForUser(userID),
+		SpiceMax:     parseSpiceMaxQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -2893,11 +3086,21 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOPDS2Publications serves the OPDS 2.0 acquisition feed with all books.
+// Honours ?spice_max=N and the child profile MaxAgeRating filter.
 func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
 
-	books, total, err := s.catalog.AllBooks(offset, limit)
+	books, total, err := s.catalog.Search(catalog.SearchQuery{
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		SortBy:       "added",
+		SortOrder:    "desc",
+		MaxAgeRating: s.maxAgeRatingForUser(userID),
+		SpiceMax:     parseSpiceMaxQuery(r),
+	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -2932,11 +3135,15 @@ func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
 
 	books, total, err := s.catalog.Search(catalog.SearchQuery{
-		Query:  q,
-		Offset: offset,
-		Limit:  limit,
+		Query:        q,
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		MaxAgeRating: s.maxAgeRatingForUser(userID),
+		SpiceMax:     parseSpiceMaxQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "search error", http.StatusInternalServerError)
@@ -3003,8 +3210,27 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	author, _ := url.PathUnescape(vars["author"])
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
+	spiceMax := parseSpiceMaxQuery(r)
+	maxAge := s.maxAgeRatingForUser(userID)
 
-	books, total, err := s.catalog.BooksByAuthor(author, offset, limit)
+	var (
+		books []catalog.Book
+		total int
+		err   error
+	)
+	if spiceMax != nil || maxAge > 0 {
+		books, total, err = s.catalog.Search(catalog.SearchQuery{
+			Author:       author,
+			Offset:       offset,
+			Limit:        limit,
+			UserID:       userID,
+			MaxAgeRating: maxAge,
+			SpiceMax:     spiceMax,
+		})
+	} else {
+		books, total, err = s.catalog.BooksByAuthor(author, offset, limit)
+	}
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3070,8 +3296,27 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	tag, _ := url.PathUnescape(vars["tag"])
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
+	spiceMax := parseSpiceMaxQuery(r)
+	maxAge := s.maxAgeRatingForUser(userID)
 
-	books, total, err := s.catalog.BooksByTag(tag, offset, limit)
+	var (
+		books []catalog.Book
+		total int
+		err   error
+	)
+	if spiceMax != nil || maxAge > 0 {
+		books, total, err = s.catalog.Search(catalog.SearchQuery{
+			Tag:          tag,
+			Offset:       offset,
+			Limit:        limit,
+			UserID:       userID,
+			MaxAgeRating: maxAge,
+			SpiceMax:     spiceMax,
+		})
+	} else {
+		books, total, err = s.catalog.BooksByTag(tag, offset, limit)
+	}
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3137,8 +3382,27 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 	vars := mux.Vars(r)
 	publisher, _ := url.PathUnescape(vars["publisher"])
 	offset, limit := parsePagination(r)
+	userID := currentUserID(r)
+	spiceMax := parseSpiceMaxQuery(r)
+	maxAge := s.maxAgeRatingForUser(userID)
 
-	books, total, err := s.catalog.BooksByPublisher(publisher, offset, limit)
+	var (
+		books []catalog.Book
+		total int
+		err   error
+	)
+	if spiceMax != nil || maxAge > 0 {
+		books, total, err = s.catalog.Search(catalog.SearchQuery{
+			Publisher:    publisher,
+			Offset:       offset,
+			Limit:        limit,
+			UserID:       userID,
+			MaxAgeRating: maxAge,
+			SpiceMax:     spiceMax,
+		})
+	} else {
+		books, total, err = s.catalog.BooksByPublisher(publisher, offset, limit)
+	}
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return

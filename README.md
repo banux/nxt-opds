@@ -255,6 +255,9 @@ cannot start, view or break a pairing.
 | `GET /opds/to-read`                | To-read pile feed (per user; multi-user clients pass `?user=<id>`) |
 | `GET /opds/wishlist`               | Wishlist feed                  |
 | `GET /opds/recommendations`        | Recommendations feed           |
+| `GET /opds/spice`                  | Spice-level navigation feed (5 buckets → `/opds/books?spice_max=N`; hidden for child profiles) |
+
+Most book-listing feeds accept `?spice_max=N` (0–5) to restrict 16+/18+ titles to a maximum 🌶 intensity; under-16 books are unaffected. The same filter is exposed on the OPDS v2 counterparts.
 
 ### OPDS 2.0
 Same paths under `/opds/v2` (JSON format).
