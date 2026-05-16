@@ -140,6 +140,12 @@ type SearchQuery struct {
 	// is irrelevant by definition).  Valid pointed-to values: 0 to 5.
 	SpiceMax *int
 
+	// SpiceMin, when non-nil, restricts results to books whose SpiceRating
+	// >= *SpiceMin (still scoped to age_rating >= 16 — sub-16 titles never
+	// carry meaningful spice).  Combine with SpiceMax for a BETWEEN range.
+	// Valid pointed-to values: 0 to 5.
+	SpiceMin *int
+
 	// NotIndexed restricts results to books that have never been processed
 	// (LastMaintenanceAt is zero / last_maintenance_at = 0).
 	NotIndexed bool

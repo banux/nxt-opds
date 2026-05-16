@@ -812,6 +812,15 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		extraClauses = append(extraClauses, "(b.age_rating < 16 OR COALESCE(b.spice_rating, 0) <= ?)")
 		extraArgs = append(extraArgs, v)
 	}
+	if q.SpiceMin != nil && *q.SpiceMin > 0 {
+		v := *q.SpiceMin
+		if v > 5 {
+			v = 5
+		}
+		// Sub-16+ books have no meaningful spice; restrict to age_rating >= 16.
+		extraClauses = append(extraClauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) >= ?)")
+		extraArgs = append(extraArgs, v)
+	}
 	if q.NotIndexed {
 		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")
 	}

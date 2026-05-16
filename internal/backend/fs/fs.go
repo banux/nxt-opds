@@ -598,6 +598,16 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 				continue
 			}
 		}
+		if q.SpiceMin != nil && *q.SpiceMin > 0 {
+			v := *q.SpiceMin
+			if v > 5 {
+				v = 5
+			}
+			// Sub-16+ books have no meaningful spice — drop them.
+			if bk.AgeRating < 16 || bk.SpiceRating < v {
+				continue
+			}
+		}
 		if q.NotIndexed && !bk.LastMaintenanceAt.IsZero() {
 			continue
 		}

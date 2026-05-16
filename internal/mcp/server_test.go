@@ -37,12 +37,37 @@ func (f *fakeCatalog) BookByID(id string) (*catalog.Book, error) {
 func (f *fakeCatalog) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	var out []catalog.Book
 	for _, b := range f.books {
-		if q.Query == "" || containsStr(b.Title, q.Query) {
-			if q.UnreadOnly && b.IsRead {
+		if q.Query != "" && !containsStr(b.Title, q.Query) {
+			continue
+		}
+		if q.UnreadOnly && b.IsRead {
+			continue
+		}
+		if len(q.AgeRatings) > 0 {
+			matched := false
+			for _, want := range q.AgeRatings {
+				if want == -1 && b.AgeRating == 0 {
+					matched = true
+					break
+				}
+				if want > 0 && b.AgeRating == want {
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				continue
 			}
-			out = append(out, b)
 		}
+		if q.SpiceMax != nil && b.AgeRating >= 16 && b.SpiceRating > *q.SpiceMax {
+			continue
+		}
+		if q.SpiceMin != nil && *q.SpiceMin > 0 {
+			if b.AgeRating < 16 || b.SpiceRating < *q.SpiceMin {
+				continue
+			}
+		}
+		out = append(out, b)
 	}
 	total := len(out)
 	if q.Offset < len(out) {
@@ -105,6 +130,30 @@ func newFakeCatalog() *fakeCatalog {
 				Tags:    []string{"classique"},
 				IsRead:  true,
 				AddedAt: time.Now().Add(-time.Hour),
+			},
+			{
+				ID:          "book-3",
+				Title:       "Adulte calme",
+				Authors:     []catalog.Author{{Name: "Anonyme"}},
+				AgeRating:   18,
+				SpiceRating: 1,
+				AddedAt:     time.Now().Add(-2 * time.Hour),
+			},
+			{
+				ID:          "book-4",
+				Title:       "Adulte épicé",
+				Authors:     []catalog.Author{{Name: "Anonyme"}},
+				AgeRating:   18,
+				SpiceRating: 4,
+				AddedAt:     time.Now().Add(-3 * time.Hour),
+			},
+			{
+				ID:          "book-5",
+				Title:       "Ado YA",
+				Authors:     []catalog.Author{{Name: "Anonyme"}},
+				AgeRating:   16,
+				SpiceRating: 2,
+				AddedAt:     time.Now().Add(-4 * time.Hour),
 			},
 		},
 	}
@@ -1221,3 +1270,101 @@ func TestDeleteWishlistItem_CrossUserNonAdminBlocked(t *testing.T) {
 		t.Errorf("DeleteWishlistItem should not have been called, got: %v", cat.deleted)
 	}
 }
+
+// callSearchBooks is a small helper for the age/spice filter tests.
+// It invokes the MCP search_books tool with the given arguments and returns
+// the rendered text content.
+func callSearchBooks(t *testing.T, srv *mcp.Server, args map[string]any) string {
+	t.Helper()
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      99,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "search_books",
+			"arguments": args,
+		},
+	})
+	result := rpcResult(t, resp)
+	content, ok := result["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("expected content items, got: %v", result)
+	}
+	return content[0].(map[string]any)["text"].(string)
+}
+
+// TestToolSearchBooks_AgeRatingExact verifies that age_rating=18 returns only
+// the 18+ titles in the fake catalog.
+func TestToolSearchBooks_AgeRatingExact(t *testing.T) {
+	srv := mcp.New(newFakeCatalog())
+	text := callSearchBooks(t, srv, map[string]any{"age_rating": 18})
+	if !containsStr(text, "Adulte calme") {
+		t.Error("age_rating=18 should include 'Adulte calme' (age=18)")
+	}
+	if !containsStr(text, "Adulte épicé") {
+		t.Error("age_rating=18 should include 'Adulte épicé' (age=18)")
+	}
+	if containsStr(text, "Ado YA") {
+		t.Error("age_rating=18 must exclude 'Ado YA' (age=16)")
+	}
+	if containsStr(text, "Vingt mille lieues") {
+		t.Error("age_rating=18 must exclude unclassified 'Vingt mille lieues'")
+	}
+}
+
+// TestToolSearchBooks_AgeRatingMin verifies that age_rating_min=16 includes
+// both 16+ AND 18+ books in a single call.
+func TestToolSearchBooks_AgeRatingMin(t *testing.T) {
+	srv := mcp.New(newFakeCatalog())
+	text := callSearchBooks(t, srv, map[string]any{"age_rating_min": 16})
+	for _, want := range []string{"Adulte calme", "Adulte épicé", "Ado YA"} {
+		if !containsStr(text, want) {
+			t.Errorf("age_rating_min=16 should include %q", want)
+		}
+	}
+	if containsStr(text, "Vingt mille lieues") {
+		t.Error("age_rating_min=16 must exclude unclassified books")
+	}
+}
+
+// TestToolSearchBooks_SpiceMin verifies that spice_min=3 only returns 16+/18+
+// books whose spice_rating >= 3.
+func TestToolSearchBooks_SpiceMin(t *testing.T) {
+	srv := mcp.New(newFakeCatalog())
+	text := callSearchBooks(t, srv, map[string]any{"spice_min": 3})
+	if !containsStr(text, "Adulte épicé") {
+		t.Error("spice_min=3 should include 'Adulte épicé' (spice=4)")
+	}
+	if containsStr(text, "Adulte calme") {
+		t.Error("spice_min=3 must exclude 'Adulte calme' (spice=1)")
+	}
+	if containsStr(text, "Ado YA") {
+		t.Error("spice_min=3 must exclude 'Ado YA' (spice=2)")
+	}
+	if containsStr(text, "Vingt mille lieues") {
+		t.Error("spice_min=3 must exclude unclassified books (age < 16)")
+	}
+}
+
+// TestToolSearchBooks_SpiceMaxWithAgeMin verifies that combining
+// age_rating_min=16 and spice_max=2 returns only soft 16+/18+ titles.
+func TestToolSearchBooks_SpiceMaxWithAgeMin(t *testing.T) {
+	srv := mcp.New(newFakeCatalog())
+	text := callSearchBooks(t, srv, map[string]any{
+		"age_rating_min": 16,
+		"spice_max":      2,
+	})
+	if !containsStr(text, "Adulte calme") {
+		t.Error("expected 'Adulte calme' (18+/spice=1)")
+	}
+	if !containsStr(text, "Ado YA") {
+		t.Error("expected 'Ado YA' (16+/spice=2)")
+	}
+	if containsStr(text, "Adulte épicé") {
+		t.Error("must exclude 'Adulte épicé' (18+/spice=4)")
+	}
+	if containsStr(text, "Vingt mille lieues") {
+		t.Error("must exclude unclassified books")
+	}
+}
+

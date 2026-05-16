@@ -111,7 +111,7 @@ nxt-opds exposes a [Model Context Protocol](https://modelcontextprotocol.io) end
 
 | Tool              | Description                                    |
 |-------------------|------------------------------------------------|
-| `search_books`         | Search the catalog with filters (incl. `not_indexed`)            |
+| `search_books`         | Search the catalog with filters (`query/author/tag/series/publisher/collection`, `unread_only`, `not_indexed`, `age_rating`/`age_rating_min`, `spice_min`/`spice_max`) |
 | `get_book`             | Get full metadata for a book                                     |
 | `update_book`          | Update book metadata (tags, summary, age rating, last indexed, etc.) |
 | `upload_book`          | Upload an EPUB file (base64-encoded)                             |
