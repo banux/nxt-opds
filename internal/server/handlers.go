@@ -786,6 +786,7 @@ type bookJSON struct {
 	ReadColors      []string `json:"readColors"`   // hex colors of all users who have read it
 	Rating          int      `json:"rating"`
 	AgeRating       int      `json:"ageRating"`
+	SpiceRating     int      `json:"spiceRating"`
 	DownloadURL       string `json:"downloadUrl"`
 	FileType          string `json:"fileType,omitempty"` // MIME type of the primary file (e.g. "application/epub+zip")
 	LastMaintenanceAt int64  `json:"lastMaintenanceAt,omitempty"` // Unix ms, when this book was last indexed
@@ -899,6 +900,18 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	var spiceMax *int
+	if raw := r.URL.Query().Get("spice_max"); raw != "" {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			if v < 0 {
+				v = 0
+			}
+			if v > 5 {
+				v = 5
+			}
+			spiceMax = &v
+		}
+	}
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
 
@@ -923,6 +936,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			SortOrder:    sortOrder,
 			MaxAgeRating: maxAge,
 			AgeRatings:   ageRatingFilters,
+			SpiceMax:     spiceMax,
 		})
 		if err != nil {
 			http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -956,6 +970,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    sortOrder,
 		MaxAgeRating: maxAge,
 		AgeRatings:   ageRatingFilters,
+		SpiceMax:     spiceMax,
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -1005,6 +1020,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			ReadColors:      colors,
 			Rating:          bk.Rating,
 			AgeRating:       bk.AgeRating,
+			SpiceRating:     bk.SpiceRating,
 			DownloadURL:     "/opds/books/" + bk.ID + "/download",
 			FileType:        fileType,
 			LastMaintenanceAt: func() int64 {
@@ -1044,6 +1060,7 @@ type bookUpdateRequest struct {
 	IsRead          *bool   `json:"isRead"`
 	Rating          *int    `json:"rating"`
 	AgeRating       *int    `json:"ageRating"`
+	SpiceRating     *int    `json:"spiceRating"`
 	// LastMaintenanceAt: Unix ms timestamp; -1 means "now".
 	LastMaintenanceAt *int64  `json:"lastMaintenanceAt"`
 }
@@ -1088,6 +1105,7 @@ func (s *Server) handleAPIBook(w http.ResponseWriter, r *http.Request) {
 		ReadColors:      colors,
 		Rating:          bk.Rating,
 		AgeRating:       bk.AgeRating,
+		SpiceRating:     bk.SpiceRating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 		FileType: func() string {
 			if len(bk.Files) > 0 {
@@ -1149,6 +1167,14 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		maintenanceAt = &t
 	}
 
+	if req.SpiceRating != nil {
+		v := *req.SpiceRating
+		if v < 0 || v > 5 {
+			http.Error(w, "spiceRating must be between 0 and 5", http.StatusBadRequest)
+			return
+		}
+	}
+
 	update := catalog.BookUpdate{
 		Title:             req.Title,
 		Authors:           req.Authors,
@@ -1164,6 +1190,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		IsRead:            updateIsRead,
 		Rating:            req.Rating,
 		AgeRating:         req.AgeRating,
+		SpiceRating:       req.SpiceRating,
 		LastMaintenanceAt: maintenanceAt,
 	}
 
@@ -1204,6 +1231,7 @@ func (s *Server) handleAPIUpdateBook(w http.ResponseWriter, r *http.Request) {
 		ReadColors:      colors,
 		Rating:          bk.Rating,
 		AgeRating:       bk.AgeRating,
+		SpiceRating:     bk.SpiceRating,
 		DownloadURL:     "/opds/books/" + bk.ID + "/download",
 		FileType:        func() string {
 			if len(bk.Files) > 0 {

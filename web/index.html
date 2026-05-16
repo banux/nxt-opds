@@ -794,6 +794,20 @@
           </button>
         </template>
 
+        <!-- Spice max filter — hidden for child profiles -->
+        <template v-if="!(currentUser && currentUser.isChild)">
+          <template v-for="sm in [{v:0,l:'🌶 0'},{v:1,l:'🌶 ≤1'},{v:2,l:'🌶 ≤2'},{v:3,l:'🌶 ≤3'},{v:4,l:'🌶 ≤4'}]" :key="sm.v">
+            <button @click="setSpiceMaxFilter(sm.v)"
+              :title="'Limiter les 16+/18+ à intensité ' + sm.v"
+              :class="spiceMaxFilter === sm.v
+                ? 'bg-red-500 text-white border-red-500'
+                : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-red-500 hover:text-red-500'"
+              class="shrink-0 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
+              {{ sm.l }}
+            </button>
+          </template>
+        </template>
+
         <!-- Tags management link -->
         <a @click="navigateTo('/tags')"
           class="flex shrink-0 items-center gap-1 px-3 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors">
@@ -1098,11 +1112,17 @@
           </div>
 
           <!-- Age rating badge -->
-          <div v-if="currentBook.ageRating > 0" class="flex items-center gap-2 mb-4">
+          <div v-if="currentBook.ageRating > 0" class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-xs font-semibold px-2.5 py-1 rounded-full" :class="ageRatingBadgeClass(currentBook.ageRating)">
               {{ ageRatingLabel(currentBook.ageRating) }}
             </span>
             <span class="text-xs text-gray-400 dark:text-gray-500">Classification d'âge</span>
+            <span v-if="currentBook.ageRating >= 16 && currentBook.spiceRating > 0"
+              class="text-xs font-semibold px-2.5 py-1 rounded-full"
+              :class="spiceBadgeClass(currentBook.spiceRating)"
+              :title="spiceLabel(currentBook.spiceRating)">
+              🌶 {{ currentBook.spiceRating }}/5
+            </span>
           </div>
 
           <!-- Star rating -->
@@ -2650,6 +2670,21 @@
             <option :value="18">18+ (Adulte)</option>
           </select>
         </div>
+
+        <div v-if="editForm.ageRating >= 16">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <span class="mr-1">🌶</span>Intensité (contenu sexuel)
+          </label>
+          <select v-model.number="editForm.spiceRating"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600">
+            <option :value="0">0 – Aucun / non noté</option>
+            <option :value="1">1 – Suggestif</option>
+            <option :value="2">2 – Romance sensuelle</option>
+            <option :value="3">3 – Scènes explicites occasionnelles</option>
+            <option :value="4">4 – Explicite récurrent</option>
+            <option :value="5">5 – Très explicite / érotique</option>
+          </select>
+        </div>
       </div>
 
       <div v-if="editError" class="mt-4 px-3 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-lg text-sm">
@@ -2986,6 +3021,8 @@ createApp({
     const notIndexedOnly    = ref(false)
     const ageRatingFilter   = ref([])  // empty = all; values: -1 = unclassified, 3/6/10/12/16/18 = exact match
     const seriesSizeFilter  = ref('')  // '' = all; values: standalone, short, medium, long
+    // spice_max filter: -1 = no filter (default); 0-5 = restrict 16+/18+ books to spice <= N.
+    const spiceMaxFilter    = ref(parseInt(localStorage.getItem('nxt-spice-max') ?? '-1', 10))
     const sortOrder         = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
@@ -3033,6 +3070,7 @@ createApp({
         if (notIndexedOnly.value) params.set('not_indexed', '1')
         if (ageRatingFilter.value.length > 0) params.set('age_rating', ageRatingFilter.value.join(','))
         if (seriesSizeFilter.value) params.set('series_size', seriesSizeFilter.value)
+        if (spiceMaxFilter.value >= 0 && spiceMaxFilter.value <= 5) params.set('spice_max', String(spiceMaxFilter.value))
         if (sortOrder.value) params.set('sort', sortOrder.value)
         const res = await apiFetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -3076,6 +3114,18 @@ createApp({
 
     function setSeriesSizeFilter(v) {
       seriesSizeFilter.value = seriesSizeFilter.value === v ? '' : v
+      page.value = 1
+      loadBooks()
+    }
+
+    function setSpiceMaxFilter(v) {
+      // Toggle: clicking the active value clears the filter.
+      spiceMaxFilter.value = spiceMaxFilter.value === v ? -1 : v
+      if (spiceMaxFilter.value >= 0) {
+        localStorage.setItem('nxt-spice-max', String(spiceMaxFilter.value))
+      } else {
+        localStorage.removeItem('nxt-spice-max')
+      }
       page.value = 1
       loadBooks()
     }
@@ -3597,6 +3647,7 @@ createApp({
       if (notIndexedOnly.value) p.set('not_indexed', '1')
       if (ageRatingFilter.value.length > 0) p.set('age_rating', ageRatingFilter.value.join(','))
       if (seriesSizeFilter.value) p.set('series_size', seriesSizeFilter.value)
+      if (spiceMaxFilter.value >= 0 && spiceMaxFilter.value <= 5) p.set('spice_max', String(spiceMaxFilter.value))
       if (sortOrder.value) p.set('sort', sortOrder.value)
       return p.toString()
     }
@@ -3666,7 +3717,7 @@ createApp({
     const editForm    = ref({
       title: '', authorsStr: '', tagsStr: '', summary: '',
       publisher: '', language: '', series: '', seriesIndex: '', seriesTotal: '', collection: '', collectionIndex: '',
-      ageRating: 0,
+      ageRating: 0, spiceRating: 0,
     })
 
     // Maps numeric age rating to French label.
@@ -3687,6 +3738,27 @@ createApp({
       if (v >= 12) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
       if (v >= 10) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
       if (v >= 3)  return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+      return 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+    }
+
+    // Maps spice rating 0-5 to a French label.
+    const spiceLabel = (v) => {
+      switch (v) {
+        case 1: return 'Suggestif'
+        case 2: return 'Romance sensuelle'
+        case 3: return 'Scènes explicites occasionnelles'
+        case 4: return 'Explicite récurrent'
+        case 5: return 'Très explicite / érotique'
+        default: return 'Aucun / non noté'
+      }
+    }
+    // Gradient green → red as spice intensity increases.
+    const spiceBadgeClass = (v) => {
+      if (v >= 5) return 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+      if (v >= 4) return 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'
+      if (v >= 3) return 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+      if (v >= 2) return 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300'
+      if (v >= 1) return 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
       return 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
     }
 
@@ -3755,6 +3827,7 @@ createApp({
         collection:      book.collection      || '',
         collectionIndex: book.collectionIndex || '',
         ageRating:       book.ageRating || 0,
+        spiceRating:     book.spiceRating || 0,
       }
       editError.value = ''
       editDialog.value = true
@@ -3786,6 +3859,7 @@ createApp({
           collection:      editForm.value.collection,
           collectionIndex: editForm.value.collectionIndex,
           ageRating:       editForm.value.ageRating,
+          spiceRating:     editForm.value.ageRating >= 16 ? editForm.value.spiceRating : 0,
         }
         const res = await apiFetch('/api/books/' + editBook.value.id, {
           method:  'PATCH',
@@ -4945,8 +5019,8 @@ createApp({
 
     return {
       isDark, toggleDark,
-      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, seriesSizeFilter, sortOrder, totalPages, pageNumbers,
-      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, setSeriesSizeFilter, onSortChange, goPage, coverGradient,
+      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, seriesSizeFilter, spiceMaxFilter, sortOrder, totalPages, pageNumbers,
+      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, setSeriesSizeFilter, setSpiceMaxFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
       onBookTouchStart, onBookTouchEnd,
@@ -4962,6 +5036,7 @@ createApp({
       coverUploading, onCoverFileChange,
       editDialog, editForm, editSaving, editError, openEdit, closeEdit, saveEdits,
       ageRatingLabel, ageRatingBadgeClass,
+      spiceLabel, spiceBadgeClass,
       autocompleteSeries, autocompleteCollections,
       tagsSuggestions, tagsSuggestionsVisible, onTagsInput, hideTagsSuggestions, selectTag,
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,

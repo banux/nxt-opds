@@ -77,6 +77,12 @@ type Book struct {
 	// 12 = adolescent, 18 = adulte.
 	AgeRating int
 
+	// SpiceRating grades the intensity of sexual content on a 0-5 scale.
+	// Only meaningful for AgeRating >= 16. 0 = none/unrated, 1 = suggestive,
+	// 2 = sensual romance, 3 = occasional explicit scenes, 4 = recurrent
+	// explicit, 5 = very explicit / erotica focus.
+	SpiceRating int
+
 	// LastMaintenanceAt is when this book's metadata was last extracted/indexed.
 	LastMaintenanceAt time.Time
 }
@@ -128,6 +134,11 @@ type SearchQuery struct {
 	// Positive values match exactly (e.g. [3, 6] shows only 3+ and 6+ books).
 	// Empty slice means no filter is applied.
 	AgeRatings []int
+
+	// SpiceMax, when non-nil, restricts results to books whose SpiceRating
+	// <= *SpiceMax.  Books with age_rating < 16 are unaffected (their spice
+	// is irrelevant by definition).  Valid pointed-to values: 0 to 5.
+	SpiceMax *int
 
 	// NotIndexed restricts results to books that have never been processed
 	// (LastMaintenanceAt is zero / last_maintenance_at = 0).
@@ -393,6 +404,7 @@ type BookUpdate struct {
 	IsRead          *bool
 	Rating          *int
 	AgeRating       *int
+	SpiceRating     *int
 	// LastMaintenanceAt, if non-nil, sets the maintenance timestamp.
 	// Use a zero time.Time to clear it; use time.Now() to mark as "just processed".
 	LastMaintenanceAt *time.Time

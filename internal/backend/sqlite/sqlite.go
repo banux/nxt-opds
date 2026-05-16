@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 17
+const currentSchemaVersion = 18
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -99,6 +99,19 @@ var schemaMigrations = []schemaMigration{
 	{version: 15, apply: migration15},
 	{version: 16, apply: migration16},
 	{version: 17, apply: migration17},
+	{version: 18, apply: migration18},
+}
+
+// migration18 adds the spice_rating column to books for 0-5 sexual-content
+// intensity grading on 16+/18+ titles (version 17 → 18).  Defensive ALTER so
+// running on a DB that already has the column (e.g. fresh schema) is tolerated.
+func migration18(db *sql.DB) error {
+	if _, err := db.Exec(`ALTER TABLE books ADD COLUMN spice_rating INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 // migration17 adds the last_seen_at column to the librarian_association table
@@ -530,12 +543,12 @@ func (b *Backend) insertBook(bk catalog.Book) error {
 	_, err = tx.Exec(`
 INSERT OR IGNORE INTO books
     (id, title, summary, language, publisher, published_at, updated_at, added_at,
-     series, series_index, series_total, collection, collection_index, is_read, rating, age_rating, cover_url, thumbnail_url,
+     series, series_index, series_total, collection, collection_index, is_read, rating, age_rating, spice_rating, cover_url, thumbnail_url,
      file_path, file_mime, file_size)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		bk.ID, bk.Title, bk.Summary, bk.Language, bk.Publisher,
 		pubAt, updAt, addedAt,
-		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating,
+		bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating, bk.SpiceRating,
 		bk.CoverURL, bk.ThumbnailURL,
 		filePath, fileMIME, fileSize,
 	)
@@ -786,6 +799,18 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		for _, v := range dbVals {
 			extraArgs = append(extraArgs, v)
 		}
+	}
+	if q.SpiceMax != nil {
+		v := *q.SpiceMax
+		if v < 0 {
+			v = 0
+		}
+		if v > 5 {
+			v = 5
+		}
+		// Books below 16+ have no spice context, so the filter ignores them.
+		extraClauses = append(extraClauses, "(b.age_rating < 16 OR COALESCE(b.spice_rating, 0) <= ?)")
+		extraArgs = append(extraArgs, v)
 	}
 	if q.NotIndexed {
 		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")
@@ -1115,6 +1140,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	if update.AgeRating != nil {
 		bk.AgeRating = *update.AgeRating
 	}
+	if update.SpiceRating != nil {
+		bk.SpiceRating = *update.SpiceRating
+	}
 	if update.LastMaintenanceAt != nil {
 		bk.LastMaintenanceAt = *update.LastMaintenanceAt
 	}
@@ -1135,10 +1163,10 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	_, err = tx.Exec(`
 UPDATE books SET
     title=?, summary=?, language=?, publisher=?,
-    updated_at=?, series=?, series_index=?, series_total=?, collection=?, collection_index=?, is_read=?, rating=?, age_rating=?, last_maintenance_at=?
+    updated_at=?, series=?, series_index=?, series_total=?, collection=?, collection_index=?, is_read=?, rating=?, age_rating=?, spice_rating=?, last_maintenance_at=?
 WHERE id=?`,
 		bk.Title, bk.Summary, bk.Language, bk.Publisher,
-		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating, maintenanceVal,
+		bk.UpdatedAt.Unix(), bk.Series, bk.SeriesIndex, bk.SeriesTotal, bk.Collection, bk.CollectionIndex, boolToInt(bk.IsRead), bk.Rating, bk.AgeRating, bk.SpiceRating, maintenanceVal,
 		id,
 	)
 	if err != nil {
@@ -1352,6 +1380,7 @@ type bookRow struct {
 	IsRead          int
 	Rating          int
 	AgeRating       int
+	SpiceRating     int
 	CoverURL     string
 	ThumbnailURL string
 	FilePath     string
@@ -1377,6 +1406,7 @@ func (r bookRow) toBook() catalog.Book {
 		IsRead:          r.IsRead != 0,
 		Rating:          r.Rating,
 		AgeRating:       r.AgeRating,
+		SpiceRating:     r.SpiceRating,
 		CoverURL:     r.CoverURL,
 		ThumbnailURL: r.ThumbnailURL,
 		UpdatedAt:         time.Unix(r.UpdatedAt, 0),
@@ -1417,7 +1447,7 @@ func (r bookRow) toBook() catalog.Book {
 // bookSelectColumns is the SELECT list for querying full book records.
 const bookSelectColumns = `
     b.id, b.title, b.summary, b.language, b.publisher,
-    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.collection, b.collection_index, b.is_read, b.rating, b.age_rating,
+    b.published_at, b.updated_at, b.added_at, b.series, b.series_index, b.series_total, b.collection, b.collection_index, b.is_read, b.rating, b.age_rating, COALESCE(b.spice_rating, 0),
     b.cover_url, b.thumbnail_url, b.file_path, b.file_mime, b.file_size,
     COALESCE(b.last_maintenance_at, 0),
     (SELECT json_group_array(json_object('name',ba.author_name,'uri',ba.author_uri))
@@ -1440,7 +1470,7 @@ func (b *Backend) queryBooks(clause string, args ...any) ([]catalog.Book, error)
 		var r bookRow
 		if err := rows.Scan(
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
-			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating, &r.SpiceRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.LastMaintenanceAt,
 			&r.AuthorsJSON, &r.TagsJSON,
@@ -1764,7 +1794,7 @@ func scanRecommendationRows(rows *sql.Rows, fromFirst bool) ([]catalog.Recommend
 			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt,
 			&r.Series, &r.SeriesIndex, &r.SeriesTotal,
 			&r.Collection, &r.CollectionIndex,
-			&r.IsRead, &r.Rating, &r.AgeRating,
+			&r.IsRead, &r.Rating, &r.AgeRating, &r.SpiceRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.LastMaintenanceAt,
 			&r.AuthorsJSON, &r.TagsJSON,
@@ -1876,7 +1906,7 @@ ORDER BY r.created_at DESC`)
 			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt,
 			&r.Series, &r.SeriesIndex, &r.SeriesTotal,
 			&r.Collection, &r.CollectionIndex,
-			&r.IsRead, &r.Rating, &r.AgeRating,
+			&r.IsRead, &r.Rating, &r.AgeRating, &r.SpiceRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.LastMaintenanceAt,
 			&r.AuthorsJSON, &r.TagsJSON,
@@ -2335,7 +2365,7 @@ ORDER BY trl.position ASC, trl.added_at ASC`, userID)
 		if err := rows.Scan(
 			&pos, &addedAt,
 			&r.ID, &r.Title, &r.Summary, &r.Language, &r.Publisher,
-			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating,
+			&r.PublishedAt, &r.UpdatedAt, &r.AddedAt, &r.Series, &r.SeriesIndex, &r.SeriesTotal, &r.Collection, &r.CollectionIndex, &r.IsRead, &r.Rating, &r.AgeRating, &r.SpiceRating,
 			&r.CoverURL, &r.ThumbnailURL, &r.FilePath, &r.FileMIME, &r.FileSize,
 			&r.LastMaintenanceAt,
 			&r.AuthorsJSON, &r.TagsJSON,

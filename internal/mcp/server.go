@@ -269,7 +269,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.121.0",
+			"version": "1.122.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
@@ -332,6 +332,7 @@ func (s *Server) toolsList() toolsListResult {
 					"is_read":              {Type: "boolean", Description: "Marquer comme lu (true) ou non lu (false)"},
 					"rating":               {Type: "integer", Description: "Note de 0 (non noté) à 5 étoiles"},
 					"age_rating":           {Type: "integer", Description: "Classification d'âge : 0=non classifié, 3=3+, 6=6+, 10=10+, 12=12+, 16=16+, 18=18+"},
+					"spice_rating":         {Type: "integer", Description: "Intensité du contenu sexuel sur une échelle 0-5 (uniquement pertinent pour les livres 16+ et 18+). 0=aucun/non noté, 1=suggestif, 2=romance sensuelle, 3=scènes explicites occasionnelles, 4=explicite récurrent, 5=très explicite/érotique"},
 					"last_maintenance_at":  {Type: "integer", Description: "Date de dernière maintenance en Unix ms. Passer -1 pour mettre à jour au moment actuel (maintenant)."},
 				},
 			},
@@ -725,6 +726,15 @@ func (s *Server) toolUpdateBook(args map[string]any) (any, *rpcError) {
 	}
 	if v, ok := numericArg(args, "age_rating"); ok {
 		update.AgeRating = &v
+	}
+	if v, ok := numericArg(args, "spice_rating"); ok {
+		if v < 0 {
+			v = 0
+		}
+		if v > 5 {
+			v = 5
+		}
+		update.SpiceRating = &v
 	}
 	if v, ok := numericArg(args, "last_maintenance_at"); ok {
 		var t time.Time
@@ -1375,6 +1385,9 @@ func formatBookDetail(b *catalog.Book) string {
 	}
 	if b.AgeRating > 0 {
 		fmt.Fprintf(&sb, "**Classification d'âge:** %d+\n", b.AgeRating)
+	}
+	if b.AgeRating >= 16 && b.SpiceRating > 0 {
+		fmt.Fprintf(&sb, "**Intensité (piment):** %d/5\n", b.SpiceRating)
 	}
 	if b.Summary != "" {
 		summary := b.Summary

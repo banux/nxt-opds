@@ -1403,3 +1403,109 @@ func TestLibrarianAssociation_Singleton(t *testing.T) {
 		t.Errorf("Clear (second call) should be idempotent, got: %v", err)
 	}
 }
+
+// TestSQLiteBackend_SpiceRating_PersistAndFilter verifies that the SpiceRating
+// field round-trips through UpdateBook + BookByID and that the SpiceMax search
+// filter respects the "age_rating < 16 OR spice <= max" rule.
+func TestSQLiteBackend_SpiceRating_PersistAndFilter(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "spicy.epub"), "Spicy Book", "Author A", "Romance")
+	createMinimalEPUB(t, filepath.Join(dir, "mild.epub"), "Mild Book", "Author B", "Romance")
+	createMinimalEPUB(t, filepath.Join(dir, "child.epub"), "Child Book", "Author C", "Children")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+
+	books, _, _ := b.AllBooks(0, 50)
+	if len(books) < 3 {
+		t.Fatalf("need 3 books, got %d", len(books))
+	}
+
+	// Map by title to make assertions deterministic.
+	byTitle := map[string]string{}
+	for _, bk := range books {
+		byTitle[bk.Title] = bk.ID
+	}
+
+	// Spicy: age 18, spice 4.
+	age18, sp4 := 18, 4
+	if _, err := b.UpdateBook(byTitle["Spicy Book"], catalog.BookUpdate{AgeRating: &age18, SpiceRating: &sp4}); err != nil {
+		t.Fatalf("UpdateBook spicy: %v", err)
+	}
+	// Mild: age 16, spice 1.
+	age16, sp1 := 16, 1
+	if _, err := b.UpdateBook(byTitle["Mild Book"], catalog.BookUpdate{AgeRating: &age16, SpiceRating: &sp1}); err != nil {
+		t.Fatalf("UpdateBook mild: %v", err)
+	}
+	// Child: age 6, spice irrelevant (must not be filtered out by SpiceMax).
+	age6, sp0 := 6, 0
+	if _, err := b.UpdateBook(byTitle["Child Book"], catalog.BookUpdate{AgeRating: &age6, SpiceRating: &sp0}); err != nil {
+		t.Fatalf("UpdateBook child: %v", err)
+	}
+
+	// Round-trip: reload by ID and ensure SpiceRating persisted.
+	spicyAfter, err := b.BookByID(byTitle["Spicy Book"])
+	if err != nil {
+		t.Fatalf("BookByID spicy: %v", err)
+	}
+	if spicyAfter.SpiceRating != 4 {
+		t.Errorf("Spicy SpiceRating: got %d, want 4", spicyAfter.SpiceRating)
+	}
+	if spicyAfter.AgeRating != 18 {
+		t.Errorf("Spicy AgeRating: got %d, want 18", spicyAfter.AgeRating)
+	}
+
+	// Filter with SpiceMax=2: must keep Mild (spice 1) + Child (under 16) but drop Spicy (spice 4).
+	max2 := 2
+	res, _, err := b.Search(catalog.SearchQuery{SpiceMax: &max2, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search SpiceMax=2: %v", err)
+	}
+	got := map[string]bool{}
+	for _, bk := range res {
+		got[bk.Title] = true
+	}
+	if got["Spicy Book"] {
+		t.Error("SpiceMax=2 must exclude Spicy Book (spice 4)")
+	}
+	if !got["Mild Book"] {
+		t.Error("SpiceMax=2 must include Mild Book (spice 1)")
+	}
+	if !got["Child Book"] {
+		t.Error("SpiceMax=2 must include Child Book (age 6, exempt)")
+	}
+
+	// No filter (nil): all three present.
+	res, _, err = b.Search(catalog.SearchQuery{Limit: 50})
+	if err != nil {
+		t.Fatalf("Search no filter: %v", err)
+	}
+	if len(res) != 3 {
+		t.Errorf("no filter expected 3 books, got %d", len(res))
+	}
+}
+
+// TestSQLiteBackend_MigrateSchema_Has18 verifies migration18 brings a database
+// up to currentSchemaVersion=18 by ensuring spice_rating column exists.
+func TestSQLiteBackend_MigrateSchema_Has18(t *testing.T) {
+	dir := t.TempDir()
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer b.Close()
+	var version int
+	if err := b.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version < 18 {
+		t.Errorf("expected user_version >= 18, got %d", version)
+	}
+	// Inserting a spice_rating value through the column should succeed.
+	if _, err := b.db.Exec(`SELECT spice_rating FROM books LIMIT 1`); err != nil {
+		t.Errorf("spice_rating column missing: %v", err)
+	}
+}

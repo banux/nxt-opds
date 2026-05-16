@@ -38,6 +38,7 @@ type metaOverride struct {
 	IsRead          *bool      `json:"isRead"`
 	Rating          *int       `json:"rating"`
 	AgeRating       *int       `json:"ageRating"`
+	SpiceRating     *int       `json:"spiceRating"`
 	LastMaintenanceAt *int64   `json:"lastMaintenanceAt"` // Unix seconds, 0 = cleared
 }
 
@@ -163,6 +164,9 @@ func mergeOverride(bk catalog.Book, ov metaOverride) catalog.Book {
 	if ov.AgeRating != nil {
 		bk.AgeRating = *ov.AgeRating
 	}
+	if ov.SpiceRating != nil {
+		bk.SpiceRating = *ov.SpiceRating
+	}
 	if ov.LastMaintenanceAt != nil {
 		if *ov.LastMaintenanceAt == 0 {
 			bk.LastMaintenanceAt = time.Time{}
@@ -228,6 +232,9 @@ func (b *Backend) UpdateBook(id string, update catalog.BookUpdate) (*catalog.Boo
 	}
 	if update.AgeRating != nil {
 		ov.AgeRating = update.AgeRating
+	}
+	if update.SpiceRating != nil {
+		ov.SpiceRating = update.SpiceRating
 	}
 	if update.LastMaintenanceAt != nil {
 		ts := update.LastMaintenanceAt.Unix()
@@ -576,6 +583,18 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 				}
 			}
 			if !matched {
+				continue
+			}
+		}
+		if q.SpiceMax != nil && bk.AgeRating >= 16 {
+			v := *q.SpiceMax
+			if v < 0 {
+				v = 0
+			}
+			if v > 5 {
+				v = 5
+			}
+			if bk.SpiceRating > v {
 				continue
 			}
 		}
@@ -961,8 +980,13 @@ func (b *Backend) StoreBook(filename string, src io.ReadCloser) (*catalog.Book, 
 	}
 	// Prepend so the new book appears first in the default (newest-first) order.
 	b.books = append([]catalog.Book{book}, b.books...)
+	// Rebuild byID across the entire slice: appending re-allocates the
+	// underlying array, so any pointers previously stored in b.byID for older
+	// books are now stale and would silently mutate orphaned copies on update.
+	for i := range b.books {
+		b.byID[b.books[i].ID] = &b.books[i]
+	}
 	bk := &b.books[0]
-	b.byID[bk.ID] = bk
 	for _, a := range bk.Authors {
 		b.authors[a.Name] = append(b.authors[a.Name], bk.ID)
 	}

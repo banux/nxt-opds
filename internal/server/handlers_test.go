@@ -1195,3 +1195,103 @@ func TestHandleSW_DefaultsToDev(t *testing.T) {
 		t.Errorf("expected dev fallback, got: %s", rr.Body.String())
 	}
 }
+
+// TestHandleAPIUpdateBook_SpiceRating_ValidAndInvalid exercises the new
+// spiceRating PATCH field: a value of 4 is accepted, persisted and returned;
+// an out-of-range value (7) is rejected with 400.
+func TestHandleAPIUpdateBook_SpiceRating_ValidAndInvalid(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	book := uploadBook(t, srv, "spice.epub", "Spicy Book", "Author A")
+
+	// Valid: spiceRating=4 with ageRating=18 must persist.
+	body := strings.NewReader(`{"ageRating":18,"spiceRating":4}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/books/"+book.ID, body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("valid spice: got %d: %s", rr.Code, rr.Body.String())
+	}
+	var updated bookJSON
+	if err := json.NewDecoder(rr.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if updated.SpiceRating != 4 {
+		t.Errorf("SpiceRating: got %d, want 4", updated.SpiceRating)
+	}
+	if updated.AgeRating != 18 {
+		t.Errorf("AgeRating: got %d, want 18", updated.AgeRating)
+	}
+
+	// Out-of-range: 7 must be rejected with 400.
+	bad := strings.NewReader(`{"spiceRating":7}`)
+	req2 := httptest.NewRequest(http.MethodPatch, "/api/books/"+book.ID, bad)
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusBadRequest {
+		t.Errorf("spiceRating=7 expected 400, got %d", rr2.Code)
+	}
+
+	// Negative: must also be rejected.
+	neg := strings.NewReader(`{"spiceRating":-1}`)
+	req3 := httptest.NewRequest(http.MethodPatch, "/api/books/"+book.ID, neg)
+	req3.Header.Set("Content-Type", "application/json")
+	rr3 := httptest.NewRecorder()
+	srv.ServeHTTP(rr3, req3)
+	if rr3.Code != http.StatusBadRequest {
+		t.Errorf("spiceRating=-1 expected 400, got %d", rr3.Code)
+	}
+}
+
+// TestHandleAPIBooks_SpiceMaxFilter verifies the ?spice_max= query parameter
+// filters out 16+/18+ books whose SpiceRating exceeds the cap while leaving
+// books under 16 untouched.
+func TestHandleAPIBooks_SpiceMaxFilter(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	spicy := uploadBook(t, srv, "spicy.epub", "Spicy Book", "Author A")
+	mild := uploadBook(t, srv, "mild.epub", "Mild Book", "Author B")
+	child := uploadBook(t, srv, "child.epub", "Child Book", "Author C")
+
+	// Spicy: ageRating=18, spiceRating=4.
+	patch := func(id, body string) {
+		req := httptest.NewRequest(http.MethodPatch, "/api/books/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("patch %s: %d - %s", id, rr.Code, rr.Body.String())
+		}
+	}
+	patch(spicy.ID, `{"ageRating":18,"spiceRating":4}`)
+	patch(mild.ID, `{"ageRating":16,"spiceRating":1}`)
+	patch(child.ID, `{"ageRating":6}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books?spice_max=2", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/books?spice_max=2: %d", rr.Code)
+	}
+	var resp struct {
+		Books []bookJSON `json:"books"`
+		Total int        `json:"total"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	titles := map[string]bool{}
+	for _, b := range resp.Books {
+		titles[b.Title] = true
+		t.Logf("book: title=%q age=%d spice=%d", b.Title, b.AgeRating, b.SpiceRating)
+	}
+	if titles["Spicy Book"] {
+		t.Error("?spice_max=2 must exclude Spicy Book (spice 4)")
+	}
+	if !titles["Mild Book"] {
+		t.Error("?spice_max=2 must include Mild Book (spice 1)")
+	}
+	if !titles["Child Book"] {
+		t.Error("?spice_max=2 must include Child Book (under 16, exempt)")
+	}
+}

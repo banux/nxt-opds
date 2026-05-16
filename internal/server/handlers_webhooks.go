@@ -241,6 +241,7 @@ func bookEventPayload(bk *catalog.Book) map[string]any {
 		"collectionIndex": bk.CollectionIndex,
 		"rating":          bk.Rating,
 		"ageRating":       bk.AgeRating,
+		"spiceRating":     bk.SpiceRating,
 		"isRead":          bk.IsRead,
 		"coverUrl":        bk.CoverURL,
 		"downloadUrl":     "/opds/books/" + bk.ID + "/download",

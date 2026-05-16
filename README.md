@@ -9,7 +9,7 @@ A lightweight personal eBook library server written in Go, with an OPDS catalog 
 - **OPDS 1.2 and OPDS 2.0** compliant catalog feeds (navigation + acquisition)
 - **Vue 3 + Tailwind CSS** web UI (no build step) with Feedbooks-style book grid
 - **EPUB upload** with instant metadata extraction (title, authors, cover, series, tags, publisher, language)
-- **Editable metadata** — title, authors, tags, series, collection, publisher, language, age rating, cover
+- **Editable metadata** — title, authors, tags, series, collection, publisher, language, age rating, spice rating (0-5 for 16+/18+ titles), cover
 - **Age classification** — multi-select filter chips (?, 3+, 6+, 10+, 12+, 16+, 18+); per-child-profile max-age enforcement
 - **Multi-user support** — per-user read status, child profiles, user-coloured read banners
 - **To-read pile** — personal ordered reading queue, exposed in OPDS feeds and the MCP server
@@ -361,6 +361,7 @@ fields:
   "collectionIndex": "",
   "rating": 5,
   "ageRating": 6,
+  "spiceRating": 0,
   "isRead": false,
   "coverUrl": "/covers/a1b2c3d4",
   "downloadUrl": "/opds/books/a1b2c3d4/download",

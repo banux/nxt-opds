@@ -444,3 +444,71 @@ func TestLibrarianAssociation_FS(t *testing.T) {
 		t.Errorf("Clear (second call) should be idempotent, got: %v", err)
 	}
 }
+
+// TestBackend_SpiceRating_PersistAndFilter exercises the fs override pipeline
+// for SpiceRating plus the SpiceMax SearchQuery filter on the in-memory index.
+func TestBackend_SpiceRating_PersistAndFilter(t *testing.T) {
+	dir := t.TempDir()
+	createMinimalEPUB(t, filepath.Join(dir, "spicy.epub"), "Spicy Book", "Author A", "Romance")
+	createMinimalEPUB(t, filepath.Join(dir, "mild.epub"), "Mild Book", "Author B", "Romance")
+	createMinimalEPUB(t, filepath.Join(dir, "child.epub"), "Child Book", "Author C", "Children")
+
+	b, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	all, _, _ := b.Search(catalog.SearchQuery{Limit: 50})
+	if len(all) < 3 {
+		t.Fatalf("need 3 books, got %d", len(all))
+	}
+	byTitle := map[string]string{}
+	for _, bk := range all {
+		byTitle[bk.Title] = bk.ID
+	}
+
+	age18, sp4 := 18, 4
+	if _, err := b.UpdateBook(byTitle["Spicy Book"], catalog.BookUpdate{AgeRating: &age18, SpiceRating: &sp4}); err != nil {
+		t.Fatalf("UpdateBook spicy: %v", err)
+	}
+	age16, sp1 := 16, 1
+	if _, err := b.UpdateBook(byTitle["Mild Book"], catalog.BookUpdate{AgeRating: &age16, SpiceRating: &sp1}); err != nil {
+		t.Fatalf("UpdateBook mild: %v", err)
+	}
+	age6 := 6
+	if _, err := b.UpdateBook(byTitle["Child Book"], catalog.BookUpdate{AgeRating: &age6}); err != nil {
+		t.Fatalf("UpdateBook child: %v", err)
+	}
+
+	// SpiceMax=2 keeps Mild (spice 1) + Child (under 16 → unaffected), drops Spicy.
+	max2 := 2
+	res, _, err := b.Search(catalog.SearchQuery{SpiceMax: &max2, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search SpiceMax=2: %v", err)
+	}
+	got := map[string]bool{}
+	for _, bk := range res {
+		got[bk.Title] = true
+	}
+	if got["Spicy Book"] {
+		t.Error("SpiceMax=2 must exclude Spicy Book (spice 4)")
+	}
+	if !got["Mild Book"] {
+		t.Error("SpiceMax=2 must include Mild Book (spice 1)")
+	}
+	if !got["Child Book"] {
+		t.Error("SpiceMax=2 must include Child Book (under 16, exempt)")
+	}
+
+	// Persistence: SpiceRating must survive a backend re-open via .metadata.json overrides.
+	b2, err := New(dir)
+	if err != nil {
+		t.Fatalf("re-open New: %v", err)
+	}
+	spicyReloaded, err := b2.BookByID(byTitle["Spicy Book"])
+	if err != nil {
+		t.Fatalf("BookByID after reopen: %v", err)
+	}
+	if spicyReloaded.SpiceRating != 4 {
+		t.Errorf("SpiceRating after reopen: got %d, want 4", spicyReloaded.SpiceRating)
+	}
+}
