@@ -40,14 +40,35 @@ type Server struct {
 	userManager     catalog.UserManager
 	userReadManager catalog.UserReadManager
 	toReadManager   catalog.ToReadManager
+	userResolver    UserResolver
 	debug           bool
 }
+
+// UserResolver returns the authenticated user's ID and admin status for an
+// incoming MCP request.  The MCP package does not know how callers are
+// authenticated (per-user OPDS token vs. shared instance token), so the host
+// (the server package) wires a resolver that reads the request context.
+//
+// Return ("", false) when no specific user is authenticated — for example
+// when the caller used the shared instance OPDS token.
+type UserResolver func(r *http.Request) (userID string, isAdmin bool)
 
 // SetDebug toggles verbose request/response logging on the MCP server.
 // When true, every incoming JSON-RPC method is logged along with errors
 // and tool-call arguments — useful when an MCP client cannot connect or
 // is silently failing on a malformed payload.
 func (s *Server) SetDebug(v bool) { s.debug = v }
+
+// SetUserResolver wires a resolver that the MCP server calls on every
+// request to determine the authenticated user (so user-scoped tools can
+// auto-resolve their user_id argument and enforce admin authorisation).
+func (s *Server) SetUserResolver(fn UserResolver) { s.userResolver = fn }
+
+// callContext carries per-request authorisation data through tool handlers.
+type callContext struct {
+	UserID  string
+	IsAdmin bool
+}
 
 // New creates a new MCP Server backed by the given catalog.
 func New(cat catalog.Catalog) *Server {
@@ -177,6 +198,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[mcp] %s method=%s id=%s", r.RemoteAddr, req.Method, rawID(req.ID))
 	}
 
+	var cc callContext
+	if s.userResolver != nil {
+		cc.UserID, cc.IsAdmin = s.userResolver(r)
+	}
+
 	var result any
 	var rpcErr *rpcError
 
@@ -196,7 +222,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result = s.toolsList()
 
 	case "tools/call":
-		result, rpcErr = s.handleToolsCall(req.Params)
+		result, rpcErr = s.handleToolsCall(cc, req.Params)
 		if s.debug && rpcErr != nil {
 			log.Printf("[mcp] tools/call error: code=%d message=%s", rpcErr.Code, rpcErr.Message)
 		}
@@ -243,7 +269,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.99.0",
+			"version": "1.121.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
@@ -369,7 +395,7 @@ func (s *Server) toolsList() toolsListResult {
 			InputSchema: &jsonSchema{
 				Type: "object",
 				Properties: map[string]*jsonSchema{
-					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur (optionnel, vide = tous les utilisateurs)"},
+					"user_id": {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour consulter celle d'un autre utilisateur ou la liste globale (vide)."},
 				},
 			},
 		},
@@ -384,7 +410,7 @@ func (s *Server) toolsList() toolsListResult {
 					"author":       {Type: "string", Description: "Auteur du livre (optionnel)"},
 					"release_date": {Type: "string", Description: "Date de parution (optionnel, ex: 2024 ou 2024-03-15)"},
 					"notes":        {Type: "string", Description: "Notes supplémentaires (optionnel)"},
-					"user_id":      {Type: "string", Description: "Identifiant de l'utilisateur (optionnel)"},
+					"user_id":      {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour créer au nom d'un autre utilisateur."},
 				},
 			},
 		},
@@ -418,7 +444,7 @@ func (s *Server) toolsList() toolsListResult {
 			InputSchema: &jsonSchema{
 				Type: "object",
 				Properties: map[string]*jsonSchema{
-					"to_user_id": {Type: "string", Description: "Identifiant du destinataire (optionnel, vide = toutes les recommandations)"},
+					"to_user_id": {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour consulter les recommandations d'un autre utilisateur ou la liste globale (vide)."},
 				},
 			},
 		},
@@ -426,10 +452,9 @@ func (s *Server) toolsList() toolsListResult {
 			Name:        "list_to_read",
 			Description: "Retourne la pile de lecture (to-read pile) ordonnée d'un utilisateur. Les livres sont listés dans l'ordre de la pile (position 0 = premier à lire).",
 			InputSchema: &jsonSchema{
-				Type:     "object",
-				Required: []string{"user_id"},
+				Type: "object",
 				Properties: map[string]*jsonSchema{
-					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"user_id": {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour consulter la pile d'un autre utilisateur."},
 				},
 			},
 		},
@@ -438,9 +463,9 @@ func (s *Server) toolsList() toolsListResult {
 			Description: "Ajoute un livre à la fin de la pile de lecture d'un utilisateur. Si le livre y est déjà, l'opération est ignorée.",
 			InputSchema: &jsonSchema{
 				Type:     "object",
-				Required: []string{"user_id", "book_id"},
+				Required: []string{"book_id"},
 				Properties: map[string]*jsonSchema{
-					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"user_id": {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour ajouter à la pile d'un autre utilisateur."},
 					"book_id": {Type: "string", Description: "Identifiant du livre à ajouter"},
 				},
 			},
@@ -450,9 +475,9 @@ func (s *Server) toolsList() toolsListResult {
 			Description: "Retire un livre de la pile de lecture d'un utilisateur. Si le livre n'y est pas, l'opération est ignorée.",
 			InputSchema: &jsonSchema{
 				Type:     "object",
-				Required: []string{"user_id", "book_id"},
+				Required: []string{"book_id"},
 				Properties: map[string]*jsonSchema{
-					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"user_id": {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour retirer de la pile d'un autre utilisateur."},
 					"book_id": {Type: "string", Description: "Identifiant du livre à retirer"},
 				},
 			},
@@ -462,9 +487,9 @@ func (s *Server) toolsList() toolsListResult {
 			Description: "Réordonne la pile de lecture d'un utilisateur selon la liste fournie. Les livres absents de la liste mais présents dans la pile sont laissés à la fin dans leur ordre d'origine ; les identifiants inconnus sont ignorés.",
 			InputSchema: &jsonSchema{
 				Type:     "object",
-				Required: []string{"user_id", "book_ids"},
+				Required: []string{"book_ids"},
 				Properties: map[string]*jsonSchema{
-					"user_id":  {Type: "string", Description: "Identifiant de l'utilisateur"},
+					"user_id":  {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié. Admin uniquement pour réordonner la pile d'un autre utilisateur."},
 					"book_ids": {Type: "array", Description: "Liste ordonnée d'identifiants de livres", Items: &jsonSchema{Type: "string"}},
 				},
 			},
@@ -477,7 +502,7 @@ func (s *Server) toolsList() toolsListResult {
 				Required: []string{"book_id", "is_read"},
 				Properties: map[string]*jsonSchema{
 					"book_id": {Type: "string", Description: "Identifiant du livre"},
-					"user_id": {Type: "string", Description: "Identifiant de l'utilisateur (multi-utilisateur uniquement)"},
+					"user_id": {Type: "string", Description: "Optionnel — défaut: utilisateur authentifié (multi-utilisateur). Admin uniquement pour modifier le statut d'un autre utilisateur."},
 					"is_read": {Type: "boolean", Description: "Vrai pour marquer comme lu, faux pour décocher"},
 				},
 			},
@@ -486,7 +511,7 @@ func (s *Server) toolsList() toolsListResult {
 	return toolsListResult{Tools: tools}
 }
 
-func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
+func (s *Server) handleToolsCall(cc callContext, raw json.RawMessage) (any, *rpcError) {
 	var p toolsCallParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &rpcError{Code: -32602, Message: "Invalid params: " + err.Error()}
@@ -510,28 +535,54 @@ func (s *Server) handleToolsCall(raw json.RawMessage) (any, *rpcError) {
 	case "upload_book":
 		return s.toolUploadBook(p.Arguments)
 	case "list_wishlist":
-		return s.toolListWishlist(p.Arguments)
+		return s.toolListWishlist(cc, p.Arguments)
 	case "add_wishlist_item":
-		return s.toolAddWishlistItem(p.Arguments)
+		return s.toolAddWishlistItem(cc, p.Arguments)
 	case "delete_wishlist_item":
-		return s.toolDeleteWishlistItem(p.Arguments)
+		return s.toolDeleteWishlistItem(cc, p.Arguments)
 	case "update_cover":
 		return s.toolUpdateCover(p.Arguments)
 	case "list_recommendations":
-		return s.toolListRecommendations(p.Arguments)
+		return s.toolListRecommendations(cc, p.Arguments)
 	case "list_to_read":
-		return s.toolListToRead(p.Arguments)
+		return s.toolListToRead(cc, p.Arguments)
 	case "add_to_read":
-		return s.toolAddToRead(p.Arguments)
+		return s.toolAddToRead(cc, p.Arguments)
 	case "remove_to_read":
-		return s.toolRemoveToRead(p.Arguments)
+		return s.toolRemoveToRead(cc, p.Arguments)
 	case "reorder_to_read":
-		return s.toolReorderToRead(p.Arguments)
+		return s.toolReorderToRead(cc, p.Arguments)
 	case "set_book_read":
-		return s.toolSetBookRead(p.Arguments)
+		return s.toolSetBookRead(cc, p.Arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: "Unknown tool: " + p.Name}
 	}
+}
+
+// resolveUserScope determines which user_id a user-scoped tool should operate on.
+//
+// Precedence:
+//  1. args[argKey] non-empty → use it. If it differs from the authenticated
+//     user, the caller must be an admin (otherwise return a 403-style error).
+//  2. args[argKey] empty → fall back to the authenticated userID from cc.
+//  3. Both empty → return an explicit error asking the caller to either
+//     authenticate with a per-user token or pass user_id explicitly.
+//
+// The returned *toolsCallResult is nil when resolution succeeded.
+func (s *Server) resolveUserScope(cc callContext, args map[string]any, argKey string) (string, *toolsCallResult) {
+	argID, _ := args[argKey].(string)
+	if argID != "" {
+		if cc.UserID == "" || cc.UserID == argID || cc.IsAdmin {
+			return argID, nil
+		}
+		r := errorResult("Accès refusé : seul un administrateur peut manipuler les données d'un autre utilisateur.")
+		return "", &r
+	}
+	if cc.UserID != "" {
+		return cc.UserID, nil
+	}
+	r := errorResult("Paramètre '" + argKey + "' requis : connectez-vous avec un jeton utilisateur ou passez explicitement '" + argKey + "'.")
+	return "", &r
 }
 
 // ─── Tool implementations ─────────────────────────────────────────────────────
@@ -856,11 +907,22 @@ func (s *Server) toolUploadBook(args map[string]any) (any, *rpcError) {
 	return textResult("Livre téléversé avec succès.\n\n" + formatBookDetail(book)), nil
 }
 
-func (s *Server) toolListWishlist(args map[string]any) (any, *rpcError) {
+func (s *Server) toolListWishlist(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.wishlistManager == nil {
 		return errorResult("Le backend ne supporte pas la liste de souhaits"), nil
 	}
-	userID, _ := args["user_id"].(string)
+	// Auto-resolve user_id from the authenticated user when omitted.
+	// list_wishlist with an empty user_id has the special meaning "all
+	// users", which only admins (or callers with no user identity at all,
+	// e.g. the shared instance token) may use.
+	argUser, _ := args["user_id"].(string)
+	userID := argUser
+	if argUser == "" && cc.UserID != "" && !cc.IsAdmin {
+		userID = cc.UserID
+	}
+	if argUser != "" && cc.UserID != "" && argUser != cc.UserID && !cc.IsAdmin {
+		return errorResult("Accès refusé : seul un administrateur peut consulter la liste de souhaits d'un autre utilisateur."), nil
+	}
 	items, err := s.wishlistManager.WishlistItems(userID)
 	if err != nil {
 		return errorResult("Erreur : " + err.Error()), nil
@@ -888,7 +950,7 @@ func (s *Server) toolListWishlist(args map[string]any) (any, *rpcError) {
 	return textResult(sb.String()), nil
 }
 
-func (s *Server) toolAddWishlistItem(args map[string]any) (any, *rpcError) {
+func (s *Server) toolAddWishlistItem(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.wishlistManager == nil {
 		return errorResult("Le backend ne supporte pas la liste de souhaits"), nil
 	}
@@ -899,7 +961,15 @@ func (s *Server) toolAddWishlistItem(args map[string]any) (any, *rpcError) {
 	author, _ := args["author"].(string)
 	releaseDate, _ := args["release_date"].(string)
 	notes, _ := args["notes"].(string)
-	userID, _ := args["user_id"].(string)
+	// Auto-resolve user_id from the authenticated user; allow empty
+	// (single-user / shared-token mode) when nothing can be inferred.
+	argUser, _ := args["user_id"].(string)
+	userID := argUser
+	if argUser == "" {
+		userID = cc.UserID
+	} else if cc.UserID != "" && argUser != cc.UserID && !cc.IsAdmin {
+		return errorResult("Accès refusé : seul un administrateur peut ajouter un souhait au nom d'un autre utilisateur."), nil
+	}
 
 	it, err := s.wishlistManager.AddWishlistItem(userID, title, author, releaseDate, notes)
 	if err != nil {
@@ -908,7 +978,7 @@ func (s *Server) toolAddWishlistItem(args map[string]any) (any, *rpcError) {
 	return textResult(fmt.Sprintf("Élément ajouté à la liste de souhaits.\nID: %s\nTitre: %s", it.ID, it.Title)), nil
 }
 
-func (s *Server) toolDeleteWishlistItem(args map[string]any) (any, *rpcError) {
+func (s *Server) toolDeleteWishlistItem(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.wishlistManager == nil {
 		return errorResult("Le backend ne supporte pas la liste de souhaits"), nil
 	}
@@ -916,18 +986,47 @@ func (s *Server) toolDeleteWishlistItem(args map[string]any) (any, *rpcError) {
 	if !ok || id == "" {
 		return nil, &rpcError{Code: -32602, Message: "Paramètre 'id' requis"}
 	}
+	// When the caller is authenticated as a specific (non-admin) user, only
+	// allow deletion of their own wishlist items.  Admins and unauthenticated
+	// (shared-token) callers may delete any item.
+	if cc.UserID != "" && !cc.IsAdmin {
+		items, err := s.wishlistManager.WishlistItems(cc.UserID)
+		if err != nil {
+			return errorResult("Erreur lors de la vérification d'appartenance : " + err.Error()), nil
+		}
+		found := false
+		for _, it := range items {
+			if it.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errorResult("Accès refusé : ce souhait n'appartient pas à votre compte."), nil
+		}
+	}
 	if err := s.wishlistManager.DeleteWishlistItem(id); err != nil {
 		return errorResult("Erreur lors de la suppression : " + err.Error()), nil
 	}
 	return textResult("Élément supprimé de la liste de souhaits."), nil
 }
 
-func (s *Server) toolListRecommendations(args map[string]any) (any, *rpcError) {
+func (s *Server) toolListRecommendations(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.recommender == nil {
 		return errorResult("Le backend ne supporte pas les recommandations"), nil
 	}
 
-	toUserID, _ := args["to_user_id"].(string)
+	// Auto-resolve to_user_id from the authenticated user.  An empty value
+	// means "all users" which is admin-only; non-admin authenticated callers
+	// implicitly filter to their own recommendations.
+	argTo, _ := args["to_user_id"].(string)
+	toUserID := argTo
+	if argTo == "" && cc.UserID != "" && !cc.IsAdmin {
+		toUserID = cc.UserID
+	}
+	if argTo != "" && cc.UserID != "" && argTo != cc.UserID && !cc.IsAdmin {
+		return errorResult("Accès refusé : seul un administrateur peut consulter les recommandations d'un autre utilisateur."), nil
+	}
 
 	var recs []catalog.Recommendation
 	var err error
@@ -976,13 +1075,13 @@ func (s *Server) toolListRecommendations(args map[string]any) (any, *rpcError) {
 	return textResult(sb.String()), nil
 }
 
-func (s *Server) toolListToRead(args map[string]any) (any, *rpcError) {
+func (s *Server) toolListToRead(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.toReadManager == nil {
 		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
 	}
-	userID, ok := args["user_id"].(string)
-	if !ok || userID == "" {
-		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	userID, errRes := s.resolveUserScope(cc, args, "user_id")
+	if errRes != nil {
+		return *errRes, nil
 	}
 
 	items, err := s.toReadManager.ToReadList(userID)
@@ -1014,13 +1113,13 @@ func (s *Server) toolListToRead(args map[string]any) (any, *rpcError) {
 	return textResult(sb.String()), nil
 }
 
-func (s *Server) toolAddToRead(args map[string]any) (any, *rpcError) {
+func (s *Server) toolAddToRead(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.toReadManager == nil {
 		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
 	}
-	userID, ok := args["user_id"].(string)
-	if !ok || userID == "" {
-		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	userID, errRes := s.resolveUserScope(cc, args, "user_id")
+	if errRes != nil {
+		return *errRes, nil
 	}
 	bookID, ok := args["book_id"].(string)
 	if !ok || bookID == "" {
@@ -1032,13 +1131,13 @@ func (s *Server) toolAddToRead(args map[string]any) (any, *rpcError) {
 	return textResult(fmt.Sprintf("Livre %s ajouté à la pile de lecture de l'utilisateur %s.", bookID, userID)), nil
 }
 
-func (s *Server) toolRemoveToRead(args map[string]any) (any, *rpcError) {
+func (s *Server) toolRemoveToRead(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.toReadManager == nil {
 		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
 	}
-	userID, ok := args["user_id"].(string)
-	if !ok || userID == "" {
-		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	userID, errRes := s.resolveUserScope(cc, args, "user_id")
+	if errRes != nil {
+		return *errRes, nil
 	}
 	bookID, ok := args["book_id"].(string)
 	if !ok || bookID == "" {
@@ -1050,13 +1149,13 @@ func (s *Server) toolRemoveToRead(args map[string]any) (any, *rpcError) {
 	return textResult(fmt.Sprintf("Livre %s retiré de la pile de lecture de l'utilisateur %s.", bookID, userID)), nil
 }
 
-func (s *Server) toolReorderToRead(args map[string]any) (any, *rpcError) {
+func (s *Server) toolReorderToRead(cc callContext, args map[string]any) (any, *rpcError) {
 	if s.toReadManager == nil {
 		return errorResult("Le backend ne supporte pas la pile de lecture"), nil
 	}
-	userID, ok := args["user_id"].(string)
-	if !ok || userID == "" {
-		return nil, &rpcError{Code: -32602, Message: "Paramètre 'user_id' requis"}
+	userID, errRes := s.resolveUserScope(cc, args, "user_id")
+	if errRes != nil {
+		return *errRes, nil
 	}
 	raw, ok := args["book_ids"]
 	if !ok {
@@ -1082,7 +1181,7 @@ func (s *Server) toolReorderToRead(args map[string]any) (any, *rpcError) {
 // by the HTTP handler handleAPIToggleRead: prefer per-user storage when both
 // userReadManager and a non-empty user_id are available, otherwise fall back
 // to the legacy global is_read column via Updater.UpdateBook.
-func (s *Server) toolSetBookRead(args map[string]any) (any, *rpcError) {
+func (s *Server) toolSetBookRead(cc callContext, args map[string]any) (any, *rpcError) {
 	bookID, ok := args["book_id"].(string)
 	if !ok || bookID == "" {
 		return nil, &rpcError{Code: -32602, Message: "Paramètre 'book_id' requis"}
@@ -1091,7 +1190,17 @@ func (s *Server) toolSetBookRead(args map[string]any) (any, *rpcError) {
 	if !ok {
 		return nil, &rpcError{Code: -32602, Message: "Paramètre 'is_read' (bool) requis"}
 	}
-	userID, _ := args["user_id"].(string)
+	// user_id is optional here: in single-user mode (no auth context, no
+	// args) the call falls through to the legacy global is_read column.
+	// In multi-user mode, auto-resolve from the authenticated user when
+	// omitted, and enforce admin-only cross-user writes.
+	argUser, _ := args["user_id"].(string)
+	userID := argUser
+	if argUser == "" && cc.UserID != "" {
+		userID = cc.UserID
+	} else if argUser != "" && cc.UserID != "" && argUser != cc.UserID && !cc.IsAdmin {
+		return errorResult("Accès refusé : seul un administrateur peut modifier le statut de lecture d'un autre utilisateur."), nil
+	}
 
 	if s.userReadManager != nil && userID != "" {
 		if err := s.userReadManager.SetUserRead(userID, bookID, isRead); err != nil {

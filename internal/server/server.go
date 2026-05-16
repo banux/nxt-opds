@@ -149,8 +149,29 @@ func New(cat catalog.Catalog, opts Options) *Server {
 
 	s.mcpServer = mcp.New(cat)
 	s.mcpServer.SetDebug(opts.Debug)
+	s.mcpServer.SetUserResolver(s.mcpUserResolver)
 	s.registerRoutes()
 	return s
+}
+
+// mcpUserResolver maps an incoming MCP request to its authenticated user.
+// The authMiddleware has already injected the userID into r.Context() via
+// ctxUserID when the caller presented a per-user OPDS token; we look it up
+// and resolve the IsAdmin flag through the catalog's UserManager.
+//
+// Returns ("", false) when no specific user is authenticated (shared instance
+// OPDS token, dev mode with no password, …) — the MCP server then falls back
+// to legacy behavior (single-user mode, requires explicit user_id args).
+func (s *Server) mcpUserResolver(r *http.Request) (string, bool) {
+	uid := currentUserID(r)
+	if uid == "" || s.userManager == nil {
+		return uid, false
+	}
+	u, err := s.userManager.UserByID(uid)
+	if err != nil || u == nil {
+		return uid, false
+	}
+	return uid, u.IsAdmin
 }
 
 // ServeHTTP implements http.Handler, delegating to the mux router.
