@@ -1,15 +1,33 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/banux/nxt-opds/internal/catalog"
 )
+
+// forgetTimeout caps the best-effort outgoing call to the librarian on
+// DELETE /api/librarian/association.  The local row is already cleared
+// by then, so a slow remote must not block the user.
+const forgetTimeout = 5 * time.Second
+
+// librarianForgetClient is overridable from tests to intercept the
+// best-effort outgoing call without requiring a real HTTP server.  It is
+// initialised to http.DefaultClient.Do at startup.
+var librarianForgetClient = func(req *http.Request) (*http.Response, error) {
+	// httptest servers commonly use a short total timeout, so we instantiate
+	// a fresh client for each call rather than mutating http.DefaultClient.
+	client := &http.Client{Timeout: forgetTimeout}
+	return client.Do(req)
+}
 
 // requireSessionAdmin wraps a handler so it only runs for callers who
 // authenticated with the session cookie AND whose user record has IsAdmin =
@@ -222,4 +240,124 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// handleAPILibrarianAssociation handles GET /api/librarian/association.
+// It returns the persisted pairing record sans secrets so the admin UI can
+// display "currently paired with X" without ever showing the chat or webhook
+// keys.  Returns 204 No Content when no pairing exists.
+//
+// Restricted to admin session callers by requireSessionAdmin.
+func (s *Server) handleAPILibrarianAssociation(w http.ResponseWriter, r *http.Request) {
+	if s.librarianAssoc == nil {
+		writeJSONError(w, http.StatusNotImplemented,
+			"le backend de catalogue ne supporte pas l'appairage librarian")
+		return
+	}
+	assoc, err := s.librarianAssoc.Get()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"lecture de l'association : "+err.Error())
+		return
+	}
+	if assoc == nil || assoc.LibrarianURL == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Surface only the non-secret fields.  connected_at_last_ping mirrors
+	// UpdatedAt for now (no liveness probe yet — future task will populate
+	// it from an actual ping handler).  Timestamps are Unix milliseconds.
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"librarian_url":           assoc.LibrarianURL,
+		"librarian_instance":      assoc.LibrarianInstance,
+		"created_at":              unixMilliOrZero(assoc.CreatedAt),
+		"updated_at":              unixMilliOrZero(assoc.UpdatedAt),
+		"connected_at_last_ping":  unixMilliOrZero(assoc.UpdatedAt),
+	})
+}
+
+// handleAPILibrarianDeleteAssociation handles DELETE /api/librarian/association.
+//
+// It clears the local row immediately so the UI flips back to "unpaired"
+// without waiting on a remote that may be slow or unreachable.  In the
+// background, a best-effort POST to
+// ${librarian_url}/instances/{instance}/forget is fired with
+// Authorization: Bearer ${chat_secret} so the librarian can clean up its
+// side too.  Failures of that outgoing call are logged but never surface
+// to the operator — the local state is authoritative.
+//
+// Idempotent: returns 204 even when no association existed.
+//
+// Restricted to admin session callers by requireSessionAdmin.
+func (s *Server) handleAPILibrarianDeleteAssociation(w http.ResponseWriter, r *http.Request) {
+	if s.librarianAssoc == nil {
+		writeJSONError(w, http.StatusNotImplemented,
+			"le backend de catalogue ne supporte pas l'appairage librarian")
+		return
+	}
+
+	// Snapshot the secrets before we Clear() so the background notification
+	// can authenticate against the librarian.  Errors here are surfaced as
+	// 500 because they indicate a broken storage layer.
+	assoc, err := s.librarianAssoc.Get()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"lecture de l'association : "+err.Error())
+		return
+	}
+	if err := s.librarianAssoc.Clear(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"suppression de l'association : "+err.Error())
+		return
+	}
+
+	if assoc != nil && assoc.LibrarianURL != "" && assoc.LibrarianInstance != "" {
+		// Snapshot the client at request time so tests that swap the global
+		// `librarianForgetClient` can restore it (via t.Cleanup / defer)
+		// without racing against the goroutine.
+		client := librarianForgetClient
+		go notifyLibrarianForget(*assoc, client)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// notifyLibrarianForget fires a best-effort POST to the librarian's forget
+// endpoint so the remote can drop this instance from its own list.  Network
+// and HTTP errors are logged only — the caller has already cleared local
+// state and considers the unpair successful.
+func notifyLibrarianForget(assoc catalog.LibrarianAssociationData, client func(*http.Request) (*http.Response, error)) {
+	url := strings.TrimRight(assoc.LibrarianURL, "/") +
+		"/instances/" + assoc.LibrarianInstance + "/forget"
+
+	ctx, cancel := context.WithTimeout(context.Background(), forgetTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		log.Printf("librarian forget: build request: %v", err)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+assoc.ChatSecret)
+
+	resp, err := client(req)
+	if err != nil {
+		log.Printf("librarian forget %s: %v", url, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		log.Printf("librarian forget %s: HTTP %d", url, resp.StatusCode)
+	}
+}
+
+// unixMilliOrZero returns t.UnixMilli() when t is non-zero, else 0.
+// JSON serialises this as 0 rather than a misleading Unix-epoch timestamp.
+func unixMilliOrZero(t time.Time) int64 {
+	if t.IsZero() || t.Unix() <= 0 {
+		return 0
+	}
+	return t.UnixMilli()
 }

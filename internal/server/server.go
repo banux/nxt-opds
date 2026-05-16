@@ -341,9 +341,14 @@ func (s *Server) registerRoutes() {
 
 	// API: librarian pairing.  Generating a code is restricted to admins who
 	// authenticated with a session cookie so a leaked OPDS/per-user token can
-	// never start a pairing handshake.
+	// never start a pairing handshake.  Same protection for view/unpair so an
+	// OPDS reader cannot enumerate or break the existing pairing.
 	protected.HandleFunc("/api/librarian/pairing-code",
 		s.requireSessionAdmin(s.handleAPILibrarianPairingCode)).Methods(http.MethodPost)
+	protected.HandleFunc("/api/librarian/association",
+		s.requireSessionAdmin(s.handleAPILibrarianAssociation)).Methods(http.MethodGet)
+	protected.HandleFunc("/api/librarian/association",
+		s.requireSessionAdmin(s.handleAPILibrarianDeleteAssociation)).Methods(http.MethodDelete)
 
 	// API: auto-update check (read-only) is open to all logged-in users so the
 	// SPA can show the "update available" badge.  Apply and restart are admin-only.

@@ -1889,15 +1889,40 @@
             <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
               Librarian
             </h3>
-            <button @click="openPairingDialog"
+            <button v-if="!librarianAssociation" @click="openPairingDialog"
               class="text-xs px-2 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded-md transition-colors">
               Associer un librarian
             </button>
+            <button v-else @click="unpairLibrarian" :disabled="librarianUnpairing"
+              class="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-md transition-colors">
+              {{ librarianUnpairing ? 'Désappairage…' : 'Désappairer' }}
+            </button>
           </div>
-          <div class="px-5 py-4 text-sm text-gray-600 dark:text-gray-400">
+          <div v-if="librarianAssociationLoading" class="px-5 py-6 text-center text-sm text-gray-400 dark:text-gray-500">
+            Chargement…
+          </div>
+          <div v-else-if="!librarianAssociation" class="px-5 py-4 text-sm text-gray-600 dark:text-gray-400">
             Génère un code à usage unique (valide 10 minutes) à coller dans la
             commande <code class="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">librarian pair</code>
             pour appairer un service librarian distant à cette bibliothèque.
+          </div>
+          <div v-else class="px-5 py-4 space-y-2 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="font-medium text-gray-900 dark:text-gray-100">Librarian appairé</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 gap-y-1 text-gray-600 dark:text-gray-400">
+              <span class="text-xs uppercase tracking-wide text-gray-400">URL</span>
+              <code class="text-xs break-all">{{ librarianAssociation.librarian_url }}</code>
+              <span class="text-xs uppercase tracking-wide text-gray-400">Instance</span>
+              <code class="text-xs break-all">{{ librarianAssociation.librarian_instance }}</code>
+              <span class="text-xs uppercase tracking-wide text-gray-400">Appairé le</span>
+              <span class="text-xs">{{ formatLibrarianTs(librarianAssociation.created_at) }}</span>
+              <span v-if="librarianAssociation.connected_at_last_ping" class="text-xs uppercase tracking-wide text-gray-400">Dernier contact</span>
+              <span v-if="librarianAssociation.connected_at_last_ping" class="text-xs">
+                {{ formatLibrarianTs(librarianAssociation.connected_at_last_ping) }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -3440,6 +3465,7 @@ createApp({
         window.scrollTo({ top: 0, behavior: 'instant' })
         await loadAdminUsers()
         await loadWebhooks()
+        await loadLibrarianAssociation()
       } else if (hash === '#/recommendations') {
         currentView.value = 'recommendations'
         window.scrollTo({ top: 0, behavior: 'instant' })
@@ -4177,6 +4203,9 @@ createApp({
     function closePairingDialog() {
       pairingDialog.value.open = false
       if (pairingTimer) { clearInterval(pairingTimer); pairingTimer = null }
+      // The librarian may have completed the handshake while the dialog was
+      // open; refresh the association card so it switches to the paired view.
+      loadLibrarianAssociation()
     }
 
     async function copyPairingCode() {
@@ -4188,6 +4217,50 @@ createApp({
       } catch {
         showToast('Impossible de copier le code', 'error')
       }
+    }
+
+    // ---- Librarian association card ----
+    const librarianAssociation        = ref(null) // null when unpaired, object when paired
+    const librarianAssociationLoading = ref(false)
+    const librarianUnpairing          = ref(false)
+
+    async function loadLibrarianAssociation() {
+      librarianAssociationLoading.value = true
+      try {
+        const res = await apiFetch('/api/librarian/association')
+        if (res.status === 204) {
+          librarianAssociation.value = null
+        } else if (res.ok) {
+          librarianAssociation.value = await res.json()
+        } else {
+          librarianAssociation.value = null
+        }
+      } catch {
+        librarianAssociation.value = null
+      } finally {
+        librarianAssociationLoading.value = false
+      }
+    }
+
+    async function unpairLibrarian() {
+      if (!confirm('Désappairer le librarian ? Le service distant sera notifié et l\'assistant IA sera désactivé.')) return
+      librarianUnpairing.value = true
+      try {
+        const res = await apiFetch('/api/librarian/association', { method: 'DELETE' })
+        if (!res.ok && res.status !== 204) throw new Error('HTTP ' + res.status)
+        librarianAssociation.value = null
+        showToast('Librarian désappairé', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        librarianUnpairing.value = false
+      }
+    }
+
+    function formatLibrarianTs(ms) {
+      if (!ms) return ''
+      const d = new Date(ms)
+      return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
     }
 
     // ---- Seen tracking (localStorage) ----
@@ -4720,6 +4793,8 @@ createApp({
       webhooks, webhooksLoading, webhookForm, webhookFormSaving, webhookEventOptions,
       loadWebhooks, openWebhookForm, closeWebhookForm, saveWebhook, deleteWebhook, testWebhook,
       pairingDialog, openPairingDialog, closePairingDialog, copyPairingCode,
+      librarianAssociation, librarianAssociationLoading, librarianUnpairing,
+      unpairLibrarian, formatLibrarianTs,
       wishlistHasNew, recommendationsHasNew,
       myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,

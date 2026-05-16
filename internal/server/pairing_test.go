@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -443,5 +444,240 @@ func TestHandleAPILibrarianPair_RespectsForwardedHeaders(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp.MCPURL != "https://public.example.com/mcp" {
 		t.Errorf("X-Forwarded-* not honoured: mcp_url=%q", resp.MCPURL)
+	}
+}
+
+// ---- GET / DELETE /api/librarian/association ----------------------------
+
+// TestHandleAPILibrarianAssociation_NoneReturns204 verifies the GET endpoint
+// returns 204 No Content (no body) when no librarian is paired yet.
+func TestHandleAPILibrarianAssociation_NoneReturns204(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	admin, err := backend.CreateUser("Admin", "#000", true, false, 0)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, admin.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr.Body.Len() != 0 {
+		t.Errorf("expected empty body, got %q", rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianAssociation_ReturnsSafeFields verifies the GET
+// endpoint returns the non-secret fields (URL, instance, timestamps) and
+// crucially excludes chat_secret / webhook_secret from the response.
+func TestHandleAPILibrarianAssociation_ReturnsSafeFields(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	admin, err := backend.CreateUser("Admin", "#000", true, false, 0)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst-x",
+		ChatSecret:        "chat-secret-should-not-leak",
+		WebhookSecret:     "webhook-secret-should-not-leak",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, admin.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	body := rr.Body.String()
+	if strings.Contains(body, "chat-secret-should-not-leak") ||
+		strings.Contains(body, "webhook-secret-should-not-leak") {
+		t.Fatalf("secrets leaked in response body: %s", body)
+	}
+
+	var resp struct {
+		LibrarianURL          string `json:"librarian_url"`
+		LibrarianInstance     string `json:"librarian_instance"`
+		CreatedAt             int64  `json:"created_at"`
+		UpdatedAt             int64  `json:"updated_at"`
+		ConnectedAtLastPing   int64  `json:"connected_at_last_ping"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.LibrarianURL != "https://librarian.example" || resp.LibrarianInstance != "inst-x" {
+		t.Errorf("payload mismatch: %+v", resp)
+	}
+	if resp.CreatedAt == 0 || resp.UpdatedAt == 0 || resp.ConnectedAtLastPing == 0 {
+		t.Errorf("timestamps should be populated: %+v", resp)
+	}
+}
+
+// TestHandleAPILibrarianAssociation_NonAdminForbidden verifies that a
+// non-admin session cookie cannot read the association card.
+func TestHandleAPILibrarianAssociation_NonAdminForbidden(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if _, err := backend.CreateUser("Admin", "#000", true, false, 0); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	alice, err := backend.CreateUser("Alice", "#f00", false, false, 0)
+	if err != nil {
+		t.Fatalf("alice: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, alice.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rr.Code)
+	}
+}
+
+// TestHandleAPILibrarianDeleteAssociation_ClearsRowAndNotifiesRemote
+// verifies the full DELETE flow: local row is cleared, a best-effort
+// POST hits ${librarian_url}/instances/{instance}/forget with the
+// Bearer chat_secret, and the response is 204.
+func TestHandleAPILibrarianDeleteAssociation_ClearsRowAndNotifiesRemote(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	admin, err := backend.CreateUser("Admin", "#000", true, false, 0)
+	if err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+
+	// Stand up a fake librarian that records the forget call.
+	type capturedCall struct {
+		path string
+		auth string
+	}
+	calls := make(chan capturedCall, 1)
+	librarian := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls <- capturedCall{path: r.URL.Path, auth: r.Header.Get("Authorization")}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer librarian.Close()
+
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      librarian.URL,
+		LibrarianInstance: "inst-42",
+		ChatSecret:        "topsecret-chat",
+		WebhookSecret:     "topsecret-webhook",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, admin.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Local row gone.
+	got, err := backend.Get()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil association after DELETE, got %+v", got)
+	}
+
+	// Remote was notified.
+	select {
+	case call := <-calls:
+		if call.path != "/instances/inst-42/forget" {
+			t.Errorf("forget called with unexpected path: %q", call.path)
+		}
+		if call.auth != "Bearer topsecret-chat" {
+			t.Errorf("forget called with wrong auth header: %q", call.auth)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("librarian forget endpoint was not hit within 3s")
+	}
+}
+
+// TestHandleAPILibrarianDeleteAssociation_IdempotentWhenAbsent verifies
+// DELETE returns 204 even when nothing is paired, with no outgoing call.
+func TestHandleAPILibrarianDeleteAssociation_IdempotentWhenAbsent(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	admin, err := backend.CreateUser("Admin", "#000", true, false, 0)
+	if err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, admin.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+}
+
+// TestHandleAPILibrarianDeleteAssociation_RemoteFailureStillSucceeds
+// verifies that a slow / failing remote does not bubble up to the caller
+// (the local row was cleared, that's authoritative).
+func TestHandleAPILibrarianDeleteAssociation_RemoteFailureStillSucceeds(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	admin, err := backend.CreateUser("Admin", "#000", true, false, 0)
+	if err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+
+	// Swap the outgoing client for one that always returns an error.  The
+	// stub signals via `done` so we can wait for the goroutine to complete
+	// before restoring the global (avoiding a real network call escaping
+	// the test).
+	prev := librarianForgetClient
+	defer func() { librarianForgetClient = prev }()
+	done := make(chan struct{}, 1)
+	librarianForgetClient = func(req *http.Request) (*http.Response, error) {
+		done <- struct{}{}
+		return nil, errors.New("synthetic network failure")
+	}
+
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://unreachable.example",
+		LibrarianInstance: "inst",
+		ChatSecret:        "tok",
+		WebhookSecret:     "hook",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, admin.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 despite remote failure, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got, _ := backend.Get()
+	if got != nil {
+		t.Errorf("local row should be cleared even when remote fails, got %+v", got)
+	}
+
+	// Wait for the goroutine so the synthetic stub stays in scope.
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forget goroutine did not complete in time")
 	}
 }
