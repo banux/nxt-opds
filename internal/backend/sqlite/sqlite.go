@@ -71,7 +71,7 @@ func (b *Backend) Close() error {
 // currentSchemaVersion is the latest schema version this binary expects.
 // Increment this constant and add a new entry to schemaMigrations whenever
 // the database schema changes.
-const currentSchemaVersion = 16
+const currentSchemaVersion = 17
 
 // schemaMigration describes a single, idempotent database migration.
 type schemaMigration struct {
@@ -98,6 +98,21 @@ var schemaMigrations = []schemaMigration{
 	{version: 14, apply: migration14},
 	{version: 15, apply: migration15},
 	{version: 16, apply: migration16},
+	{version: 17, apply: migration17},
+}
+
+// migration17 adds the last_seen_at column to the librarian_association table
+// so the heartbeat endpoint can persist when the remote librarian last pinged
+// us (version 16 → 17).  Defensive ALTER + ignore "duplicate column" error so
+// fresh DBs (where migration16 already created the column on a newer binary
+// path) are tolerated.
+func migration17(db *sql.DB) error {
+	if _, err := db.Exec(`ALTER TABLE librarian_association ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 // migration16 adds the librarian_association singleton table that stores the
@@ -2621,17 +2636,21 @@ func (b *Backend) RecordWebhookFire(id, status string, at time.Time) error {
 func (b *Backend) Get() (*catalog.LibrarianAssociationData, error) {
 	var (
 		url, instance, chatSecret, webhookSecret string
-		createdAt, updatedAt                     int64
+		createdAt, updatedAt, lastSeenAt         int64
 	)
 	err := b.db.QueryRow(`
-SELECT librarian_url, librarian_instance, chat_secret, webhook_secret, created_at, updated_at
+SELECT librarian_url, librarian_instance, chat_secret, webhook_secret, created_at, updated_at, last_seen_at
 FROM librarian_association WHERE id = 1`).
-		Scan(&url, &instance, &chatSecret, &webhookSecret, &createdAt, &updatedAt)
+		Scan(&url, &instance, &chatSecret, &webhookSecret, &createdAt, &updatedAt, &lastSeenAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	var lastSeen time.Time
+	if lastSeenAt > 0 {
+		lastSeen = time.Unix(lastSeenAt, 0)
 	}
 	return &catalog.LibrarianAssociationData{
 		LibrarianURL:      url,
@@ -2640,6 +2659,7 @@ FROM librarian_association WHERE id = 1`).
 		WebhookSecret:     webhookSecret,
 		CreatedAt:         time.Unix(createdAt, 0),
 		UpdatedAt:         time.Unix(updatedAt, 0),
+		LastSeenAt:        lastSeen,
 	}, nil
 }
 
@@ -2677,5 +2697,13 @@ ON CONFLICT(id) DO UPDATE SET
 // Clear removes the librarian association singleton.  Idempotent.
 func (b *Backend) Clear() error {
 	_, err := b.db.Exec(`DELETE FROM librarian_association WHERE id = 1`)
+	return err
+}
+
+// Touch updates only the last_seen_at field on the singleton row.  It does
+// not advance updated_at because a heartbeat is not a mutation.  Idempotent
+// when no association exists (no row updated = no error).
+func (b *Backend) Touch(at time.Time) error {
+	_, err := b.db.Exec(`UPDATE librarian_association SET last_seen_at = ? WHERE id = 1`, at.Unix())
 	return err
 }

@@ -280,16 +280,16 @@ func (s *Server) handleAPILibrarianAssociation(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Surface only the non-secret fields.  connected_at_last_ping mirrors
-	// UpdatedAt for now (no liveness probe yet — future task will populate
-	// it from an actual ping handler).  Timestamps are Unix milliseconds.
+	// Surface only the non-secret fields.  last_seen_at is the timestamp of
+	// the most recent /heartbeat POST (0 if never received).  Timestamps are
+	// Unix milliseconds.
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"librarian_url":           assoc.LibrarianURL,
-		"librarian_instance":      assoc.LibrarianInstance,
-		"created_at":              unixMilliOrZero(assoc.CreatedAt),
-		"updated_at":              unixMilliOrZero(assoc.UpdatedAt),
-		"connected_at_last_ping":  unixMilliOrZero(assoc.UpdatedAt),
+		"librarian_url":      assoc.LibrarianURL,
+		"librarian_instance": assoc.LibrarianInstance,
+		"created_at":         unixMilliOrZero(assoc.CreatedAt),
+		"updated_at":         unixMilliOrZero(assoc.UpdatedAt),
+		"last_seen_at":       unixMilliOrZero(assoc.LastSeenAt),
 	})
 }
 
@@ -589,6 +589,52 @@ func (s *Server) handleAPILibrarianAnnounce(w http.ResponseWriter, r *http.Reque
 	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError,
 			"écriture de l'association : "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAPILibrarianHeartbeat handles POST /api/librarian/heartbeat.
+//
+// Inbound endpoint called BY the remote librarian roughly every ~60 s while
+// it is in `serve` mode.  Authentication is via X-Librarian-Chat-Secret
+// (same scheme as /rotate, /forget and /announce).  The optional JSON body
+// `{"version":"vX.Y"}` is accepted for forward-compatibility but currently
+// ignored.
+//
+// On success the LastSeenAt field of the association is stamped to time.Now()
+// via the new Touch() method.  UpdatedAt is NOT advanced — a heartbeat is
+// not a mutation.  Idempotent by construction: repeated calls just update
+// LastSeenAt.  Returns 204 No Content.
+//
+// Failure modes:
+//   - 401 missing or wrong X-Librarian-Chat-Secret
+//   - 404 no association is currently paired
+//   - 500 backend write failure
+//   - 501 catalog backend has no LibrarianAssociation impl
+func (s *Server) handleAPILibrarianHeartbeat(w http.ResponseWriter, r *http.Request) {
+	assoc := s.authenticateLibrarian(w, r)
+	if assoc == nil {
+		return
+	}
+
+	// Body is optional and currently ignored.  Decode-and-discard so a
+	// malformed JSON body still produces a meaningful 400 rather than being
+	// silently swallowed.
+	if r.ContentLength > 0 {
+		var body struct {
+			Version string `json:"version"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "JSON invalide")
+			return
+		}
+		_ = body // accepted for forward-compatibility; ignored for now
+	}
+
+	if err := s.librarianAssoc.Touch(time.Now()); err != nil {
+		writeJSONError(w, http.StatusInternalServerError,
+			"écriture du heartbeat : "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

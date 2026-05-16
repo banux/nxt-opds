@@ -749,6 +749,12 @@ type LibrarianAssociationData struct {
 
 	// UpdatedAt is when the association was last modified (e.g. secret rotation).
 	UpdatedAt time.Time
+
+	// LastSeenAt is the most recent time the remote librarian sent a heartbeat
+	// (POST /api/librarian/heartbeat).  Zero means a heartbeat has never been
+	// received.  It is not advanced by mutations (rotate/announce) — only by
+	// the dedicated heartbeat endpoint, so the admin UI can show liveness.
+	LastSeenAt time.Time
 }
 
 // LibrarianAssociation is an optional interface for catalog backends that
@@ -767,4 +773,9 @@ type LibrarianAssociation interface {
 	// Clear removes the association.  Idempotent — no error when nothing
 	// is stored.
 	Clear() error
+
+	// Touch updates only the LastSeenAt field on the existing association,
+	// without advancing UpdatedAt (a heartbeat is not a mutation).  Returns
+	// nil and does nothing when no association exists.
+	Touch(at time.Time) error
 }

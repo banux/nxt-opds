@@ -214,6 +214,10 @@ func (s *Server) registerRoutes() {
 	// LibrarianURL without going through a full re-pair.
 	r.HandleFunc("/api/librarian/announce", s.handleAPILibrarianAnnounce).Methods(http.MethodPost)
 
+	// Librarian-initiated heartbeat (~60 s while `serve` is running): same
+	// auth as /rotate.  Updates only LastSeenAt — does not advance UpdatedAt.
+	r.HandleFunc("/api/librarian/heartbeat", s.handleAPILibrarianHeartbeat).Methods(http.MethodPost)
+
 	// PWA assets must be publicly accessible for browser install flow
 	if s.opts.StaticFS != nil {
 		staticServer := http.FileServer(http.FS(s.opts.StaticFS))

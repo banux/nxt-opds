@@ -1908,8 +1908,11 @@
           </div>
           <div v-else class="px-5 py-4 space-y-2 text-sm">
             <div class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="w-2 h-2 rounded-full" :class="librarianHeartbeatColor(librarianAssociation.last_seen_at)"></span>
               <span class="font-medium text-gray-900 dark:text-gray-100">Librarian appairé</span>
+              <span class="text-xs" :class="librarianHeartbeatTextColor(librarianAssociation.last_seen_at)">
+                · connecté {{ formatLibrarianRelative(librarianAssociation.last_seen_at) }}
+              </span>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-3 gap-y-1 text-gray-600 dark:text-gray-400">
               <span class="text-xs uppercase tracking-wide text-gray-400">URL</span>
@@ -1918,9 +1921,9 @@
               <code class="text-xs break-all">{{ librarianAssociation.librarian_instance }}</code>
               <span class="text-xs uppercase tracking-wide text-gray-400">Appairé le</span>
               <span class="text-xs">{{ formatLibrarianTs(librarianAssociation.created_at) }}</span>
-              <span v-if="librarianAssociation.connected_at_last_ping" class="text-xs uppercase tracking-wide text-gray-400">Dernier contact</span>
-              <span v-if="librarianAssociation.connected_at_last_ping" class="text-xs">
-                {{ formatLibrarianTs(librarianAssociation.connected_at_last_ping) }}
+              <span v-if="librarianAssociation.last_seen_at" class="text-xs uppercase tracking-wide text-gray-400">Dernier contact</span>
+              <span v-if="librarianAssociation.last_seen_at" class="text-xs">
+                {{ formatLibrarianTs(librarianAssociation.last_seen_at) }}
               </span>
             </div>
           </div>
@@ -4294,6 +4297,42 @@ createApp({
       return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
     }
 
+    // librarianNow ticks every 15 s so the relative "il y a Ns" labels stay
+    // fresh without a manual refresh of the admin page.
+    const librarianNow = ref(Date.now())
+    let librarianNowTimer = null
+    onMounted(() => {
+      librarianNowTimer = setInterval(() => { librarianNow.value = Date.now() }, 15000)
+    })
+    onUnmounted(() => {
+      if (librarianNowTimer) clearInterval(librarianNowTimer)
+    })
+
+    function formatLibrarianRelative(ms) {
+      if (!ms) return 'jamais'
+      const diffSec = Math.max(0, Math.round((librarianNow.value - ms) / 1000))
+      if (diffSec < 60)   return 'il y a ' + diffSec + ' s'
+      if (diffSec < 3600) return 'il y a ' + Math.round(diffSec / 60) + ' min'
+      if (diffSec < 86400) return 'il y a ' + Math.round(diffSec / 3600) + ' h'
+      return 'il y a ' + Math.round(diffSec / 86400) + ' j'
+    }
+
+    // Heartbeat health: green < 3 min, amber 3–15 min, red > 15 min, gray = never.
+    function librarianHeartbeatColor(ms) {
+      if (!ms) return 'bg-gray-400'
+      const diffMs = librarianNow.value - ms
+      if (diffMs < 3  * 60 * 1000) return 'bg-emerald-500'
+      if (diffMs < 15 * 60 * 1000) return 'bg-amber-500'
+      return 'bg-red-500'
+    }
+    function librarianHeartbeatTextColor(ms) {
+      if (!ms) return 'text-gray-500 dark:text-gray-400'
+      const diffMs = librarianNow.value - ms
+      if (diffMs < 3  * 60 * 1000) return 'text-emerald-700 dark:text-emerald-400'
+      if (diffMs < 15 * 60 * 1000) return 'text-amber-700 dark:text-amber-400'
+      return 'text-red-700 dark:text-red-400'
+    }
+
     // ---- Seen tracking (localStorage) ----
     const wishlistSeenCount         = ref(parseInt(localStorage.getItem('wishlist_seen_count') || '0', 10))
     const recommendationsSeenCount  = ref(parseInt(localStorage.getItem('recommendations_seen_count') || '0', 10))
@@ -4965,6 +5004,7 @@ createApp({
       pairingDialog, openPairingDialog, closePairingDialog, copyPairingCode,
       librarianAssociation, librarianAssociationLoading, librarianUnpairing,
       unpairLibrarian, formatLibrarianTs,
+      formatLibrarianRelative, librarianHeartbeatColor, librarianHeartbeatTextColor,
       wishlistHasNew, recommendationsHasNew,
       myRecommendations, recommendationsLoading, recommendDialog, recommendToUserID,
       recommendMessage, recommending, recommendableUsers, openRecommend, doRecommend,

@@ -507,11 +507,11 @@ func TestHandleAPILibrarianAssociation_ReturnsSafeFields(t *testing.T) {
 	}
 
 	var resp struct {
-		LibrarianURL          string `json:"librarian_url"`
-		LibrarianInstance     string `json:"librarian_instance"`
-		CreatedAt             int64  `json:"created_at"`
-		UpdatedAt             int64  `json:"updated_at"`
-		ConnectedAtLastPing   int64  `json:"connected_at_last_ping"`
+		LibrarianURL      string `json:"librarian_url"`
+		LibrarianInstance string `json:"librarian_instance"`
+		CreatedAt         int64  `json:"created_at"`
+		UpdatedAt         int64  `json:"updated_at"`
+		LastSeenAt        int64  `json:"last_seen_at"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -519,8 +519,59 @@ func TestHandleAPILibrarianAssociation_ReturnsSafeFields(t *testing.T) {
 	if resp.LibrarianURL != "https://librarian.example" || resp.LibrarianInstance != "inst-x" {
 		t.Errorf("payload mismatch: %+v", resp)
 	}
-	if resp.CreatedAt == 0 || resp.UpdatedAt == 0 || resp.ConnectedAtLastPing == 0 {
+	if resp.CreatedAt == 0 || resp.UpdatedAt == 0 {
 		t.Errorf("timestamps should be populated: %+v", resp)
+	}
+	// LastSeenAt is 0 until the first heartbeat lands.
+	if resp.LastSeenAt != 0 {
+		t.Errorf("LastSeenAt should be 0 before any heartbeat: got %d", resp.LastSeenAt)
+	}
+	// The legacy connected_at_last_ping key must no longer appear in the body.
+	if strings.Contains(body, "connected_at_last_ping") {
+		t.Errorf("legacy field 'connected_at_last_ping' still present: %s", body)
+	}
+}
+
+// TestHandleAPILibrarianAssociation_SurfacesLastSeenAt verifies that once a
+// heartbeat has been recorded via the new Touch() method on the backend, the
+// GET /api/librarian/association response surfaces it under the last_seen_at
+// JSON key (Unix milliseconds, not seconds).
+func TestHandleAPILibrarianAssociation_SurfacesLastSeenAt(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	admin, err := backend.CreateUser("Admin", "#000", true, false, 0)
+	if err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst-hb",
+		ChatSecret:        "s",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	stamp := time.Now().Truncate(time.Second)
+	if err := backend.Touch(stamp); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/librarian/association", nil)
+	for _, c := range loginAsHelper(t, srv, admin.ID) {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		LastSeenAt int64 `json:"last_seen_at"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.LastSeenAt != stamp.UnixMilli() {
+		t.Errorf("LastSeenAt should be %d (Unix ms), got %d", stamp.UnixMilli(), resp.LastSeenAt)
 	}
 }
 
@@ -1442,5 +1493,216 @@ func TestHandleAPILibrarianAnnounce_PublicRoute(t *testing.T) {
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("announce must be reachable without session/OPDS auth, got %d: %s",
 			rr.Code, rr.Body.String())
+	}
+}
+
+// ---- POST /api/librarian/heartbeat (inbound) ----------------------------
+
+// TestHandleAPILibrarianHeartbeat_HappyPath verifies a heartbeat with the
+// correct chat secret returns 204, stamps LastSeenAt, and does NOT advance
+// UpdatedAt (a heartbeat is not a mutation).  URL, instance and both
+// secrets are also preserved verbatim.
+func TestHandleAPILibrarianHeartbeat_HappyPath(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "inst-hb",
+		ChatSecret:        "the-secret",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before, _ := backend.Get()
+	if !before.LastSeenAt.IsZero() {
+		t.Fatalf("seed should have zero LastSeenAt, got %v", before.LastSeenAt)
+	}
+	updatedAtBefore := before.UpdatedAt.Unix()
+	// Sleep so a (would-be) UpdatedAt change would be observable at second resolution.
+	time.Sleep(1100 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat",
+		strings.NewReader(`{"version":"v0.1"}`))
+	req.Header.Set("X-Librarian-Chat-Secret", "the-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	after, _ := backend.Get()
+	if after == nil {
+		t.Fatal("association should still exist after heartbeat")
+	}
+	if after.LastSeenAt.IsZero() {
+		t.Errorf("LastSeenAt should be stamped after heartbeat")
+	}
+	if after.UpdatedAt.Unix() != updatedAtBefore {
+		t.Errorf("UpdatedAt must NOT advance on heartbeat: was %d, now %d",
+			updatedAtBefore, after.UpdatedAt.Unix())
+	}
+	if after.LibrarianURL != "https://librarian.example" || after.LibrarianInstance != "inst-hb" {
+		t.Errorf("URL/instance changed: %+v", after)
+	}
+	if after.ChatSecret != "the-secret" || after.WebhookSecret != "w" {
+		t.Errorf("secrets changed on heartbeat: chat=%q webhook=%q",
+			after.ChatSecret, after.WebhookSecret)
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_NoBodyAccepted verifies an empty body is
+// accepted (the version field is optional / ignored).
+func TestHandleAPILibrarianHeartbeat_NoBodyAccepted(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "s",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "s")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 with empty body, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_Idempotent verifies repeated heartbeats
+// keep returning 204 and only update LastSeenAt.
+func TestHandleAPILibrarianHeartbeat_Idempotent(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "s",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat", nil)
+		req.Header.Set("X-Librarian-Chat-Secret", "s")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("call %d: expected 204, got %d: %s", i, rr.Code, rr.Body.String())
+		}
+	}
+	after, _ := backend.Get()
+	if after == nil || after.LastSeenAt.IsZero() {
+		t.Errorf("LastSeenAt should be set after repeated heartbeats: %+v", after)
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_MissingHeader verifies absence of the
+// chat secret header yields 401 and LastSeenAt stays untouched.
+func TestHandleAPILibrarianHeartbeat_MissingHeader(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "s",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with no header, got %d: %s", rr.Code, rr.Body.String())
+	}
+	after, _ := backend.Get()
+	if after == nil || !after.LastSeenAt.IsZero() {
+		t.Errorf("LastSeenAt should be unchanged on 401: %+v", after)
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_WrongHeader verifies a mismatched secret
+// yields 401 and LastSeenAt is not updated.
+func TestHandleAPILibrarianHeartbeat_WrongHeader(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "real",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "wrong")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with wrong header, got %d: %s", rr.Code, rr.Body.String())
+	}
+	after, _ := backend.Get()
+	if after == nil || !after.LastSeenAt.IsZero() {
+		t.Errorf("LastSeenAt should be unchanged on 401: %+v", after)
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_NoAssociation verifies 404 when nothing is
+// currently paired (consistent with /rotate, /announce).
+func TestHandleAPILibrarianHeartbeat_NoAssociation(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "anything")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when unpaired, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_PublicRoute verifies the endpoint is
+// reachable WITHOUT a session cookie / OPDS token — the librarian holds
+// only the chat secret.
+func TestHandleAPILibrarianHeartbeat_PublicRoute(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw", OPDSToken: "shared-tok"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "valid",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat", nil)
+	req.Header.Set("X-Librarian-Chat-Secret", "valid")
+	// No cookies, no ?token=, no Basic Auth — only the header.
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("heartbeat must be reachable without session/OPDS auth, got %d: %s",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleAPILibrarianHeartbeat_BadJSONBody verifies a malformed JSON body
+// is rejected with 400 (auth still happened first; the body is decoded).
+func TestHandleAPILibrarianHeartbeat_BadJSONBody(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if err := backend.Set(catalog.LibrarianAssociationData{
+		LibrarianURL:      "https://librarian.example",
+		LibrarianInstance: "i",
+		ChatSecret:        "s",
+		WebhookSecret:     "w",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/librarian/heartbeat",
+		strings.NewReader(`{"version":`))
+	req.Header.Set("X-Librarian-Chat-Secret", "s")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on malformed JSON, got %d: %s", rr.Code, rr.Body.String())
 	}
 }

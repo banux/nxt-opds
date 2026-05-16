@@ -987,6 +987,7 @@ type librarianFile struct {
 	WebhookSecret     string `json:"webhookSecret"`
 	CreatedAt         int64  `json:"createdAt"`
 	UpdatedAt         int64  `json:"updatedAt"`
+	LastSeenAt        int64  `json:"lastSeenAt,omitempty"`
 }
 
 // Get returns the current librarian association, or (nil, nil) when the file
@@ -1006,6 +1007,10 @@ func (b *Backend) Get() (*catalog.LibrarianAssociationData, error) {
 	// A file that exists but only contains zero values means "cleared" — keep
 	// returning the record so callers can detect a partial state, but allow an
 	// empty URL to round-trip cleanly.
+	var lastSeen time.Time
+	if f.LastSeenAt > 0 {
+		lastSeen = time.Unix(f.LastSeenAt, 0)
+	}
 	return &catalog.LibrarianAssociationData{
 		LibrarianURL:      f.LibrarianURL,
 		LibrarianInstance: f.LibrarianInstance,
@@ -1013,6 +1018,7 @@ func (b *Backend) Get() (*catalog.LibrarianAssociationData, error) {
 		WebhookSecret:     f.WebhookSecret,
 		CreatedAt:         time.Unix(f.CreatedAt, 0),
 		UpdatedAt:         time.Unix(f.UpdatedAt, 0),
+		LastSeenAt:        lastSeen,
 	}, nil
 }
 
@@ -1022,9 +1028,16 @@ func (b *Backend) Get() (*catalog.LibrarianAssociationData, error) {
 func (b *Backend) Set(data catalog.LibrarianAssociationData) error {
 	now := time.Now().Unix()
 	createdAt := now
-	// Preserve the original creation timestamp on update.
-	if existing, err := b.Get(); err == nil && existing != nil && !existing.CreatedAt.IsZero() && existing.CreatedAt.Unix() > 0 {
-		createdAt = existing.CreatedAt.Unix()
+	var lastSeenAt int64
+	// Preserve the original creation timestamp and last_seen_at on update —
+	// mutations (rotate/announce) must not reset the heartbeat clock.
+	if existing, err := b.Get(); err == nil && existing != nil {
+		if !existing.CreatedAt.IsZero() && existing.CreatedAt.Unix() > 0 {
+			createdAt = existing.CreatedAt.Unix()
+		}
+		if !existing.LastSeenAt.IsZero() && existing.LastSeenAt.Unix() > 0 {
+			lastSeenAt = existing.LastSeenAt.Unix()
+		}
 	} else if !data.CreatedAt.IsZero() && data.CreatedAt.Unix() > 0 {
 		createdAt = data.CreatedAt.Unix()
 	}
@@ -1035,6 +1048,7 @@ func (b *Backend) Set(data catalog.LibrarianAssociationData) error {
 		WebhookSecret:     data.WebhookSecret,
 		CreatedAt:         createdAt,
 		UpdatedAt:         now,
+		LastSeenAt:        lastSeenAt,
 	}
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -1052,6 +1066,33 @@ func (b *Backend) Set(data catalog.LibrarianAssociationData) error {
 func (b *Backend) Clear() error {
 	if err := os.Remove(b.librarianPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove librarian association: %w", err)
+	}
+	return nil
+}
+
+// Touch updates the LastSeenAt field on the existing association without
+// advancing UpdatedAt (a heartbeat is not a mutation).  Returns nil and
+// does nothing when no association file exists.  Implements
+// catalog.LibrarianAssociation.
+func (b *Backend) Touch(at time.Time) error {
+	data, err := os.ReadFile(b.librarianPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read librarian association: %w", err)
+	}
+	var f librarianFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return fmt.Errorf("parse librarian association: %w", err)
+	}
+	f.LastSeenAt = at.Unix()
+	out, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal librarian association: %w", err)
+	}
+	if err := os.WriteFile(b.librarianPath, out, 0600); err != nil {
+		return fmt.Errorf("write librarian association: %w", err)
 	}
 	return nil
 }
