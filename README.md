@@ -158,7 +158,11 @@ catalog on your behalf.
 Two parallel channels: the chat relay is request-driven (a user types →
 the librarian runs its agent loop → it returns a single JSON
 `{"reply":"...","error":"..."}` once the loop terminates; nxt-opds
-forwards the body bytes verbatim); the webhook fan-out is push-driven
+forwards the body bytes verbatim, but injects a `user_token` field
+holding the connected user's per-user OPDS/MCP token so the librarian's
+MCP calls — `list_to_read`, `list_wishlist`, `list_recommendations`,
+`search_books(unread:true)` — are scoped to the active user instead of
+falling back to the instance token); the webhook fan-out is push-driven
 (every `book.created` / `book.updated` / `book.deleted` / `book.read`
 event also hits the librarian alongside any admin-configured webhooks).
 

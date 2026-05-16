@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -649,6 +651,12 @@ func (s *Server) handleAPILibrarianHeartbeat(w http.ResponseWriter, r *http.Requ
 // ${librarian_url}/chat with Authorization: Bearer ${chat_secret} and
 // streams the upstream text/event-stream response back to the client.
 //
+// Before forwarding, the body is augmented with a `user_token` field
+// holding the connected user's per-user OPDS/MCP token so the librarian
+// can scope MCP calls (list_to_read, list_wishlist, list_recommendations,
+// search_books with unread:true) to the active user instead of falling
+// back to its shared instance token.
+//
 // The inbound request's context is plumbed into the upstream call so a
 // client disconnect tears the proxied request down.  No total timeout
 // here — chat sessions are intentionally long-lived.
@@ -668,9 +676,29 @@ func (s *Server) handleAPILibrarianChat(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Read the inbound body fully so we can optionally inject the connected
+	// user's per-user token before forwarding it.  The body is small (a JSON
+	// object such as {message, history}) so this is cheap.
+	inboundBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest,
+			"lecture du corps : "+err.Error())
+		return
+	}
+	outboundBody := inboundBody
+	if token := s.userTokenForChat(r); token != "" {
+		var payload map[string]any
+		if err := json.Unmarshal(inboundBody, &payload); err == nil && payload != nil {
+			payload["user_token"] = token
+			if encoded, err := json.Marshal(payload); err == nil {
+				outboundBody = encoded
+			}
+		}
+	}
+
 	upstreamURL := strings.TrimRight(assoc.LibrarianURL, "/") + "/chat"
 	upstreamReq, err := http.NewRequestWithContext(r.Context(),
-		http.MethodPost, upstreamURL, r.Body)
+		http.MethodPost, upstreamURL, bytes.NewReader(outboundBody))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError,
 			"construction requête : "+err.Error())
@@ -721,4 +749,38 @@ func (s *Server) handleAPILibrarianChat(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+}
+
+// userTokenForChat resolves the per-user OPDS/MCP token to forward to the
+// librarian in the /chat body's `user_token` field.  Returns "" when no
+// specific user can be determined, in which case the librarian falls back
+// to its instance token.
+//
+// Resolution order:
+//  1. The userID set on the request context by authMiddleware (session
+//     cookie, per-user OPDS/MCP token).
+//  2. When the request has no userID (single-user / dev mode, or an
+//     anonymous session) and exactly one user is registered, that user's
+//     token — so a vanilla single-user deployment still scopes chat calls
+//     correctly.
+//
+// Empty string is returned when the catalog backend doesn't support user
+// management, when the resolved user has no token, or when multiple users
+// exist but none could be identified.
+func (s *Server) userTokenForChat(r *http.Request) string {
+	if s.userManager == nil {
+		return ""
+	}
+	if uid := currentUserID(r); uid != "" {
+		u, err := s.userManager.UserByID(uid)
+		if err != nil || u == nil {
+			return ""
+		}
+		return u.Token
+	}
+	users, err := s.userManager.Users()
+	if err != nil || len(users) != 1 {
+		return ""
+	}
+	return users[0].Token
 }
