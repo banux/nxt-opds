@@ -67,6 +67,11 @@ func (f *fakeCatalog) Search(q catalog.SearchQuery) ([]catalog.Book, int, error)
 				continue
 			}
 		}
+		if q.SpiceExact != nil {
+			if b.AgeRating < 16 || b.SpiceRating != *q.SpiceExact {
+				continue
+			}
+		}
 		out = append(out, b)
 	}
 	total := len(out)
@@ -1343,6 +1348,28 @@ func TestToolSearchBooks_SpiceMin(t *testing.T) {
 	}
 	if containsStr(text, "Vingt mille lieues") {
 		t.Error("spice_min=3 must exclude unclassified books (age < 16)")
+	}
+}
+
+// TestToolSearchBooks_SpiceExact verifies the new spice_rating=N argument is
+// an EXACT match scoped to 16+/18+ books — sub-16 titles are excluded even
+// though their SpiceRating happens to be 0, because that 0 means "undefined"
+// for them, not "rated 0".
+func TestToolSearchBooks_SpiceExact(t *testing.T) {
+	srv := mcp.New(newFakeCatalog())
+	// spice_rating=4 should match only "Adulte épicé".
+	text := callSearchBooks(t, srv, map[string]any{"spice_rating": 4})
+	if !containsStr(text, "Adulte épicé") {
+		t.Error("spice_rating=4 should include 'Adulte épicé' (18+/spice=4)")
+	}
+	if containsStr(text, "Adulte calme") {
+		t.Error("spice_rating=4 must exclude 'Adulte calme' (spice=1)")
+	}
+	if containsStr(text, "Ado YA") {
+		t.Error("spice_rating=4 must exclude 'Ado YA' (spice=2)")
+	}
+	if containsStr(text, "Vingt mille lieues") {
+		t.Error("spice_rating=4 must exclude unclassified books (sub-16)")
 	}
 }
 

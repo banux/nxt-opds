@@ -146,6 +146,13 @@ type SearchQuery struct {
 	// Valid pointed-to values: 0 to 5.
 	SpiceMin *int
 
+	// SpiceExact, when non-nil, restricts results to books whose SpiceRating
+	// equals *SpiceExact.  The filter is scoped to age_rating >= 16 — sub-16
+	// books never carry meaningful spice, even when *SpiceExact = 0 (which
+	// otherwise means "unrated", a notion that only makes sense for adult
+	// books).  Valid pointed-to values: 0 to 5.
+	SpiceExact *int
+
 	// NotIndexed restricts results to books that have never been processed
 	// (LastMaintenanceAt is zero / last_maintenance_at = 0).
 	NotIndexed bool

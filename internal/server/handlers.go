@@ -312,6 +312,7 @@ func (s *Server) handleUnreadBooks(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
 		SpiceMax:     parseSpiceMaxQuery(r),
+		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -349,6 +350,7 @@ func (s *Server) handleAllBooks(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
 		SpiceMax:     parseSpiceMaxQuery(r),
+		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -412,6 +414,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		UserID:       userID,
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
 		SpiceMax:     parseSpiceMaxQuery(r),
+		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "search error", http.StatusInternalServerError)
@@ -479,6 +482,7 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
 	var (
@@ -486,7 +490,7 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || maxAge > 0 {
+	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Author:       author,
 			Offset:       offset,
@@ -494,6 +498,7 @@ func (s *Server) handleAuthorBooks(w http.ResponseWriter, r *http.Request) {
 			UserID:       userID,
 			MaxAgeRating: maxAge,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 	} else {
 		books, total, err = s.catalog.BooksByAuthor(author, offset, limit)
@@ -564,6 +569,7 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
 	var (
@@ -571,7 +577,7 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || maxAge > 0 {
+	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Tag:          tag,
 			Offset:       offset,
@@ -579,6 +585,7 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 			UserID:       userID,
 			MaxAgeRating: maxAge,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 	} else {
 		books, total, err = s.catalog.BooksByTag(tag, offset, limit)
@@ -604,26 +611,27 @@ func (s *Server) handleTagBooks(w http.ResponseWriter, r *http.Request) {
 }
 
 // spiceLevels defines the entries shown in the "Niveaux de piment" OPDS
-// navigation feeds.  Each entry points to /opds/books?spice_max=N (or its
-// OPDS v2 equivalent) so that age-classified books with spice <= N are
-// surfaced while younger-audience books remain visible (the backend filter
-// is `age_rating < 16 OR spice <= N`).
+// navigation feeds.  Each entry points to /opds/books?spice=N (or its OPDS v2
+// equivalent) so the backend filter applies an EXACT match scoped to 16+/18+
+// books — the older "≤ N" semantic was confusing for end users.
 var spiceLevels = []struct {
 	N        int
 	Title    string
 	Subtitle string
 }{
-	{0, "Sans piment", "Uniquement les livres notés 🌶 0 (ou jeune public)"},
-	{1, "Doux (≤ 1)", "Livres au plus 🌶 1 sur les titres 16+ et 18+"},
-	{2, "Modéré (≤ 2)", "Livres au plus 🌶 2 sur les titres 16+ et 18+"},
-	{3, "Épicé (≤ 3)", "Livres au plus 🌶 3 sur les titres 16+ et 18+"},
-	{4, "Très épicé (≤ 4)", "Livres au plus 🌶 4 sur les titres 16+ et 18+"},
+	{0, "🌶 0 — Sans", "Livres 16+/18+ explicitement notés sans contenu sexuel"},
+	{1, "🌶 1 — Suggestif", "Livres 16+/18+ avec contenu suggéré ou allusif"},
+	{2, "🌶 2 — Sensuel", "Romance sensuelle, peu de scènes explicites"},
+	{3, "🌶 3 — Explicite", "Scènes explicites occasionnelles"},
+	{4, "🌶 4 — Récurrent", "Contenu explicite récurrent"},
+	{5, "🌶 5 — Érotique", "Très explicite / érotique"},
 }
 
 // handleSpiceLevels serves the OPDS 1.x navigation feed listing the spice
-// intensity buckets.  Each entry links to /opds/books?spice_max=N.  For child
-// profiles (maxAgeRatingForUser > 0), the feed returns an empty list — the
-// spice levels are irrelevant since their age filter already strips 16+/18+.
+// intensity buckets.  Each entry links to /opds/books?spice=N (exact match).
+// For child profiles (maxAgeRatingForUser > 0), the feed returns an empty
+// list — the spice levels are irrelevant since their age filter already
+// strips 16+/18+.
 func (s *Server) handleSpiceLevels(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 
@@ -641,7 +649,7 @@ func (s *Server) handleSpiceLevels(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	for _, lvl := range spiceLevels {
-		href := fmt.Sprintf("/opds/books?spice_max=%d", lvl.N)
+		href := fmt.Sprintf("/opds/books?spice=%d", lvl.N)
 		feed.AddEntry(opds.Entry{
 			ID:      fmt.Sprintf("urn:nxt-opds:spice:%d", lvl.N),
 			Title:   opds.Text{Value: lvl.Title},
@@ -674,7 +682,7 @@ func (s *Server) handleOPDS2SpiceLevels(w http.ResponseWriter, r *http.Request) 
 	}
 
 	for _, lvl := range spiceLevels {
-		href := fmt.Sprintf("/opds/v2/publications?spice_max=%d", lvl.N)
+		href := fmt.Sprintf("/opds/v2/publications?spice=%d", lvl.N)
 		feed.Navigation = append(feed.Navigation, opds2.NavItem{
 			Title: lvl.Title,
 			Href:  withToken(href, tok),
@@ -732,6 +740,7 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
 	var (
@@ -739,7 +748,7 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || maxAge > 0 {
+	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Publisher:    publisher,
 			Offset:       offset,
@@ -747,6 +756,7 @@ func (s *Server) handlePublisherBooks(w http.ResponseWriter, r *http.Request) {
 			UserID:       userID,
 			MaxAgeRating: maxAge,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 	} else {
 		books, total, err = s.catalog.BooksByPublisher(publisher, offset, limit)
@@ -1049,8 +1059,34 @@ func parseSortParam(r *http.Request) (sortBy, sortOrder string) {
 // or unparseable.  Shared by /api/books and every OPDS feed that builds a
 // SearchQuery so external OPDS clients can restrict spicy content the same
 // way the web UI does.
+//
+// Deprecated: prefer parseSpiceExactQuery (?spice=N) — kept for one release
+// so OPDS clients that bookmarked the older URL keep working.
 func parseSpiceMaxQuery(r *http.Request) *int {
 	raw := r.URL.Query().Get("spice_max")
+	if raw == "" {
+		return nil
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return nil
+	}
+	if v < 0 {
+		v = 0
+	}
+	if v > 5 {
+		v = 5
+	}
+	return &v
+}
+
+// parseSpiceExactQuery reads ?spice=N (exact spice rating match, 0..5) and
+// returns a clamped pointer or nil when absent / unparseable.  This is the
+// preferred filter going forward — the older ?spice_max= range filter is
+// still parsed for backward compatibility but exposes a confusing semantic
+// ("≤N" ranges) so the UI and OPDS navigation feed now emit ?spice=N.
+func parseSpiceExactQuery(r *http.Request) *int {
+	raw := r.URL.Query().Get("spice")
 	if raw == "" {
 		return nil
 	}
@@ -1095,6 +1131,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	sortBy, sortOrder := parseSortParam(r)
 	userID := currentUserID(r)
 
@@ -1120,6 +1157,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 			MaxAgeRating: maxAge,
 			AgeRatings:   ageRatingFilters,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 		if err != nil {
 			http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -1154,6 +1192,7 @@ func (s *Server) handleAPIBooks(w http.ResponseWriter, r *http.Request) {
 		MaxAgeRating: maxAge,
 		AgeRatings:   ageRatingFilters,
 		SpiceMax:     spiceMax,
+		SpiceExact:   spiceExact,
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -3060,6 +3099,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
 		SpiceMax:     parseSpiceMaxQuery(r),
+		SpiceExact:   parseSpiceExactQuery(r),
 	})
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
@@ -3212,6 +3252,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
 	var (
@@ -3219,7 +3260,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 		total int
 		err   error
 	)
-	if spiceMax != nil || maxAge > 0 {
+	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Author:       author,
 			Offset:       offset,
@@ -3227,6 +3268,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 			UserID:       userID,
 			MaxAgeRating: maxAge,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 	} else {
 		books, total, err = s.catalog.BooksByAuthor(author, offset, limit)
@@ -3298,6 +3340,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
 	var (
@@ -3305,7 +3348,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 		total int
 		err   error
 	)
-	if spiceMax != nil || maxAge > 0 {
+	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Tag:          tag,
 			Offset:       offset,
@@ -3313,6 +3356,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 			UserID:       userID,
 			MaxAgeRating: maxAge,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 	} else {
 		books, total, err = s.catalog.BooksByTag(tag, offset, limit)
@@ -3384,6 +3428,7 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 	spiceMax := parseSpiceMaxQuery(r)
+	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
 	var (
@@ -3391,7 +3436,7 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 		total int
 		err   error
 	)
-	if spiceMax != nil || maxAge > 0 {
+	if spiceMax != nil || spiceExact != nil || maxAge > 0 {
 		books, total, err = s.catalog.Search(catalog.SearchQuery{
 			Publisher:    publisher,
 			Offset:       offset,
@@ -3399,6 +3444,7 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 			UserID:       userID,
 			MaxAgeRating: maxAge,
 			SpiceMax:     spiceMax,
+			SpiceExact:   spiceExact,
 		})
 	} else {
 		books, total, err = s.catalog.BooksByPublisher(publisher, offset, limit)

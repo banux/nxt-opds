@@ -111,7 +111,7 @@ nxt-opds exposes a [Model Context Protocol](https://modelcontextprotocol.io) end
 
 | Tool              | Description                                    |
 |-------------------|------------------------------------------------|
-| `search_books`         | Search the catalog with filters (`query/author/tag/series/publisher/collection`, `unread_only`, `not_indexed`, `age_rating`/`age_rating_min`, `spice_min`/`spice_max`) |
+| `search_books`         | Search the catalog with filters (`query/author/tag/series/publisher/collection`, `unread_only`, `not_indexed`, `age_rating`/`age_rating_min`, `spice_rating` exact match, `spice_min`/`spice_max` advanced ranges) |
 | `get_book`             | Get full metadata for a book                                     |
 | `update_book`          | Update book metadata (tags, summary, age rating, last indexed, etc.) |
 | `upload_book`          | Upload an EPUB file (base64-encoded)                             |
@@ -255,9 +255,9 @@ cannot start, view or break a pairing.
 | `GET /opds/to-read`                | To-read pile feed (per user; multi-user clients pass `?user=<id>`) |
 | `GET /opds/wishlist`               | Wishlist feed                  |
 | `GET /opds/recommendations`        | Recommendations feed           |
-| `GET /opds/spice`                  | Spice-level navigation feed (5 buckets → `/opds/books?spice_max=N`; hidden for child profiles) |
+| `GET /opds/spice`                  | Spice-level navigation feed (6 exact buckets 0–5 → `/opds/books?spice=N`; hidden for child profiles) |
 
-Most book-listing feeds accept `?spice_max=N` (0–5) to restrict 16+/18+ titles to a maximum 🌶 intensity; under-16 books are unaffected. The same filter is exposed on the OPDS v2 counterparts.
+Most book-listing feeds accept `?spice=N` (0–5, **exact** spice rating scoped to 16+/18+ titles); the older `?spice_max=N` parameter (≤N range) is still honoured for one release but will be removed. Both filters automatically exclude sub-16 titles since the spice axis is undefined for them. The OPDS v2 counterparts honour the same query parameters.
 
 ### OPDS 2.0
 Same paths under `/opds/v2` (JSON format).

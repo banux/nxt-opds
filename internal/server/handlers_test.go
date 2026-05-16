@@ -1297,6 +1297,62 @@ func TestHandleAPIBooks_SpiceMaxFilter(t *testing.T) {
 	}
 }
 
+// TestHandleAPIBooks_SpiceExactFilter verifies that the new ?spice=N query
+// parameter is an EXACT match scoped to 16+/18+ books and that books under 16
+// are excluded (even when their stored spice value would happen to match).
+func TestHandleAPIBooks_SpiceExactFilter(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	spicy := uploadBook(t, srv, "spicy.epub", "Spicy Book", "Author A")
+	mild := uploadBook(t, srv, "mild.epub", "Mild Book", "Author B")
+	other := uploadBook(t, srv, "other.epub", "Other Adult Book", "Author C")
+	child := uploadBook(t, srv, "child.epub", "Child Book", "Author D")
+
+	patch := func(id, body string) {
+		req := httptest.NewRequest(http.MethodPatch, "/api/books/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("patch %s: %d - %s", id, rr.Code, rr.Body.String())
+		}
+	}
+	patch(spicy.ID, `{"ageRating":18,"spiceRating":4}`)
+	patch(mild.ID, `{"ageRating":16,"spiceRating":1}`)
+	patch(other.ID, `{"ageRating":18,"spiceRating":2}`)
+	patch(child.ID, `{"ageRating":6}`)
+
+	// ?spice=4 → only "Spicy Book" (exact match, sub-16 books are excluded).
+	req := httptest.NewRequest(http.MethodGet, "/api/books?spice=4", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/books?spice=4: %d", rr.Code)
+	}
+	var resp struct {
+		Books []bookJSON `json:"books"`
+		Total int        `json:"total"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	titles := map[string]bool{}
+	for _, b := range resp.Books {
+		titles[b.Title] = true
+	}
+	if !titles["Spicy Book"] {
+		t.Error("?spice=4 must include Spicy Book (16+, spice=4)")
+	}
+	if titles["Other Adult Book"] {
+		t.Error("?spice=4 must exclude Other Adult Book (spice=2)")
+	}
+	if titles["Mild Book"] {
+		t.Error("?spice=4 must exclude Mild Book (spice=1)")
+	}
+	if titles["Child Book"] {
+		t.Error("?spice=4 must exclude Child Book (under 16, sub-16 has no meaningful spice)")
+	}
+}
+
 // ---- OPDS spice navigation ----
 
 // TestHandleRoot_HasSpiceNavEntry verifies that GET /opds advertises a
@@ -1360,10 +1416,10 @@ func TestHandleOPDS2Root_HasSpiceNavItem(t *testing.T) {
 	}
 }
 
-// TestHandleSpiceLevels_FiveEntries verifies GET /opds/spice returns a
-// 5-entry navigation feed whose links carry ?spice_max=0..4 against
+// TestHandleSpiceLevels_SixEntries verifies GET /opds/spice returns a
+// 6-entry navigation feed whose links carry ?spice=0..5 (exact match) against
 // /opds/books.
-func TestHandleSpiceLevels_FiveEntries(t *testing.T) {
+func TestHandleSpiceLevels_SixEntries(t *testing.T) {
 	srv := newTestServer(t, Options{})
 	req := httptest.NewRequest(http.MethodGet, "/opds/spice", nil)
 	rr := httptest.NewRecorder()
@@ -1375,19 +1431,19 @@ func TestHandleSpiceLevels_FiveEntries(t *testing.T) {
 	if err := xml.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
 		t.Fatalf("invalid XML: %v", err)
 	}
-	if len(feed.Entries) != 5 {
-		t.Fatalf("expected 5 spice entries, got %d", len(feed.Entries))
+	if len(feed.Entries) != 6 {
+		t.Fatalf("expected 6 spice entries, got %d", len(feed.Entries))
 	}
 	for i, e := range feed.Entries {
-		expectedHref := fmt.Sprintf("/opds/books?spice_max=%d", i)
+		expectedHref := fmt.Sprintf("/opds/books?spice=%d", i)
 		if len(e.Links) == 0 || !strings.Contains(e.Links[0].Href, expectedHref) {
 			t.Errorf("entry %d: expected href to contain %q, got %+v", i, expectedHref, e.Links)
 		}
 	}
 }
 
-// TestHandleOPDS2SpiceLevels_FiveItems verifies the OPDS v2 spice feed.
-func TestHandleOPDS2SpiceLevels_FiveItems(t *testing.T) {
+// TestHandleOPDS2SpiceLevels_SixItems verifies the OPDS v2 spice feed.
+func TestHandleOPDS2SpiceLevels_SixItems(t *testing.T) {
 	srv := newTestServer(t, Options{})
 	req := httptest.NewRequest(http.MethodGet, "/opds/v2/spice", nil)
 	rr := httptest.NewRecorder()
@@ -1399,11 +1455,11 @@ func TestHandleOPDS2SpiceLevels_FiveItems(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(feed.Navigation) != 5 {
-		t.Fatalf("expected 5 nav items, got %d", len(feed.Navigation))
+	if len(feed.Navigation) != 6 {
+		t.Fatalf("expected 6 nav items, got %d", len(feed.Navigation))
 	}
 	for i, nv := range feed.Navigation {
-		expectedHref := fmt.Sprintf("/opds/v2/publications?spice_max=%d", i)
+		expectedHref := fmt.Sprintf("/opds/v2/publications?spice=%d", i)
 		if !strings.Contains(nv.Href, expectedHref) {
 			t.Errorf("nav item %d: expected href to contain %q, got %q", i, expectedHref, nv.Href)
 		}

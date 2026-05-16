@@ -608,6 +608,19 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 				continue
 			}
 		}
+		if q.SpiceExact != nil {
+			v := *q.SpiceExact
+			if v < 0 {
+				v = 0
+			}
+			if v > 5 {
+				v = 5
+			}
+			// Spice (incl. "unrated"=0) only applies to 16+/18+ books.
+			if bk.AgeRating < 16 || bk.SpiceRating != v {
+				continue
+			}
+		}
 		if q.NotIndexed && !bk.LastMaintenanceAt.IsZero() {
 			continue
 		}

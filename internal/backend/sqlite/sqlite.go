@@ -821,6 +821,19 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		extraClauses = append(extraClauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) >= ?)")
 		extraArgs = append(extraArgs, v)
 	}
+	if q.SpiceExact != nil {
+		v := *q.SpiceExact
+		if v < 0 {
+			v = 0
+		}
+		if v > 5 {
+			v = 5
+		}
+		// Even when v == 0 ("unrated"), the filter is scoped to 16+/18+:
+		// younger-audience books carry no meaningful spice value at all.
+		extraClauses = append(extraClauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) = ?)")
+		extraArgs = append(extraArgs, v)
+	}
 	if q.NotIndexed {
 		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")
 	}

@@ -269,7 +269,7 @@ func (s *Server) handleInitialize() initializeResult {
 		ProtocolVersion: protocolVersion,
 		ServerInfo: map[string]any{
 			"name":    "nxt-opds",
-			"version": "1.126.0",
+			"version": "1.127.0",
 		},
 		Capabilities: map[string]any{
 			"tools": map[string]any{},
@@ -295,8 +295,9 @@ func (s *Server) toolsList() toolsListResult {
 					"not_indexed":  {Type: "boolean", Description: "Si vrai, retourne uniquement les livres jamais traités par le libraire (last_maintenance_at = 0)"},
 					"age_rating":     {Type: "integer", Description: "Filtre par classification d'âge exacte (3/6/10/12/16/18). -1 = livres non classifiés (age_rating = 0). Pour inclure plusieurs paliers utiliser age_rating_min."},
 					"age_rating_min": {Type: "integer", Description: "Filtre par classification d'âge minimum : 16 retourne les 16+ ET 18+, 12 retourne 12+/16+/18+, etc. Valeurs acceptées : 3/6/10/12/16/18."},
-					"spice_min":      {Type: "integer", Description: "Intensité piment minimum (0-5). Restreint aux livres 16+/18+ avec spice_rating ≥ N. 0 = pas de filtre (équivalent à omis)."},
-					"spice_max":      {Type: "integer", Description: "Intensité piment maximum (0-5). Restreint aux livres 16+/18+ avec spice_rating ≤ N. Les titres sous 16+ ne sont pas affectés."},
+					"spice_rating":   {Type: "integer", Description: "Filtre par intensité piment EXACTE (0-5). Restreint aux livres 16+/18+ avec spice_rating == N. À privilégier sur spice_min/spice_max (qui restent disponibles pour des plages avancées)."},
+					"spice_min":      {Type: "integer", Description: "Intensité piment minimum (0-5). Restreint aux livres 16+/18+ avec spice_rating ≥ N. 0 = pas de filtre (équivalent à omis). Pour un match exact, préférer spice_rating."},
+					"spice_max":      {Type: "integer", Description: "Intensité piment maximum (0-5). Restreint aux livres 16+/18+ avec spice_rating ≤ N. Pour un match exact, préférer spice_rating."},
 					"sort":        {Type: "string", Description: "Tri : added_desc (défaut), added_asc, title_asc, title_desc", Enum: []string{"added_desc", "added_asc", "title_asc", "title_desc"}},
 					"limit":       {Type: "integer", Description: "Nombre maximum de résultats (défaut: 20, max: 100)"},
 					"offset":      {Type: "integer", Description: "Décalage pour la pagination (défaut: 0)"},
@@ -658,6 +659,16 @@ func (s *Server) toolSearchBooks(args map[string]any) (any, *rpcError) {
 			clamped = 5
 		}
 		q.SpiceMin = &clamped
+	}
+	if v, ok := numericArg(args, "spice_rating"); ok {
+		clamped := v
+		if clamped < 0 {
+			clamped = 0
+		}
+		if clamped > 5 {
+			clamped = 5
+		}
+		q.SpiceExact = &clamped
 	}
 	if v, ok := args["sort"].(string); ok {
 		switch v {

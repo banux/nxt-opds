@@ -794,12 +794,12 @@
           </button>
         </template>
 
-        <!-- Spice max filter — hidden for child profiles -->
+        <!-- Spice exact filter — hidden for child profiles -->
         <template v-if="!(currentUser && currentUser.isChild)">
-          <template v-for="sm in [{v:0,l:'🌶 0'},{v:1,l:'🌶 ≤1'},{v:2,l:'🌶 ≤2'},{v:3,l:'🌶 ≤3'},{v:4,l:'🌶 ≤4'}]" :key="sm.v">
-            <button @click="setSpiceMaxFilter(sm.v)"
-              :title="'Limiter les 16+/18+ à intensité ' + sm.v"
-              :class="spiceMaxFilter === sm.v
+          <template v-for="sm in [{v:0,l:'🌶 0 Sans'},{v:1,l:'🌶 1 Suggestif'},{v:2,l:'🌶 2 Sensuel'},{v:3,l:'🌶 3 Explicite'},{v:4,l:'🌶 4 Récurrent'},{v:5,l:'🌶 5 Érotique'}]" :key="sm.v">
+            <button @click="setSpiceExactFilter(sm.v)"
+              :title="'Filtre exact 16+/18+ : intensité ' + sm.v"
+              :class="spiceExactFilter === sm.v
                 ? 'bg-red-500 text-white border-red-500'
                 : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-red-500 hover:text-red-500'"
               class="shrink-0 px-3 py-1 text-xs font-medium rounded-full border transition-colors">
@@ -3037,8 +3037,14 @@ createApp({
     const notIndexedOnly    = ref(false)
     const ageRatingFilter   = ref([])  // empty = all; values: -1 = unclassified, 3/6/10/12/16/18 = exact match
     const seriesSizeFilter  = ref('')  // '' = all; values: standalone, short, medium, long
-    // spice_max filter: -1 = no filter (default); 0-5 = restrict 16+/18+ books to spice <= N.
-    const spiceMaxFilter    = ref(parseInt(localStorage.getItem('nxt-spice-max') ?? '-1', 10))
+    // spice exact filter: -1 = no filter (default); 0-5 = restrict to 16+/18+ books
+    // whose spice_rating == N.  Legacy ?spice_max= "≤N" semantics were confusing,
+    // so we drop any inherited nxt-spice-max key without auto-converting it
+    // (a threshold is not equivalent to an exact match).
+    if (localStorage.getItem('nxt-spice-max') !== null) {
+      localStorage.removeItem('nxt-spice-max')
+    }
+    const spiceExactFilter  = ref(parseInt(localStorage.getItem('nxt-spice') ?? '-1', 10))
     const sortOrder         = ref(localStorage.getItem('nxt-sort') || 'added_desc')
     let searchTimer = null
 
@@ -3086,7 +3092,7 @@ createApp({
         if (notIndexedOnly.value) params.set('not_indexed', '1')
         if (ageRatingFilter.value.length > 0) params.set('age_rating', ageRatingFilter.value.join(','))
         if (seriesSizeFilter.value) params.set('series_size', seriesSizeFilter.value)
-        if (spiceMaxFilter.value >= 0 && spiceMaxFilter.value <= 5) params.set('spice_max', String(spiceMaxFilter.value))
+        if (spiceExactFilter.value >= 0 && spiceExactFilter.value <= 5) params.set('spice', String(spiceExactFilter.value))
         if (sortOrder.value) params.set('sort', sortOrder.value)
         const res = await apiFetch('/api/books?' + params)
         if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -3134,13 +3140,13 @@ createApp({
       loadBooks()
     }
 
-    function setSpiceMaxFilter(v) {
+    function setSpiceExactFilter(v) {
       // Toggle: clicking the active value clears the filter.
-      spiceMaxFilter.value = spiceMaxFilter.value === v ? -1 : v
-      if (spiceMaxFilter.value >= 0) {
-        localStorage.setItem('nxt-spice-max', String(spiceMaxFilter.value))
+      spiceExactFilter.value = spiceExactFilter.value === v ? -1 : v
+      if (spiceExactFilter.value >= 0) {
+        localStorage.setItem('nxt-spice', String(spiceExactFilter.value))
       } else {
-        localStorage.removeItem('nxt-spice-max')
+        localStorage.removeItem('nxt-spice')
       }
       page.value = 1
       loadBooks()
@@ -3663,7 +3669,7 @@ createApp({
       if (notIndexedOnly.value) p.set('not_indexed', '1')
       if (ageRatingFilter.value.length > 0) p.set('age_rating', ageRatingFilter.value.join(','))
       if (seriesSizeFilter.value) p.set('series_size', seriesSizeFilter.value)
-      if (spiceMaxFilter.value >= 0 && spiceMaxFilter.value <= 5) p.set('spice_max', String(spiceMaxFilter.value))
+      if (spiceExactFilter.value >= 0 && spiceExactFilter.value <= 5) p.set('spice', String(spiceExactFilter.value))
       if (sortOrder.value) p.set('sort', sortOrder.value)
       return p.toString()
     }
@@ -5035,8 +5041,8 @@ createApp({
 
     return {
       isDark, toggleDark,
-      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, seriesSizeFilter, spiceMaxFilter, sortOrder, totalPages, pageNumbers,
-      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, setSeriesSizeFilter, setSpiceMaxFilter, onSortChange, goPage, coverGradient,
+      books, total, loading, page, searchQuery, unreadOnly, notIndexedOnly, ageRatingFilter, seriesSizeFilter, spiceExactFilter, sortOrder, totalPages, pageNumbers,
+      loadBooks, onSearchInput, toggleUnreadFilter, toggleNotIndexedFilter, toggleAgeRating, setSeriesSizeFilter, setSpiceExactFilter, onSortChange, goPage, coverGradient,
       currentView, currentBook, bookLoading, navigateTo,
       navBookIDs, navBookIndex, prevBookID, nextBookID, openBook, gridFilterParams,
       onBookTouchStart, onBookTouchEnd,
