@@ -1103,6 +1103,95 @@ func TestAddWishlistItem_AutoResolveUserID(t *testing.T) {
 	}
 }
 
+// updateBookCatalog captures the BookUpdate passed to UpdateBook so tests can
+// assert on individual fields (e.g. SpiceRating).
+type updateBookCatalog struct {
+	*fakeCatalog
+	lastUpdate *catalog.BookUpdate
+}
+
+func (c *updateBookCatalog) UpdateBook(id string, u catalog.BookUpdate) (*catalog.Book, error) {
+	cp := u
+	c.lastUpdate = &cp
+	for i := range c.books {
+		if c.books[i].ID == id {
+			if u.SpiceRating != nil {
+				c.books[i].SpiceRating = *u.SpiceRating
+			}
+			if u.AgeRating != nil {
+				c.books[i].AgeRating = *u.AgeRating
+			}
+			out := c.books[i]
+			return &out, nil
+		}
+	}
+	return nil, fmt.Errorf("book %q not found", id)
+}
+
+// TestToolUpdateBook_SpiceRating verifies the MCP update_book tool accepts the
+// spice_rating numeric argument and propagates it through BookUpdate.
+func TestToolUpdateBook_SpiceRating(t *testing.T) {
+	cat := &updateBookCatalog{fakeCatalog: newFakeCatalog()}
+	srv := mcp.New(cat)
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      200,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "update_book",
+			"arguments": map[string]any{
+				"id":           "book-1",
+				"age_rating":   16,
+				"spice_rating": 3,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("unexpected error result: %v", result)
+	}
+	if cat.lastUpdate == nil || cat.lastUpdate.SpiceRating == nil {
+		t.Fatalf("expected UpdateBook to receive SpiceRating, got: %+v", cat.lastUpdate)
+	}
+	if *cat.lastUpdate.SpiceRating != 3 {
+		t.Errorf("expected SpiceRating=3, got %d", *cat.lastUpdate.SpiceRating)
+	}
+	content := result["content"].([]any)
+	text := content[0].(map[string]any)["text"].(string)
+	if !containsStr(text, "Intensité (piment):** 3/5") {
+		t.Errorf("expected spice section in formatted output, got: %s", text)
+	}
+}
+
+// TestToolUpdateBook_SpiceRating_Clamped verifies out-of-range values are
+// clamped to [0, 5].
+func TestToolUpdateBook_SpiceRating_Clamped(t *testing.T) {
+	cat := &updateBookCatalog{fakeCatalog: newFakeCatalog()}
+	srv := mcp.New(cat)
+	resp := mcpPost(t, srv, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      201,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "update_book",
+			"arguments": map[string]any{
+				"id":           "book-1",
+				"spice_rating": 9,
+			},
+		},
+	})
+	result := rpcResult(t, resp)
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("unexpected error result: %v", result)
+	}
+	if cat.lastUpdate == nil || cat.lastUpdate.SpiceRating == nil {
+		t.Fatalf("expected SpiceRating to be set, got: %+v", cat.lastUpdate)
+	}
+	if *cat.lastUpdate.SpiceRating != 5 {
+		t.Errorf("expected SpiceRating to be clamped to 5, got %d", *cat.lastUpdate.SpiceRating)
+	}
+}
+
 // TestDeleteWishlistItem_CrossUserNonAdminBlocked verifies that a non-admin
 // user can't delete another user's wishlist entry.
 func TestDeleteWishlistItem_CrossUserNonAdminBlocked(t *testing.T) {
