@@ -285,9 +285,6 @@ func (s *Server) registerRoutes() {
 	// Spice-intensity navigation feed (links to /opds/books?spice=N)
 	protected.HandleFunc("/opds/spice", s.handleSpiceLevels).Methods(http.MethodGet)
 
-	// Wishlist feed
-	protected.HandleFunc("/opds/wishlist", s.handleOPDSWishlist).Methods(http.MethodGet)
-
 	// Recommendations feed
 	protected.HandleFunc("/opds/recommendations", s.handleOPDSRecommendations).Methods(http.MethodGet)
 
@@ -431,7 +428,6 @@ func (s *Server) registerRoutes() {
 	protected.HandleFunc("/opds/v2/publishers/{publisher}", s.handleOPDS2PublisherBooks).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/unread", s.handleOPDS2Unread).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/spice", s.handleOPDS2SpiceLevels).Methods(http.MethodGet)
-	protected.HandleFunc("/opds/v2/wishlist", s.handleOPDS2Wishlist).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/recommendations", s.handleOPDS2Recommendations).Methods(http.MethodGet)
 	protected.HandleFunc("/opds/v2/to-read", s.handleOPDS2ToRead).Methods(http.MethodGet)
 

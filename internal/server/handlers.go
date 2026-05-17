@@ -225,18 +225,6 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if s.wishlistManager != nil {
-		feed.AddEntry(opds.Entry{
-			ID:      "urn:nxt-opds:wishlist",
-			Title:   opds.Text{Value: "Liste de souhaits"},
-			Updated: opds.AtomDate{Time: now},
-			Content: &opds.Content{Type: "text", Value: "Livres recherchés"},
-			Links: []opds.Link{
-				{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/wishlist", tok), Type: opds.MIMENavigationFeed},
-			},
-		})
-	}
-
 	if s.recommender != nil && s.userManager != nil {
 		feed.AddEntry(opds.Entry{
 			ID:      "urn:nxt-opds:recommendations",
@@ -2509,59 +2497,7 @@ func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
 	writeOPDS2(w, http.StatusOK, feed)
 }
 
-// ─── OPDS Wishlist / Recommendations ─────────────────────────────────────────
-
-// handleOPDSWishlist serves an OPDS 1.x navigation feed of wishlist items.
-// GET /opds/wishlist
-// Wishlist items are not real catalog books, so they are exposed as navigation
-// entries with the title, author and notes in the content field.
-func (s *Server) handleOPDSWishlist(w http.ResponseWriter, r *http.Request) {
-	if s.wishlistManager == nil {
-		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
-		return
-	}
-	tok := r.URL.Query().Get("token")
-	items, err := s.wishlistManager.WishlistItems("") // all users
-	if err != nil {
-		http.Error(w, "catalog error", http.StatusInternalServerError)
-		return
-	}
-
-	feed := opds.NewNavigationFeed(
-		"urn:nxt-opds:wishlist",
-		fmt.Sprintf("Liste de souhaits (%d)", len(items)),
-	)
-	feed.Author = &opds.Author{Name: "nxt-opds"}
-	feed.AddLink(opds.RelSelf, withToken("/opds/wishlist", tok), opds.MIMENavigationFeed)
-	feed.AddLink(opds.RelStart, withToken("/opds", tok), opds.MIMENavigationFeed)
-
-	for _, it := range items {
-		content := it.Author
-		if it.ReleaseDate != "" {
-			if content != "" {
-				content += " – "
-			}
-			content += it.ReleaseDate
-		}
-		if it.Notes != "" {
-			if content != "" {
-				content += " – "
-			}
-			content += it.Notes
-		}
-		if it.UserName != "" {
-			content += " (souhaité par " + it.UserName + ")"
-		}
-		feed.AddEntry(opds.Entry{
-			ID:      "urn:nxt-opds:wishlist:" + it.ID,
-			Title:   opds.Text{Value: it.Title},
-			Updated: opds.AtomDate{Time: it.CreatedAt},
-			Content: &opds.Content{Type: "text", Value: content},
-			Links:   []opds.Link{{Rel: opds.RelCatalogNavigation, Href: withToken("/opds/wishlist", tok), Type: opds.MIMENavigationFeed}},
-		})
-	}
-	writeOPDS(w, http.StatusOK, feed)
-}
+// ─── OPDS Recommendations ────────────────────────────────────────────────────
 
 // handleOPDSRecommendations serves an OPDS 1.x acquisition feed of recommended
 // books.  When the request is authenticated as a specific user (session
@@ -2657,42 +2593,6 @@ func (s *Server) recommendedBooks(uid string) ([]catalog.Book, error) {
 		}
 	}
 	return books, nil
-}
-
-// handleOPDS2Wishlist serves an OPDS 2.0 navigation feed of wishlist items.
-// GET /opds/v2/wishlist
-func (s *Server) handleOPDS2Wishlist(w http.ResponseWriter, r *http.Request) {
-	if s.wishlistManager == nil {
-		http.Error(w, "wishlist not supported", http.StatusNotImplemented)
-		return
-	}
-	tok := r.URL.Query().Get("token")
-	items, err := s.wishlistManager.WishlistItems("") // all users
-	if err != nil {
-		http.Error(w, "catalog error", http.StatusInternalServerError)
-		return
-	}
-
-	feed := &opds2.Feed{
-		Metadata: opds2.FeedMetadata{
-			Title:         fmt.Sprintf("Liste de souhaits (%d)", len(items)),
-			NumberOfItems: len(items),
-		},
-		Links: []opds2.Link{
-			{Rel: "self", Href: withToken("/opds/v2/wishlist", tok), Type: opds2.MIMEFeed},
-			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
-			opds2SearchLink,
-		},
-	}
-
-	for _, it := range items {
-		feed.Navigation = append(feed.Navigation, opds2.Link{
-			Title: it.Title,
-			Href:  withToken("/opds/v2/wishlist", tok),
-			Type:  opds2.MIMEFeed,
-		})
-	}
-	writeOPDS2(w, http.StatusOK, feed)
 }
 
 // handleOPDS2Recommendations serves an OPDS 2.0 acquisition feed of recommended

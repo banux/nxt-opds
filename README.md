@@ -253,7 +253,6 @@ cannot start, view or break a pairing.
 | `GET /opds/publishers/{publisher}` | Books by publisher             |
 | `GET /opds/unread`                 | Unread books feed              |
 | `GET /opds/to-read`                | To-read pile feed (per user; multi-user clients pass `?user=<id>`) |
-| `GET /opds/wishlist`               | Wishlist feed                  |
 | `GET /opds/recommendations`        | Recommendations feed           |
 | `GET /opds/spice`                  | Spice-level navigation feed (6 exact buckets 0–5 → `/opds/books?spice=N`; hidden for child profiles) |
 

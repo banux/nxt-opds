@@ -1426,17 +1426,28 @@ func TestHandleOPDS2Root_NavigationStripsDeprecatedSubFeeds(t *testing.T) {
 		}
 	}
 
-	// Deprecated routes themselves still respond 200 (back-compat).
-	for _, d := range deprecated {
-		// Skip the user-specific ones that need auth/state to serve.
-		if d == "/opds/v2/to-read" || d == "/opds/v2/recommendations" {
-			continue
-		}
+	// Back-compat: deprecated routes that we kept still answer 200 (or 501).
+	// Wishlist and to-read/recommendations are excluded — wishlist is now
+	// fully removed (v1.136) since it never carried real publications, and
+	// the user-scoped routes require auth/state to evaluate.
+	keptRoutes := []string{"/opds/v2/spice", "/opds/v2/unread"}
+	for _, d := range keptRoutes {
 		req2 := httptest.NewRequest(http.MethodGet, d, nil)
 		rr2 := httptest.NewRecorder()
 		srv.ServeHTTP(rr2, req2)
 		if rr2.Code != http.StatusOK && rr2.Code != http.StatusNotImplemented {
 			t.Errorf("GET %s: expected 200 (or 501 when backend lacks support), got %d", d, rr2.Code)
+		}
+	}
+
+	// The wishlist routes (v1 and v2) MUST return 404 — wishlists are not
+	// publications, they're tracked via REST API + MCP only.
+	for _, p := range []string{"/opds/wishlist", "/opds/v2/wishlist"} {
+		req2 := httptest.NewRequest(http.MethodGet, p, nil)
+		rr2 := httptest.NewRecorder()
+		srv.ServeHTTP(rr2, req2)
+		if rr2.Code != http.StatusNotFound {
+			t.Errorf("GET %s: expected 404 (wishlist OPDS feeds removed), got %d", p, rr2.Code)
 		}
 	}
 }
