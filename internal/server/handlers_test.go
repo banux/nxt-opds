@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1622,5 +1624,270 @@ func TestHandleSpiceLevels_HiddenForChildProfile(t *testing.T) {
 	}
 	if len(spiceFeed.Entries) != 0 {
 		t.Errorf("child profile should see no spice entries; got %d", len(spiceFeed.Entries))
+	}
+}
+
+// patchBook is a tiny helper that PATCHes a book's metadata via the API and
+// fails the test on any non-200 response.
+func patchBook(t *testing.T, srv *Server, id, jsonBody string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/api/books/"+id, strings.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch %s: %d - %s", id, rr.Code, rr.Body.String())
+	}
+}
+
+// findFacetGroup returns the FacetGroup with the given title or nil.
+func findFacetGroup(feed *opds2.Feed, title string) *opds2.FacetGroup {
+	for i := range feed.Facets {
+		if feed.Facets[i].Metadata.Title == title {
+			return &feed.Facets[i]
+		}
+	}
+	return nil
+}
+
+// findFacetLink returns the Link with the given count-property value, or nil.
+func findFacetLinkByCount(fg *opds2.FacetGroup, count int) *opds2.Link {
+	for i := range fg.Links {
+		if fg.Links[i].Properties != nil && fg.Links[i].Properties.NumberOfItems == count {
+			return &fg.Links[i]
+		}
+	}
+	return nil
+}
+
+// TestHandleOPDS2Publications_FacetsAge verifies that GET /opds/v2/publications
+// exposes a "Classification d'âge" facet group when classified books exist,
+// and that each link carries a NumberOfItems property reflecting the bucket
+// count after applying the (current query + this facet value).
+func TestHandleOPDS2Publications_FacetsAge(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	// Three books with three different age ratings.
+	a := uploadBook(t, srv, "a.epub", "Six Plus", "Author A")
+	b := uploadBook(t, srv, "b.epub", "Twelve Plus", "Author B")
+	c := uploadBook(t, srv, "c.epub", "Eighteen Plus", "Author C")
+	patchBook(t, srv, a.ID, `{"ageRating":6}`)
+	patchBook(t, srv, b.ID, `{"ageRating":12}`)
+	patchBook(t, srv, c.ID, `{"ageRating":18,"spiceRating":3}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/publications", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2/publications: %d", rr.Code)
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	ageGroup := findFacetGroup(&feed, "Classification d'âge")
+	if ageGroup == nil {
+		t.Fatalf("missing 'Classification d'âge' facet group; got facets=%+v", feed.Facets)
+	}
+	if len(ageGroup.Links) < 3 {
+		t.Fatalf("age facet should have at least 3 links (6+/12+/18+); got %d", len(ageGroup.Links))
+	}
+	// Every link must carry a NumberOfItems hint and an href that contains age_rating=.
+	for i, l := range ageGroup.Links {
+		if l.Properties == nil || l.Properties.NumberOfItems <= 0 {
+			t.Errorf("age facet link %d (%q) missing NumberOfItems; got %+v", i, l.Title, l.Properties)
+		}
+		if !strings.Contains(l.Href, "age_rating=") {
+			t.Errorf("age facet link %d href should carry age_rating=; got %q", i, l.Href)
+		}
+	}
+	// The "Piment" facet must be present (one 18+/spice=3 book exists).
+	if spice := findFacetGroup(&feed, "Piment"); spice == nil {
+		t.Errorf("spice facet should exist when at least one 16+/18+ book matches; got nil")
+	}
+}
+
+// TestHandleOPDS2Publications_FacetsHiddenForChild verifies that the spice
+// facet is omitted entirely when the request is authenticated as a child
+// profile (MaxAgeRating > 0).  The age facet still appears but only with
+// buckets <= MaxAge.
+func TestHandleOPDS2Publications_FacetsHiddenForChild(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if _, err := backend.CreateUser("Admin", "#000", true, false, 0); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	kid, err := backend.CreateUser("Kid", "#0f0", false, true, 10)
+	if err != nil {
+		t.Fatalf("kid: %v", err)
+	}
+
+	// Add two more books directly via the backend's StoreBook (no HTTP auth).
+	storeMin := func(filename, title, author string) string {
+		data := buildEPUBBytes(title, author)
+		bk, err := backend.StoreBook(filename, io.NopCloser(bytes.NewReader(data)))
+		if err != nil {
+			t.Fatalf("StoreBook %s: %v", filename, err)
+		}
+		return bk.ID
+	}
+	id12 := storeMin("b12.epub", "Twelve Plus", "B")
+	id18 := storeMin("b18.epub", "Eighteen Plus", "C")
+
+	// Update metadata directly via backend (admin-equivalent path).
+	mustUpdate := func(id string, age, spice int) {
+		_, err := backend.UpdateBook(id, catalog.BookUpdate{AgeRating: &age, SpiceRating: &spice})
+		if err != nil {
+			t.Fatalf("UpdateBook %s: %v", id, err)
+		}
+	}
+	mustUpdate(id12, 12, 0)
+	mustUpdate(id18, 18, 3)
+	// The pre-existing "Alpha" book gets a 6+ rating.
+	allBooks, _, err := backend.AllBooks(0, 10)
+	if err != nil {
+		t.Fatalf("AllBooks: %v", err)
+	}
+	for _, bk := range allBooks {
+		if bk.Title == "Alpha" {
+			six := 6
+			zero := 0
+			if _, err := backend.UpdateBook(bk.ID, catalog.BookUpdate{AgeRating: &six, SpiceRating: &zero}); err != nil {
+				t.Fatalf("UpdateBook alpha: %v", err)
+			}
+		}
+	}
+
+	// Authenticate the request as the child user via its session cookie.
+	cookies := loginAsHelper(t, srv, kid.ID)
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/publications", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2/publications (child): %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	// Spice facet must be absent.
+	if spice := findFacetGroup(&feed, "Piment"); spice != nil {
+		t.Errorf("child profile must NOT see spice facet; got %+v", spice)
+	}
+	// Age facet must NOT expose buckets above MaxAge=10.
+	ageGroup := findFacetGroup(&feed, "Classification d'âge")
+	if ageGroup == nil {
+		t.Fatalf("age facet should still exist for child profile")
+	}
+	for _, l := range ageGroup.Links {
+		if strings.Contains(l.Href, "age_rating=12") || strings.Contains(l.Href, "age_rating=16") || strings.Contains(l.Href, "age_rating=18") {
+			t.Errorf("child profile (MaxAge=10) must not see facet for ages above 10; got %q", l.Href)
+		}
+	}
+}
+
+// TestHandleOPDS2TagBooks_FacetsPreserveTag verifies that facets on a
+// scoped feed (here /opds/v2/tags/{name}) build hrefs that point back to
+// the same scoped path — the tag scope survives.  Counts must reflect the
+// scoped subset, not the global library.
+func TestHandleOPDS2TagBooks_FacetsPreserveTag(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	a := uploadBook(t, srv, "a.epub", "Tagged Six", "Author A")
+	b := uploadBook(t, srv, "b.epub", "Tagged Twelve", "Author B")
+	other := uploadBook(t, srv, "c.epub", "Untagged Six", "Author C")
+	patchBook(t, srv, a.ID, `{"ageRating":6,"tags":["Fantasy"]}`)
+	patchBook(t, srv, b.ID, `{"ageRating":12,"tags":["Fantasy"]}`)
+	patchBook(t, srv, other.ID, `{"ageRating":6,"tags":["Horror"]}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/tags/Fantasy", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2/tags/Fantasy: %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	ageGroup := findFacetGroup(&feed, "Classification d'âge")
+	if ageGroup == nil {
+		t.Fatalf("expected age facet on scoped feed; got %+v", feed.Facets)
+	}
+	// Each facet href should point back to /opds/v2/tags/Fantasy.
+	var foundSix, foundTwelve bool
+	for _, l := range ageGroup.Links {
+		if !strings.HasPrefix(l.Href, "/opds/v2/tags/Fantasy") {
+			t.Errorf("facet href must preserve tag scope; got %q", l.Href)
+		}
+		if strings.Contains(l.Href, "age_rating=6") && l.Properties.NumberOfItems == 1 {
+			foundSix = true
+		}
+		if strings.Contains(l.Href, "age_rating=12") && l.Properties.NumberOfItems == 1 {
+			foundTwelve = true
+		}
+	}
+	if !foundSix {
+		t.Errorf("expected age_rating=6 facet with count=1 (the only Fantasy 6+); got %+v", ageGroup.Links)
+	}
+	if !foundTwelve {
+		t.Errorf("expected age_rating=12 facet with count=1; got %+v", ageGroup.Links)
+	}
+	// "Untagged Six" must NOT contribute to the Fantasy scope's count.
+	for _, l := range ageGroup.Links {
+		if strings.Contains(l.Href, "age_rating=6") && l.Properties.NumberOfItems > 1 {
+			t.Errorf("Fantasy scope should report 1 for age_rating=6, not %d", l.Properties.NumberOfItems)
+		}
+	}
+}
+
+// TestHandleOPDS2Publications_FacetCountMatchesSearch verifies that for each
+// age facet link, navigating to its href produces the same count as the
+// facet's NumberOfItems property (round-trip consistency).
+func TestHandleOPDS2Publications_FacetCountMatchesSearch(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	a := uploadBook(t, srv, "a.epub", "Six A", "Author A")
+	b := uploadBook(t, srv, "b.epub", "Six B", "Author B")
+	c := uploadBook(t, srv, "c.epub", "Twelve C", "Author C")
+	patchBook(t, srv, a.ID, `{"ageRating":6}`)
+	patchBook(t, srv, b.ID, `{"ageRating":6}`)
+	patchBook(t, srv, c.ID, `{"ageRating":12}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/publications", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2/publications: %d", rr.Code)
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	age := findFacetGroup(&feed, "Classification d'âge")
+	if age == nil {
+		t.Fatalf("missing age facet")
+	}
+	// Find the 6+ link and assert NumberOfItems==2 and a follow-up call returns 2 publications.
+	six := findFacetLinkByCount(age, 2)
+	if six == nil || !strings.Contains(six.Href, "age_rating=6") {
+		t.Fatalf("expected age_rating=6 link with count=2; got %+v", age.Links)
+	}
+
+	// Follow the facet href.
+	req2 := httptest.NewRequest(http.MethodGet, six.Href, nil)
+	rr2 := httptest.NewRecorder()
+	srv.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("follow facet href %q: %d", six.Href, rr2.Code)
+	}
+	var follow opds2.Feed
+	if err := json.Unmarshal(rr2.Body.Bytes(), &follow); err != nil {
+		t.Fatalf("follow invalid JSON: %v", err)
+	}
+	if follow.Metadata.NumberOfItems != 2 {
+		t.Errorf("facet round-trip: expected 2 publications, got %d", follow.Metadata.NumberOfItems)
 	}
 }

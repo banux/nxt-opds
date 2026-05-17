@@ -2965,6 +2965,122 @@ func bookToPublication(b catalog.Book, tok string) opds2.Publication {
 	return pub
 }
 
+// ageFacetLabel returns the human-readable label for an age_rating bucket.
+func ageFacetLabel(v int) string {
+	if v == 0 {
+		return "Non classifié"
+	}
+	return fmt.Sprintf("%d+", v)
+}
+
+// spiceFacetLabel returns the human-readable label for a spice bucket.
+func spiceFacetLabel(v int) string {
+	for _, lvl := range spiceLevels {
+		if lvl.N == v {
+			return lvl.Title
+		}
+	}
+	return ""
+}
+
+// buildFacetURL composes a facet link URL: takes the base path and current
+// query parameters, replaces (or sets) the named facet param, and ensures the
+// token survives.  Pagination params (offset/limit) are stripped so the
+// caller restarts at page 1 after picking a facet.
+func buildFacetURL(basePath string, cur url.Values, param, value, tok string) string {
+	out := url.Values{}
+	for k, vs := range cur {
+		if k == "offset" || k == "limit" || k == "token" || k == param {
+			continue
+		}
+		for _, v := range vs {
+			out.Add(k, v)
+		}
+	}
+	out.Set(param, value)
+	if tok != "" {
+		out.Set("token", tok)
+	}
+	return basePath + "?" + out.Encode()
+}
+
+// faceter is implemented by catalog backends that can compute facet counts.
+type faceter interface {
+	Facets(q catalog.SearchQuery) (catalog.FacetCounts, error)
+}
+
+// buildFacetGroups produces the OPDS 2.0 "facets" section for an acquisition
+// feed.  When the catalog backend does not implement Facets, returns nil so
+// the caller's Feed.Facets stays empty (and the field is omitted from JSON).
+//
+// Age facet: shown when at least one bucket has results.  Buckets above the
+// child profile's MaxAgeRating are skipped automatically.
+// Spice facet: hidden when MaxAgeRating > 0 (child profile) or when no
+// matching book is 16+/18+.  Each bucket count is computed by the catalog
+// already scoped to age >= 16.
+func (s *Server) buildFacetGroups(r *http.Request, q catalog.SearchQuery, basePath, tok string) []opds2.FacetGroup {
+	f, ok := s.catalog.(faceter)
+	if !ok {
+		return nil
+	}
+	counts, err := f.Facets(q)
+	if err != nil {
+		return nil
+	}
+
+	var groups []opds2.FacetGroup
+	cur := r.URL.Query()
+
+	if len(counts.AgeRating) > 0 {
+		var links []opds2.Link
+		for _, v := range []int{0, 3, 6, 10, 12, 16, 18} {
+			n := counts.AgeRating[v]
+			if n == 0 {
+				continue
+			}
+			if q.MaxAgeRating > 0 && v > q.MaxAgeRating {
+				continue
+			}
+			links = append(links, opds2.Link{
+				Title:      ageFacetLabel(v),
+				Href:       buildFacetURL(basePath, cur, "age_rating", strconv.Itoa(v), tok),
+				Type:       opds2.MIMEFeed,
+				Properties: &opds2.LinkProperties{NumberOfItems: n},
+			})
+		}
+		if len(links) > 0 {
+			groups = append(groups, opds2.FacetGroup{
+				Metadata: opds2.FacetMetadata{Title: "Classification d'âge"},
+				Links:    links,
+			})
+		}
+	}
+
+	if q.MaxAgeRating == 0 && len(counts.Spice) > 0 {
+		var links []opds2.Link
+		for v := 0; v <= 5; v++ {
+			n := counts.Spice[v]
+			if n == 0 {
+				continue
+			}
+			links = append(links, opds2.Link{
+				Title:      spiceFacetLabel(v),
+				Href:       buildFacetURL(basePath, cur, "spice", strconv.Itoa(v), tok),
+				Type:       opds2.MIMEFeed,
+				Properties: &opds2.LinkProperties{NumberOfItems: n},
+			})
+		}
+		if len(links) > 0 {
+			groups = append(groups, opds2.FacetGroup{
+				Metadata: opds2.FacetMetadata{Title: "Piment"},
+				Links:    links,
+			})
+		}
+	}
+
+	return groups
+}
+
 // addPaginationLinks2 appends OPDS 2.0 pagination links to a feed.
 func addPaginationLinks2(feed *opds2.Feed, r *http.Request, offset, limit, total int) {
 	if total <= 0 || limit <= 0 {
@@ -3063,7 +3179,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 
-	books, total, err := s.catalog.Search(catalog.SearchQuery{
+	q := catalog.SearchQuery{
 		UnreadOnly:   true,
 		UserID:       userID,
 		Offset:       offset,
@@ -3072,7 +3188,8 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
 		SpiceExact:   parseSpiceExactQuery(r),
-	})
+	}
+	books, total, err := s.catalog.Search(q)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3089,6 +3206,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
+	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/unread", tok)
 
 	for _, bk := range books {
 		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
@@ -3104,7 +3222,7 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 	offset, limit := parsePagination(r)
 	userID := currentUserID(r)
 
-	books, total, err := s.catalog.Search(catalog.SearchQuery{
+	q := catalog.SearchQuery{
 		Offset:       offset,
 		Limit:        limit,
 		UserID:       userID,
@@ -3112,7 +3230,16 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 		SortOrder:    "desc",
 		MaxAgeRating: s.maxAgeRatingForUser(userID),
 		SpiceExact:   parseSpiceExactQuery(r),
-	})
+	}
+	// Honour ?age_rating=N (single value) on the publications feed.
+	if raw := r.URL.Query().Get("age_rating"); raw != "" {
+		for _, s := range strings.Split(raw, ",") {
+			if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+				q.AgeRatings = append(q.AgeRatings, v)
+			}
+		}
+	}
+	books, total, err := s.catalog.Search(q)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3129,6 +3256,7 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
+	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/publications", tok)
 
 	for _, bk := range books {
 		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
@@ -3225,23 +3353,15 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
-	var (
-		books []catalog.Book
-		total int
-		err   error
-	)
-	if spiceExact != nil || maxAge > 0 {
-		books, total, err = s.catalog.Search(catalog.SearchQuery{
-			Author:       author,
-			Offset:       offset,
-			Limit:        limit,
-			UserID:       userID,
-			MaxAgeRating: maxAge,
-			SpiceExact:   spiceExact,
-		})
-	} else {
-		books, total, err = s.catalog.BooksByAuthor(author, offset, limit)
+	q := catalog.SearchQuery{
+		Author:       author,
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		MaxAgeRating: maxAge,
+		SpiceExact:   spiceExact,
 	}
+	books, total, err := s.catalog.Search(q)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3258,6 +3378,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
+	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/authors/"+url.PathEscape(author), tok)
 
 	for _, bk := range books {
 		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
@@ -3310,23 +3431,15 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
-	var (
-		books []catalog.Book
-		total int
-		err   error
-	)
-	if spiceExact != nil || maxAge > 0 {
-		books, total, err = s.catalog.Search(catalog.SearchQuery{
-			Tag:          tag,
-			Offset:       offset,
-			Limit:        limit,
-			UserID:       userID,
-			MaxAgeRating: maxAge,
-			SpiceExact:   spiceExact,
-		})
-	} else {
-		books, total, err = s.catalog.BooksByTag(tag, offset, limit)
+	q := catalog.SearchQuery{
+		Tag:          tag,
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		MaxAgeRating: maxAge,
+		SpiceExact:   spiceExact,
 	}
+	books, total, err := s.catalog.Search(q)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3343,6 +3456,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
+	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/tags/"+url.PathEscape(tag), tok)
 
 	for _, bk := range books {
 		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
@@ -3395,23 +3509,15 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 	spiceExact := parseSpiceExactQuery(r)
 	maxAge := s.maxAgeRatingForUser(userID)
 
-	var (
-		books []catalog.Book
-		total int
-		err   error
-	)
-	if spiceExact != nil || maxAge > 0 {
-		books, total, err = s.catalog.Search(catalog.SearchQuery{
-			Publisher:    publisher,
-			Offset:       offset,
-			Limit:        limit,
-			UserID:       userID,
-			MaxAgeRating: maxAge,
-			SpiceExact:   spiceExact,
-		})
-	} else {
-		books, total, err = s.catalog.BooksByPublisher(publisher, offset, limit)
+	q := catalog.SearchQuery{
+		Publisher:    publisher,
+		Offset:       offset,
+		Limit:        limit,
+		UserID:       userID,
+		MaxAgeRating: maxAge,
+		SpiceExact:   spiceExact,
 	}
+	books, total, err := s.catalog.Search(q)
 	if err != nil {
 		http.Error(w, "catalog error", http.StatusInternalServerError)
 		return
@@ -3428,6 +3534,7 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
+	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/publishers/"+url.PathEscape(publisher), tok)
 
 	for _, bk := range books {
 		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))

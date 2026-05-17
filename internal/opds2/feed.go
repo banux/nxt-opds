@@ -24,6 +24,28 @@ type Feed struct {
 	Links        []Link        `json:"links"`
 	Navigation   []Link        `json:"navigation,omitempty"`
 	Publications []Publication `json:"publications,omitempty"`
+	// Facets exposes filtering options to OPDS clients per spec §2.6.
+	// Cantook renders each FacetGroup as a row of clickable filter chips
+	// above the publication list.
+	Facets []FacetGroup `json:"facets,omitempty"`
+}
+
+// FacetGroup is a single facet (e.g. "Classification d'âge"), holding the
+// list of clickable filter values as Link Objects.
+type FacetGroup struct {
+	Metadata FacetMetadata `json:"metadata"`
+	Links    []Link        `json:"links"`
+}
+
+// FacetMetadata holds the display title of a facet group.
+type FacetMetadata struct {
+	Title string `json:"title"`
+}
+
+// LinkProperties carries optional Readium-style metadata on a Link Object
+// (notably the facet-count NumberOfItems hint).
+type LinkProperties struct {
+	NumberOfItems int `json:"numberOfItems,omitempty"`
 }
 
 // FeedMetadata holds top-level metadata for a feed.
@@ -34,11 +56,12 @@ type FeedMetadata struct {
 
 // Link represents a link in the feed or in a publication.
 type Link struct {
-	Rel       interface{} `json:"rel,omitempty"` // string or []string
-	Href      string      `json:"href"`
-	Type      string      `json:"type,omitempty"`
-	Title     string      `json:"title,omitempty"`
-	Templated bool        `json:"templated,omitempty"`
+	Rel        interface{}     `json:"rel,omitempty"` // string or []string
+	Href       string          `json:"href"`
+	Type       string          `json:"type,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	Templated  bool            `json:"templated,omitempty"`
+	Properties *LinkProperties `json:"properties,omitempty"`
 }
 
 // Publication represents a book in an acquisition feed.

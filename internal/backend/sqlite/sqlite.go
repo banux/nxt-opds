@@ -743,64 +743,72 @@ func sortClause(q catalog.SearchQuery) string {
 	}
 }
 
-// Search performs a case-insensitive substring search over title and authors.
-// If q.Query is empty all books are candidates (filtered only by q.UnreadOnly / q.Series).
-func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
-	var extraClauses []string
-	var extraArgs []any
+// filterOptions toggles which sub-filters buildSearchFilters emits.
+// The defaults (zero value) include everything — facet queries opt out of
+// the dimension they're counting so alternative buckets are visible.
+type filterOptions struct {
+	skipAgeRatings bool
+	skipSpice      bool
+}
+
+// buildSearchFilters turns a SearchQuery into a SQL WHERE-clause fragment
+// (always prefixed with " AND ") and the matching argument slice.  The
+// fragment is empty when no filter is active.
+func buildSearchFilters(q catalog.SearchQuery, opts filterOptions) (string, []any) {
+	var clauses []string
+	var args []any
 
 	if q.UnreadOnly {
 		if q.UserID != "" {
-			// Per-user unread: book has no is_read=1 entry for this user.
-			extraClauses = append(extraClauses, `NOT EXISTS (
+			clauses = append(clauses, `NOT EXISTS (
 				SELECT 1 FROM user_read_status _urs
 				WHERE _urs.book_id = b.id AND _urs.user_id = ? AND _urs.is_read = 1)`)
-			extraArgs = append(extraArgs, q.UserID)
+			args = append(args, q.UserID)
 		} else {
-			extraClauses = append(extraClauses, "b.is_read = 0")
+			clauses = append(clauses, "b.is_read = 0")
 		}
 	}
 	if q.Series != "" {
-		extraClauses = append(extraClauses, "b.series = ?")
-		extraArgs = append(extraArgs, q.Series)
+		clauses = append(clauses, "b.series = ?")
+		args = append(args, q.Series)
 	}
 	if q.Author != "" {
-		extraClauses = append(extraClauses, "EXISTS (SELECT 1 FROM book_authors _ba WHERE _ba.book_id = b.id AND LOWER(_ba.author_name) = LOWER(?))")
-		extraArgs = append(extraArgs, q.Author)
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM book_authors _ba WHERE _ba.book_id = b.id AND LOWER(_ba.author_name) = LOWER(?))")
+		args = append(args, q.Author)
 	}
 	if q.Tag != "" {
-		extraClauses = append(extraClauses, "EXISTS (SELECT 1 FROM book_tags _bt WHERE _bt.book_id = b.id AND LOWER(_bt.tag) = LOWER(?))")
-		extraArgs = append(extraArgs, q.Tag)
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM book_tags _bt WHERE _bt.book_id = b.id AND LOWER(_bt.tag) = LOWER(?))")
+		args = append(args, q.Tag)
 	}
 	if q.Publisher != "" {
-		extraClauses = append(extraClauses, "LOWER(b.publisher) = LOWER(?)")
-		extraArgs = append(extraArgs, q.Publisher)
+		clauses = append(clauses, "LOWER(b.publisher) = LOWER(?)")
+		args = append(args, q.Publisher)
 	}
 	if q.Collection != "" {
-		extraClauses = append(extraClauses, "LOWER(b.collection) = LOWER(?)")
-		extraArgs = append(extraArgs, q.Collection)
+		clauses = append(clauses, "LOWER(b.collection) = LOWER(?)")
+		args = append(args, q.Collection)
 	}
 	if q.MaxAgeRating > 0 {
-		extraClauses = append(extraClauses, "(b.age_rating = 0 OR b.age_rating <= ?)")
-		extraArgs = append(extraArgs, q.MaxAgeRating)
+		clauses = append(clauses, "(b.age_rating = 0 OR b.age_rating <= ?)")
+		args = append(args, q.MaxAgeRating)
 	}
-	if len(q.AgeRatings) > 0 {
+	if !opts.skipAgeRatings && len(q.AgeRatings) > 0 {
 		dbVals := make([]int, 0, len(q.AgeRatings))
 		for _, v := range q.AgeRatings {
 			if v == -1 {
-				dbVals = append(dbVals, 0) // unclassified → age_rating = 0
+				dbVals = append(dbVals, 0)
 			} else {
 				dbVals = append(dbVals, v)
 			}
 		}
 		placeholders := strings.Repeat("?,", len(dbVals))
 		placeholders = placeholders[:len(placeholders)-1]
-		extraClauses = append(extraClauses, "b.age_rating IN ("+placeholders+")")
+		clauses = append(clauses, "b.age_rating IN ("+placeholders+")")
 		for _, v := range dbVals {
-			extraArgs = append(extraArgs, v)
+			args = append(args, v)
 		}
 	}
-	if q.SpiceMax != nil {
+	if !opts.skipSpice && q.SpiceMax != nil {
 		v := *q.SpiceMax
 		if v < 0 {
 			v = 0
@@ -808,20 +816,18 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		if v > 5 {
 			v = 5
 		}
-		// Books below 16+ have no spice context, so the filter ignores them.
-		extraClauses = append(extraClauses, "(b.age_rating < 16 OR COALESCE(b.spice_rating, 0) <= ?)")
-		extraArgs = append(extraArgs, v)
+		clauses = append(clauses, "(b.age_rating < 16 OR COALESCE(b.spice_rating, 0) <= ?)")
+		args = append(args, v)
 	}
-	if q.SpiceMin != nil && *q.SpiceMin > 0 {
+	if !opts.skipSpice && q.SpiceMin != nil && *q.SpiceMin > 0 {
 		v := *q.SpiceMin
 		if v > 5 {
 			v = 5
 		}
-		// Sub-16+ books have no meaningful spice; restrict to age_rating >= 16.
-		extraClauses = append(extraClauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) >= ?)")
-		extraArgs = append(extraArgs, v)
+		clauses = append(clauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) >= ?)")
+		args = append(args, v)
 	}
-	if q.SpiceExact != nil {
+	if !opts.skipSpice && q.SpiceExact != nil {
 		v := *q.SpiceExact
 		if v < 0 {
 			v = 0
@@ -829,23 +835,28 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 		if v > 5 {
 			v = 5
 		}
-		// Even when v == 0 ("unrated"), the filter is scoped to 16+/18+:
-		// younger-audience books carry no meaningful spice value at all.
-		extraClauses = append(extraClauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) = ?)")
-		extraArgs = append(extraArgs, v)
+		clauses = append(clauses, "(b.age_rating >= 16 AND COALESCE(b.spice_rating, 0) = ?)")
+		args = append(args, v)
 	}
 	if q.NotIndexed {
-		extraClauses = append(extraClauses, "COALESCE(b.last_maintenance_at, 0) = 0")
+		clauses = append(clauses, "COALESCE(b.last_maintenance_at, 0) = 0")
 	}
-	if clause, args := seriesSizeClause(q.SeriesSize); clause != "" {
-		extraClauses = append(extraClauses, clause)
-		extraArgs = append(extraArgs, args...)
+	if clause, sArgs := seriesSizeClause(q.SeriesSize); clause != "" {
+		clauses = append(clauses, clause)
+		args = append(args, sArgs...)
 	}
 
-	extraWhere := ""
-	for _, c := range extraClauses {
-		extraWhere += " AND " + c
+	where := ""
+	for _, c := range clauses {
+		where += " AND " + c
 	}
+	return where, args
+}
+
+// Search performs a case-insensitive substring search over title and authors.
+// If q.Query is empty all books are candidates (filtered only by q.UnreadOnly / q.Series).
+func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
+	extraWhere, extraArgs := buildSearchFilters(q, filterOptions{})
 
 	orderBy := "ORDER BY " + sortClause(q)
 
@@ -942,6 +953,109 @@ func buildFTSMatchQuery(q string) string {
 		out = append(out, `"`+p+`"*`)
 	}
 	return strings.Join(out, " ")
+}
+
+// Facets computes age-rating and spice-rating bucket counts for the books
+// that match q, ignoring q.AgeRatings (for the age facet) and the spice
+// filters (for the spice facet) so the caller can render every alternative
+// bucket.  MaxAgeRating (child-profile protection) is applied.
+func (b *Backend) Facets(q catalog.SearchQuery) (catalog.FacetCounts, error) {
+	out := catalog.FacetCounts{
+		AgeRating: map[int]int{},
+		Spice:     map[int]int{},
+	}
+
+	// Age facet: drop AgeRatings filter so counts cover every bucket.
+	ageWhere, ageArgs := buildSearchFilters(q, filterOptions{skipAgeRatings: true})
+	if q.Query == "" {
+		rows, err := b.db.Query(`
+SELECT b.age_rating, COUNT(*) FROM books b
+WHERE 1=1`+ageWhere+`
+GROUP BY b.age_rating`, ageArgs...)
+		if err != nil {
+			return out, err
+		}
+		for rows.Next() {
+			var k, v int
+			if err := rows.Scan(&k, &v); err != nil {
+				rows.Close()
+				return out, err
+			}
+			out.AgeRating[k] = v
+		}
+		rows.Close()
+	} else {
+		fts := buildFTSMatchQuery(q.Query)
+		if fts != "" {
+			args := append([]any{fts}, ageArgs...)
+			rows, err := b.db.Query(`
+SELECT b.age_rating, COUNT(*) FROM books b
+JOIN books_fts fts ON fts.rowid = b.rowid
+WHERE books_fts MATCH ?`+ageWhere+`
+GROUP BY b.age_rating`, args...)
+			if err != nil {
+				return out, err
+			}
+			for rows.Next() {
+				var k, v int
+				if err := rows.Scan(&k, &v); err != nil {
+					rows.Close()
+					return out, err
+				}
+				out.AgeRating[k] = v
+			}
+			rows.Close()
+		}
+	}
+
+	// Spice facet: scoped to 16+ books, drop spice filters.
+	// Child profiles never see spice — leave the map empty when MaxAgeRating > 0.
+	if q.MaxAgeRating == 0 {
+		spiceWhere, spiceArgs := buildSearchFilters(q, filterOptions{skipSpice: true})
+		spiceWhere += " AND b.age_rating >= 16"
+		if q.Query == "" {
+			rows, err := b.db.Query(`
+SELECT COALESCE(b.spice_rating, 0), COUNT(*) FROM books b
+WHERE 1=1`+spiceWhere+`
+GROUP BY COALESCE(b.spice_rating, 0)`, spiceArgs...)
+			if err != nil {
+				return out, err
+			}
+			for rows.Next() {
+				var k, v int
+				if err := rows.Scan(&k, &v); err != nil {
+					rows.Close()
+					return out, err
+				}
+				out.Spice[k] = v
+			}
+			rows.Close()
+		} else {
+			fts := buildFTSMatchQuery(q.Query)
+			if fts != "" {
+				args := append([]any{fts}, spiceArgs...)
+				rows, err := b.db.Query(`
+SELECT COALESCE(b.spice_rating, 0), COUNT(*) FROM books b
+JOIN books_fts fts ON fts.rowid = b.rowid
+WHERE books_fts MATCH ?`+spiceWhere+`
+GROUP BY COALESCE(b.spice_rating, 0)`, args...)
+				if err != nil {
+					return out, err
+				}
+				for rows.Next() {
+					var k, v int
+					if err := rows.Scan(&k, &v); err != nil {
+						rows.Close()
+						return out, err
+					}
+					out.Spice[k] = v
+				}
+				rows.Close()
+			}
+		}
+	}
+
+	return out, nil
 }
 
 // BooksByAuthor returns books by a specific author with pagination.

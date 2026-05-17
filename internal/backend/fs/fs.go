@@ -695,6 +695,106 @@ func (b *Backend) Search(q catalog.SearchQuery) ([]catalog.Book, int, error) {
 	return matched[offset:end], total, nil
 }
 
+// Facets computes age-rating and spice-rating bucket counts for the books
+// that match q, ignoring q.AgeRatings (for the age facet) and the spice
+// filters (for the spice facet) so the caller can render every alternative
+// bucket.  MaxAgeRating (child profile) is applied: a child profile gets
+// only the allowed age buckets and an empty spice map.
+func (b *Backend) Facets(q catalog.SearchQuery) (catalog.FacetCounts, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	out := catalog.FacetCounts{
+		AgeRating: map[int]int{},
+		Spice:     map[int]int{},
+	}
+
+	// Pre-compute series sizes if SeriesSize filter is in effect.
+	var seriesSizes map[string]int
+	if q.SeriesSize != "" && q.SeriesSize != "standalone" {
+		seriesSizes = map[string]int{}
+		for _, bk := range b.books {
+			if bk.Series != "" {
+				seriesSizes[bk.Series]++
+			}
+		}
+	}
+
+	qLower := strings.ToLower(q.Query)
+
+	for _, bk := range b.books {
+		// Same filter chain as Search() but skip AgeRatings + spice filters.
+		if q.UnreadOnly && bk.IsRead {
+			continue
+		}
+		if q.Series != "" && bk.Series != q.Series {
+			continue
+		}
+		if q.SeriesSize != "" && !matchSeriesSize(q.SeriesSize, bk.Series, seriesSizes) {
+			continue
+		}
+		if q.Author != "" {
+			match := false
+			for _, a := range bk.Authors {
+				if strings.EqualFold(a.Name, q.Author) {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if q.Tag != "" {
+			match := false
+			for _, t := range bk.Tags {
+				if strings.EqualFold(t, q.Tag) {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if q.Publisher != "" && !strings.EqualFold(bk.Publisher, q.Publisher) {
+			continue
+		}
+		if q.Collection != "" && !strings.EqualFold(bk.Collection, q.Collection) {
+			continue
+		}
+		if q.MaxAgeRating > 0 && bk.AgeRating > q.MaxAgeRating {
+			continue
+		}
+		if q.NotIndexed && !bk.LastMaintenanceAt.IsZero() {
+			continue
+		}
+		if q.Query != "" {
+			matched := strings.Contains(strings.ToLower(bk.Title), qLower)
+			if !matched && bk.Series != "" {
+				matched = strings.Contains(strings.ToLower(bk.Series), qLower)
+			}
+			if !matched {
+				for _, a := range bk.Authors {
+					if strings.Contains(strings.ToLower(a.Name), qLower) {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
+		out.AgeRating[bk.AgeRating]++
+		if bk.AgeRating >= 16 && q.MaxAgeRating == 0 {
+			out.Spice[bk.SpiceRating]++
+		}
+	}
+	return out, nil
+}
+
 // BooksByAuthor returns books by a specific author with pagination.
 func (b *Backend) BooksByAuthor(author string, offset, limit int) ([]catalog.Book, int, error) {
 	b.mu.RLock()

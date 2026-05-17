@@ -657,6 +657,35 @@ type Recommender interface {
 	BookRecipients(fromUserID, bookID string) ([]string, error)
 }
 
+// FacetCounts holds book counts grouped by faceted dimensions, used to
+// build the OPDS 2.0 "facets" section.  Maps are keyed by the bucket value
+// (e.g. age_rating 0/3/6/10/12/16/18, spice 0..5) and report the number of
+// books that match the current SearchQuery PLUS that single bucket.
+//
+// AgeRating counts ignore any AgeRatings selection on the query (so the
+// client can show counts for every alternative). Spice counts are scoped
+// to age_rating >= 16 only (sub-16 spice is undefined).
+type FacetCounts struct {
+	// AgeRating maps age value → number of matching books. Key 0 = unclassified.
+	AgeRating map[int]int
+
+	// Spice maps spice value (0..5) → number of matching 16+ books.
+	Spice map[int]int
+}
+
+// Faceter is an optional interface for catalog backends that can compute
+// facet counts in a single pass.  Backends not implementing it cause the
+// server to omit the OPDS 2.0 facets section.
+type Faceter interface {
+	// Facets returns counts for each facet dimension, scoped to the supplied
+	// SearchQuery — but ignoring the AgeRatings selector (for the age facet)
+	// and the spice filters (for the spice facet), so the caller can render
+	// alternative bucket values.  MaxAgeRating (child-profile protection) is
+	// always applied: for a child profile the AgeRating map only contains
+	// allowed buckets and the Spice map is empty.
+	Facets(q SearchQuery) (FacetCounts, error)
+}
+
 // AllRecommendationsLister is an optional interface implemented by Recommender
 // backends that can return every recommendation in a single query.  It exists
 // to avoid the N+1 pattern of calling RecommendationsForUser once per user
