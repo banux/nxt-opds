@@ -178,7 +178,7 @@
   - Aucun groupe vide n'apparaît.
   - Spec compliance : chaque FacetGroup a `metadata.title` non vide, et `links` est une compact collection de Link Objects.
 
-- [ ] OPDS v2 : exposer pile-à-lire / recos / non-lus / derniers ajouts en `groups` sur la racine — la spec OPDS 2.0 §2.5 prévoit des `groups` qui permettent de présenter plusieurs collections dans une seule réponse (équivalent d'un dashboard pour les clients OPDS). **Cantook rend chaque acquisition group comme une carousel horizontale de couvertures sur l'écran d'accueil**, avec le titre du group au-dessus et un lien "Voir tout →" qui suit `links.self`. C'est exactement l'UX qu'on veut. Au lieu d'obliger l'utilisateur à naviguer dans 4 sous-feeds successifs, la racine `/opds/v2` renvoie directement N petites sections + un lien "voir tout" sur chacune. Refondre `handleOPDS2Root` (`internal/server/handlers.go:2990-3036`).
+- [x] OPDS v2 : exposer pile-à-lire / recos / non-lus / derniers ajouts en `groups` sur la racine — **Done: `internal/opds2/feed.go` — ajout des types `Group{Metadata, Links, Navigation, Publications}` et `GroupMetadata{Title, NumberOfItems omitempty}` ; ajout du champ `Groups []Group` à `Feed` (`json:"groups,omitempty"`). Par spec OPDS 2.0 §2.5, un Group est SOIT navigation SOIT acquisition — jamais les deux (vérifié par un test dédié). `internal/server/handlers.go` — nouvelle constante `rootGroupLimit = 10` (taille max d'un carousel), nouvelle helper `publicationsFromBooks(books, tok)` qui factorise la conversion via bookToPublication, et nouvelle méthode `Server.buildRootGroups(r, tok)` qui assemble les 4 groupes : (1) « Pile à lire » — uniquement si userID identifié ET la pile n'est pas vide ; post-filtre profil enfant qui clip les livres > MaxAge ; `NumberOfItems` = total réel (pas len(Publications)) ; self-link `/opds/v2/to-read` ; (2) « Recommandations reçues » — uniquement si userID identifié ET au moins une reco (réutilise `recommendedBooks(uid)`) ; clip profil enfant ; self-link `/opds/v2/recommendations` ; (3) « Derniers ajoutés » — toujours présent quand le catalog n'est pas vide ; `Search(SortBy:added, SortOrder:desc, Limit:10, MaxAgeRating: ...)` ; self-link `/opds/v2/publications?sort=added_desc` ; (4) « Non lus » — uniquement si total > 0 ; `Search(UnreadOnly:true, SortBy:added, ...)` ; self-link `/opds/v2/unread`. Les groupes vides sont skippés (spec §2.5 violation sinon). Pas de concurrence pour l'instant : 4 Search() séquentiels suffisent sur SQLite local, on basculera en errgroup+timeout si TTFB devient problématique. `handleOPDS2Root` appelle `feed.Groups = s.buildRootGroups(r, tok)` à la fin avant `writeOPDS2`. 4 nouveaux tests : `TestHandleOPDS2Root_GroupsLatestOnEmptyLib` (single-user fresh install → seul « Derniers ajoutés » présent, pas de Pile/Recos, self-link rel="self" vers /opds/v2/publications, vérifie que chaque Group a navigation OU publications), `TestHandleOPDS2Root_GroupsToReadForUser` (multi-user authentifié avec 1 livre dans sa pile → « Pile à lire » présent avec NumberOfItems=1 et self-link /opds/v2/to-read), `TestHandleOPDS2Root_GroupsNoEmptyEntries` (vérifie spec §2.5 — aucun Group ne peut être vide et chaque Group a un title), `TestHandleOPDS2Root_GroupsHideAdultForChild` (profil enfant MaxAge=10 + livre 18+ ajouté → aucun groupe ne contient le livre Spicy). MCP `serverInfo.version` 1.132.0 → 1.133.0. v1.133.0** **Cantook rend chaque acquisition group comme une carousel horizontale de couvertures sur l'écran d'accueil**, avec le titre du group au-dessus et un lien "Voir tout →" qui suit `links.self`. C'est exactement l'UX qu'on veut. Au lieu d'obliger l'utilisateur à naviguer dans 4 sous-feeds successifs, la racine `/opds/v2` renvoie directement N petites sections + un lien "voir tout" sur chacune. Refondre `handleOPDS2Root` (`internal/server/handlers.go:2990-3036`).
 
   **Type Go (`internal/opds2/feed.go`)** :
   ```go
@@ -237,7 +237,7 @@
   - `/opds/v2/unread` — exposé désormais comme Group sur la racine + reste accessible via `?spice=…` / `?age_rating=…` sur `/publications`
   - `/opds/v2/to-read` — exposé comme Group ; le lien dans nav root devient redondant
   - `/opds/v2/recommendations` — idem
-  - `/opds/v2/wishlist` — peu utile en feed OPDS dédié (les wishlists ne sont pas des publications téléchargeables) ; déprécier complètement
+  - `/opds/v2/wishlist` — voir la tâche dédiée plus bas (retrait complet v1+v2)
 
   Pour chaque route dépréciée :
   1. Retirer l'entrée correspondante de `handleOPDS2Root` (champ `navigation`).
@@ -315,6 +315,26 @@
   - Quand `Author.Sort != ""`, l'auteur est sérialisé en objet `{name, sortAs}`.
   - Comparer manuellement la sortie sur 3 livres avec la structure de https://test.opds.io/2.0/home.json — alignement field-by-field.
   - Tester l'ouverture du catalogue dans **Cantook** (Android ou iOS) avec un utilisateur authentifié et vérifier : (a) couvertures s'affichent (deux tailles), (b) bouton Télécharger direct sur la fiche, (c) facets+groups rendus correctement, (d) auteurs triés alphabétiquement (sortAs respecté).
+
+- [ ] Retirer la wishlist des flux OPDS v1 et v2 — la wishlist contient des intentions d'achat / souhaits de lecteur, PAS des publications téléchargeables. Sa présence dans le catalogue OPDS embrouille les clients (Cantook affiche des "livres" qu'on ne peut pas télécharger) et n'apporte rien fonctionnellement : elle reste accessible via le SPA Vue + l'API REST + le MCP (list_wishlist / add_wishlist_item / delete_wishlist_item). À supprimer :
+
+  **OPDS v1** (`internal/server/handlers.go`) :
+  - L'entrée nav root « Liste de souhaits » dans `handleOPDSRoot` (~lignes 228-236) qui pointe vers `/opds/wishlist` → retirer la branche `if s.wishlistManager != nil`.
+  - Le handler `handleOPDSWishlist` (~ligne 2512) → supprimer la fonction.
+  - La route `/opds/wishlist` dans `server.go` → retirer la ligne.
+
+  **OPDS v2** (`internal/server/handlers.go`) :
+  - L'entrée nav root dans `handleOPDS2Root` (~ligne 3132 — `if s.wishlistManager != nil`) → retirer la branche.
+  - Le handler `handleOPDS2Wishlist` (~ligne 2658) → supprimer la fonction.
+  - La route `/opds/v2/wishlist` dans `server.go` → retirer la ligne.
+
+  **À conserver intactes** (NE PAS toucher) :
+  - `GET /api/wishlist`, `POST /api/wishlist`, `PATCH/DELETE /api/wishlist/{id}` (REST API SPA)
+  - Tools MCP `list_wishlist`, `add_wishlist_item`, `delete_wishlist_item`
+  - Vue #/wishlist page + bouton header
+  - Le `wishlistManager` côté catalog (toujours nécessaire pour les API/MCP)
+
+  README à mettre à jour pour retirer les références aux flux OPDS wishlist. Tests : GET `/opds/wishlist` retourne 404, GET `/opds/v2/wishlist` retourne 404, ni `/opds` ni `/opds/v2` ne mentionnent "Liste de souhaits" dans leur navigation. L'API REST + MCP wishlist passent toujours tous leurs tests existants sans modification.
 
 - [x] MCP : auto-résoudre user_id depuis l'auth sur les tools user-scopés — **Done: new `mcp.UserResolver` callback type + `Server.SetUserResolver()` so the host (server package) tells the MCP server which user is authenticated on each request; `internal/server/server.go` wires `s.mcpUserResolver` which reads `currentUserID(r)` (already injected by authMiddleware via the per-user OPDS token) and looks up `IsAdmin` via UserManager.UserByID. Inside `ServeHTTP`, a new `callContext{UserID, IsAdmin}` is built from the resolver and passed through `handleToolsCall` to each user-scoped tool. New `resolveUserScope(cc, args, "user_id")` helper centralises the precedence rules: (1) `args["user_id"]` non-empty → use it but require admin when it differs from `cc.UserID`; (2) empty → fall back to `cc.UserID`; (3) both empty → explicit error message asking the caller to authenticate or pass user_id explicitly. The 4 to-read tools (`list_to_read`, `add_to_read`, `remove_to_read`, `reorder_to_read`) use `resolveUserScope` directly. `add_wishlist_item`, `list_wishlist`, `list_recommendations` and `set_book_read` use tailored logic since they have a special "no userID = all users / global is_read" behaviour: a non-admin authenticated caller without user_id implicitly filters to their own scope, while admins / shared-token callers retain the legacy "all users" view. `delete_wishlist_item` (no user_id arg) gains an ownership check: when caller is a non-admin authenticated user, the targeted wishlist ID must appear in their own list. Schemas updated: `user_id` removed from `Required` on the 4 to-read tools, descriptions changed to « Optionnel — défaut: utilisateur authentifié. Admin uniquement pour … d'un autre utilisateur. ». MCP `serverInfo.version` bumped 1.99.0 → 1.121.0. 9 new tests in server_test.go cover auto-resolution (add_to_read/list_to_read/set_book_read/add_wishlist_item), unauthenticated-no-user_id error, cross-user-non-admin 403 (add_to_read + set_book_read + delete_wishlist_item), and cross-user-admin happy path. v1.121.0**
 

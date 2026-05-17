@@ -1891,3 +1891,183 @@ func TestHandleOPDS2Publications_FacetCountMatchesSearch(t *testing.T) {
 		t.Errorf("facet round-trip: expected 2 publications, got %d", follow.Metadata.NumberOfItems)
 	}
 }
+
+// findGroup returns the first Group whose metadata title matches.
+func findGroup(feed *opds2.Feed, title string) *opds2.Group {
+	for i := range feed.Groups {
+		if feed.Groups[i].Metadata.Title == title {
+			return &feed.Groups[i]
+		}
+	}
+	return nil
+}
+
+// TestHandleOPDS2Root_GroupsLatestOnEmptyLib verifies that on a freshly
+// initialized single-user install the root feed exposes only the "Derniers
+// ajoutés" group (alpha.epub is pre-populated by newSQLiteTestServer) and
+// the to-read / recos / unread groups are absent because they require
+// state that doesn't exist yet.
+func TestHandleOPDS2Root_GroupsLatestOnEmptyLib(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2: %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(feed.Groups) == 0 {
+		t.Fatalf("expected at least one group; got %+v", feed.Groups)
+	}
+	latest := findGroup(&feed, "Derniers ajoutés")
+	if latest == nil {
+		t.Fatalf("missing 'Derniers ajoutés' group; got %+v", feed.Groups)
+	}
+	if latest.Metadata.NumberOfItems == 0 {
+		t.Errorf("'Derniers ajoutés' NumberOfItems should be > 0; got %d", latest.Metadata.NumberOfItems)
+	}
+	if len(latest.Publications) == 0 {
+		t.Errorf("'Derniers ajoutés' should have publications; got 0")
+	}
+	if len(latest.Links) == 0 || latest.Links[0].Rel != "self" {
+		t.Errorf("'Derniers ajoutés' must have a links[0].rel=self link; got %+v", latest.Links)
+	}
+	if !strings.Contains(latest.Links[0].Href, "/opds/v2/publications") {
+		t.Errorf("'Derniers ajoutés' self link should point to /opds/v2/publications; got %q", latest.Links[0].Href)
+	}
+	// To-read / unread / recos must NOT appear (no user identified, no pile, no recos).
+	if g := findGroup(&feed, "Pile à lire"); g != nil {
+		t.Errorf("anonymous request must not see 'Pile à lire' group; got %+v", g)
+	}
+	if g := findGroup(&feed, "Recommandations reçues"); g != nil {
+		t.Errorf("anonymous request must not see 'Recommandations reçues' group; got %+v", g)
+	}
+	// Spec compliance: every group must have either Navigation or Publications.
+	for i, g := range feed.Groups {
+		if len(g.Navigation) == 0 && len(g.Publications) == 0 {
+			t.Errorf("group[%d] %q violates spec: neither navigation nor publications", i, g.Metadata.Title)
+		}
+	}
+}
+
+// TestHandleOPDS2Root_GroupsToReadForUser verifies that an authenticated
+// user with books in her pile sees a "Pile à lire" acquisition group on
+// the root feed, with NumberOfItems = total pile size (not bounded by the
+// carousel limit).
+func TestHandleOPDS2Root_GroupsToReadForUser(t *testing.T) {
+	srv, backend, bookID := newSQLiteTestServer(t, Options{Password: "pw"})
+	alice, err := backend.CreateUser("Alice", "#ff0000", false, false, 0)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := backend.AddToReadList(alice.ID, bookID); err != nil {
+		t.Fatalf("AddToReadList: %v", err)
+	}
+
+	cookies := loginAsHelper(t, srv, alice.ID)
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2: %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	pile := findGroup(&feed, "Pile à lire")
+	if pile == nil {
+		t.Fatalf("missing 'Pile à lire' group; got %+v", feed.Groups)
+	}
+	if pile.Metadata.NumberOfItems != 1 {
+		t.Errorf("Pile à lire NumberOfItems: expected 1, got %d", pile.Metadata.NumberOfItems)
+	}
+	if len(pile.Publications) != 1 {
+		t.Errorf("Pile à lire publications: expected 1, got %d", len(pile.Publications))
+	}
+	if len(pile.Links) == 0 || pile.Links[0].Rel != "self" {
+		t.Errorf("Pile à lire must have self link; got %+v", pile.Links)
+	}
+	if !strings.Contains(pile.Links[0].Href, "/opds/v2/to-read") {
+		t.Errorf("Pile à lire self link should point to /opds/v2/to-read; got %q", pile.Links[0].Href)
+	}
+}
+
+// TestHandleOPDS2Root_GroupsNoEmptyEntries verifies that no Group ever
+// appears without Publications or Navigation (OPDS 2.0 §2.5 requires
+// each Group to be one or the other).
+func TestHandleOPDS2Root_GroupsNoEmptyEntries(t *testing.T) {
+	srv, _, _ := newSQLiteTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2: %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	for i, g := range feed.Groups {
+		if len(g.Publications) == 0 && len(g.Navigation) == 0 {
+			t.Errorf("group[%d] %q is empty (neither navigation nor publications)", i, g.Metadata.Title)
+		}
+		if g.Metadata.Title == "" {
+			t.Errorf("group[%d] missing metadata.title", i)
+		}
+	}
+}
+
+// TestHandleOPDS2Root_GroupsHideAdultForChild verifies that a child user
+// never sees a 16+/18+ book in any root Group — the MaxAgeRating filter
+// flows through to Search() and the to-read post-filter clips items too.
+func TestHandleOPDS2Root_GroupsHideAdultForChild(t *testing.T) {
+	srv, backend, _ := newSQLiteTestServer(t, Options{Password: "pw"})
+	if _, err := backend.CreateUser("Admin", "#000", true, false, 0); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	kid, err := backend.CreateUser("Kid", "#0f0", false, true, 10)
+	if err != nil {
+		t.Fatalf("kid: %v", err)
+	}
+
+	// Add an 18+ book directly via backend.
+	data := buildEPUBBytes("Spicy", "Adult Author")
+	adult, err := backend.StoreBook("spicy.epub", io.NopCloser(bytes.NewReader(data)))
+	if err != nil {
+		t.Fatalf("StoreBook: %v", err)
+	}
+	eighteen := 18
+	if _, err := backend.UpdateBook(adult.ID, catalog.BookUpdate{AgeRating: &eighteen}); err != nil {
+		t.Fatalf("UpdateBook: %v", err)
+	}
+
+	cookies := loginAsHelper(t, srv, kid.ID)
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2 (child): %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	// Walk every group's publications and ensure no title equals "Spicy".
+	for _, g := range feed.Groups {
+		for _, pub := range g.Publications {
+			if pub.Metadata.Title == "Spicy" {
+				t.Errorf("child profile must not see adult book in group %q", g.Metadata.Title)
+			}
+		}
+	}
+}

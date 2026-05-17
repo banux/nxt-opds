@@ -28,6 +28,28 @@ type Feed struct {
 	// Cantook renders each FacetGroup as a row of clickable filter chips
 	// above the publication list.
 	Facets []FacetGroup `json:"facets,omitempty"`
+	// Groups exposes multiple sub-collections in a single response per spec §2.5.
+	// Each Group is either a navigation group (Group.Navigation) OR an
+	// acquisition group (Group.Publications) — never both.  Cantook renders
+	// acquisition groups as horizontal carousels of covers on the home screen.
+	Groups []Group `json:"groups,omitempty"`
+}
+
+// Group is a sub-section of a Feed, either a navigation list or an
+// acquisition list (per OPDS 2.0 §2.5 — mutually exclusive).
+type Group struct {
+	Metadata     GroupMetadata `json:"metadata"`
+	Links        []Link        `json:"links,omitempty"`        // self link toward the dedicated feed
+	Navigation   []Link        `json:"navigation,omitempty"`   // navigation group
+	Publications []Publication `json:"publications,omitempty"` // acquisition group
+}
+
+// GroupMetadata holds the title and (optional) total count of a Group.
+// NumberOfItems is the TOTAL items reachable via the self link, not
+// merely len(Publications) which is bounded by the carousel limit.
+type GroupMetadata struct {
+	Title         string `json:"title"`
+	NumberOfItems int    `json:"numberOfItems,omitempty"`
 }
 
 // FacetGroup is a single facet (e.g. "Classification d'âge"), holding the

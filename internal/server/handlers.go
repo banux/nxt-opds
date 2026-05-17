@@ -3101,7 +3101,10 @@ func addPaginationLinks2(feed *opds2.Feed, r *http.Request, offset, limit, total
 	feed.Links = append(feed.Links, opds2.Link{Rel: "last", Href: paginationLink(r, lastOffset, limit), Type: opds2.MIMEFeed})
 }
 
-// handleOPDS2Root serves the OPDS 2.0 root navigation feed.
+// handleOPDS2Root serves the OPDS 2.0 root navigation feed.  Per spec §2.5
+// it also exposes a "groups" section so clients (Cantook) can render the
+// user's pile-à-lire, recommendations, latest additions, and unread books
+// as carousels on the home screen — no extra navigation step required.
 func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	feed := &opds2.Feed{
@@ -3143,7 +3146,134 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 	if s.toReadManager != nil {
 		s.appendToReadV2NavItems(feed, r, tok)
 	}
+
+	feed.Groups = s.buildRootGroups(r, tok)
 	writeOPDS2(w, http.StatusOK, feed)
+}
+
+// rootGroupLimit caps the carousel size for each Group on /opds/v2.
+const rootGroupLimit = 10
+
+// buildRootGroups assembles the acquisition groups shown on the OPDS v2
+// root feed: "Pile à lire", "Recommandations reçues", "Derniers ajoutés"
+// and "Non lus".  Empty groups are skipped.  Profile-driven filters
+// (MaxAgeRating for child accounts) flow through Search() automatically.
+//
+// The four sub-queries run sequentially because the per-query cost is
+// already small on a local SQLite and a stalled goroutine would only
+// fight the cache.  If profiling later shows TTFB pressure we can wrap
+// these in an errgroup with a short timeout.
+func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
+	userID := currentUserID(r)
+	maxAge := s.maxAgeRatingForUser(userID)
+	var groups []opds2.Group
+
+	// 1. Pile à lire — only when the user is identified AND the list is non-empty.
+	if s.toReadManager != nil && userID != "" {
+		items, err := s.toReadManager.ToReadList(userID)
+		if err == nil && len(items) > 0 {
+			books := make([]catalog.Book, 0, len(items))
+			for _, it := range items {
+				// Profile-driven age clipping: child accounts must never
+				// see 16+/18+ books even if they sneaked into the list.
+				if maxAge > 0 && it.Book.AgeRating > maxAge {
+					continue
+				}
+				books = append(books, it.Book)
+				if len(books) >= rootGroupLimit {
+					break
+				}
+			}
+			if len(books) > 0 {
+				groups = append(groups, opds2.Group{
+					Metadata: opds2.GroupMetadata{Title: "Pile à lire", NumberOfItems: len(items)},
+					Links: []opds2.Link{
+						{Rel: "self", Href: withToken("/opds/v2/to-read", tok), Type: opds2.MIMEFeed},
+					},
+					Publications: publicationsFromBooks(books, tok),
+				})
+			}
+		}
+	}
+
+	// 2. Recommandations reçues — multi-user mode only, and only when the
+	//    current user has at least one.
+	if s.recommender != nil && s.userManager != nil && userID != "" {
+		books, err := s.recommendedBooks(userID)
+		if err == nil && len(books) > 0 {
+			trimmed := books
+			for i, b := range trimmed {
+				if maxAge > 0 && b.AgeRating > maxAge {
+					trimmed = append(trimmed[:i], trimmed[i+1:]...)
+				}
+			}
+			total := len(trimmed)
+			if total > rootGroupLimit {
+				trimmed = trimmed[:rootGroupLimit]
+			}
+			if total > 0 {
+				groups = append(groups, opds2.Group{
+					Metadata: opds2.GroupMetadata{Title: "Recommandations reçues", NumberOfItems: total},
+					Links: []opds2.Link{
+						{Rel: "self", Href: withToken("/opds/v2/recommendations", tok), Type: opds2.MIMEFeed},
+					},
+					Publications: publicationsFromBooks(trimmed, tok),
+				})
+			}
+		}
+	}
+
+	// 3. Derniers ajoutés — always present when the catalog has at least one
+	//    matching book.
+	addedQ := catalog.SearchQuery{
+		Offset:       0,
+		Limit:        rootGroupLimit,
+		UserID:       userID,
+		SortBy:       "added",
+		SortOrder:    "desc",
+		MaxAgeRating: maxAge,
+	}
+	if books, total, err := s.catalog.Search(addedQ); err == nil && total > 0 {
+		groups = append(groups, opds2.Group{
+			Metadata: opds2.GroupMetadata{Title: "Derniers ajoutés", NumberOfItems: total},
+			Links: []opds2.Link{
+				{Rel: "self", Href: withToken("/opds/v2/publications?sort=added_desc", tok), Type: opds2.MIMEFeed},
+			},
+			Publications: publicationsFromBooks(books, tok),
+		})
+	}
+
+	// 4. Non lus — only when the user has at least one unread book.
+	unreadQ := catalog.SearchQuery{
+		UnreadOnly:   true,
+		UserID:       userID,
+		Offset:       0,
+		Limit:        rootGroupLimit,
+		SortBy:       "added",
+		SortOrder:    "desc",
+		MaxAgeRating: maxAge,
+	}
+	if books, total, err := s.catalog.Search(unreadQ); err == nil && total > 0 {
+		groups = append(groups, opds2.Group{
+			Metadata: opds2.GroupMetadata{Title: "Non lus", NumberOfItems: total},
+			Links: []opds2.Link{
+				{Rel: "self", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed},
+			},
+			Publications: publicationsFromBooks(books, tok),
+		})
+	}
+
+	return groups
+}
+
+// publicationsFromBooks is a small helper that maps a slice of books to an
+// OPDS 2.0 Publications slice using the existing bookToPublication helper.
+func publicationsFromBooks(books []catalog.Book, tok string) []opds2.Publication {
+	out := make([]opds2.Publication, 0, len(books))
+	for _, b := range books {
+		out = append(out, bookToPublication(b, tok))
+	}
+	return out
 }
 
 // appendToReadV2NavItems is the OPDS v2 counterpart to appendToReadV1Entries.
