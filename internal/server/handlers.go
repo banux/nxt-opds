@@ -676,11 +676,10 @@ func (s *Server) handleOPDS2SpiceLevels(w http.ResponseWriter, r *http.Request) 
 
 	for _, lvl := range spiceLevels {
 		href := fmt.Sprintf("/opds/v2/publications?spice=%d", lvl.N)
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: lvl.Title,
 			Href:  withToken(href, tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "subsection",
 		})
 	}
 
@@ -2680,11 +2679,10 @@ func (s *Server) handleOPDS2Wishlist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, it := range items {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: it.Title,
 			Href:  withToken("/opds/v2/wishlist", tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "current",
 		})
 	}
 	writeOPDS2(w, http.StatusOK, feed)
@@ -2997,36 +2995,33 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 			{Rel: "search", Href: "/opds/v2/search{?q}", Type: opds2.MIMEFeed, Templated: true},
 		},
-		Navigation: []opds2.NavItem{
-			{Title: "Tous les livres", Href: withToken("/opds/v2/publications", tok), Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Par auteur", Href: withToken("/opds/v2/authors", tok), Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Par genre", Href: withToken("/opds/v2/tags", tok), Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Par éditeur", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed, Rel: "current"},
-			{Title: "Non lus", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed, Rel: "current"},
+		Navigation: []opds2.Link{
+			{Title: "Tous les livres", Href: withToken("/opds/v2/publications", tok), Type: opds2.MIMEFeed},
+			{Title: "Par auteur", Href: withToken("/opds/v2/authors", tok), Type: opds2.MIMEFeed},
+			{Title: "Par genre", Href: withToken("/opds/v2/tags", tok), Type: opds2.MIMEFeed},
+			{Title: "Par éditeur", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed},
+			{Title: "Non lus", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed},
 		},
 	}
 	if s.maxAgeRatingForUser(currentUserID(r)) == 0 {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: "Niveaux de piment",
 			Href:  withToken("/opds/v2/spice", tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "current",
 		})
 	}
 	if s.wishlistManager != nil {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: "Liste de souhaits",
 			Href:  withToken("/opds/v2/wishlist", tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "current",
 		})
 	}
 	if s.recommender != nil && s.userManager != nil {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: "Recommandations",
 			Href:  withToken("/opds/v2/recommendations", tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "current",
 		})
 	}
 	if s.toReadManager != nil {
@@ -3038,11 +3033,10 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 // appendToReadV2NavItems is the OPDS v2 counterpart to appendToReadV1Entries.
 func (s *Server) appendToReadV2NavItems(feed *opds2.Feed, r *http.Request, tok string) {
 	if currentUserID(r) != "" || !s.hasMultipleUsers() {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: "Pile à lire",
 			Href:  withToken("/opds/v2/to-read", tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "current",
 		})
 		return
 	}
@@ -3052,11 +3046,10 @@ func (s *Server) appendToReadV2NavItems(feed *opds2.Feed, r *http.Request, tok s
 	}
 	for _, u := range users {
 		href := "/opds/v2/to-read?user=" + url.QueryEscape(u.ID)
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: "Pile à lire de " + u.Name,
 			Href:  withToken(href, tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "current",
 		})
 	}
 }
@@ -3212,11 +3205,10 @@ func (s *Server) handleOPDS2Authors(w http.ResponseWriter, r *http.Request) {
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, name := range authors {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: name,
 			Href:  withToken("/opds/v2/authors/"+url.PathEscape(name), tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "subsection",
 		})
 	}
 
@@ -3298,11 +3290,10 @@ func (s *Server) handleOPDS2Tags(w http.ResponseWriter, r *http.Request) {
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, tag := range tags {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: tag,
 			Href:  withToken("/opds/v2/tags/"+url.PathEscape(tag), tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "subsection",
 		})
 	}
 
@@ -3384,11 +3375,10 @@ func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, pub := range publishers {
-		feed.Navigation = append(feed.Navigation, opds2.NavItem{
+		feed.Navigation = append(feed.Navigation, opds2.Link{
 			Title: pub,
 			Href:  withToken("/opds/v2/publishers/"+url.PathEscape(pub), tok),
 			Type:  opds2.MIMEFeed,
-			Rel:   "subsection",
 		})
 	}
 

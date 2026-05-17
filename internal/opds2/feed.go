@@ -13,10 +13,16 @@ const (
 
 // Feed is the root object for an OPDS 2.0 feed.
 // It may be a navigation feed, an acquisition feed, or a combined feed.
+//
+// Per OPDS 2.0 spec, "navigation" is a Compact Collection: a flat list of
+// Link Objects. We therefore use []Link directly rather than a dedicated
+// type so the JSON shape matches the reference catalog at
+// https://test.opds.io/2.0/home.json — and so strict clients (Cantook,
+// Foliate) accept the feed.
 type Feed struct {
 	Metadata     FeedMetadata  `json:"metadata"`
 	Links        []Link        `json:"links"`
-	Navigation   []NavItem     `json:"navigation,omitempty"`
+	Navigation   []Link        `json:"navigation,omitempty"`
 	Publications []Publication `json:"publications,omitempty"`
 }
 
@@ -33,14 +39,6 @@ type Link struct {
 	Type      string      `json:"type,omitempty"`
 	Title     string      `json:"title,omitempty"`
 	Templated bool        `json:"templated,omitempty"`
-}
-
-// NavItem is a navigation entry in a navigation feed.
-type NavItem struct {
-	Title string `json:"title"`
-	Href  string `json:"href"`
-	Type  string `json:"type,omitempty"`
-	Rel   string `json:"rel,omitempty"`
 }
 
 // Publication represents a book in an acquisition feed.

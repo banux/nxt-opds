@@ -93,6 +93,229 @@
 
 - [x] Refonte de la barre de filtres : drawer + chips actifs — **Done: la barre est devenue 3 lignes (au lieu d'une seule scrollable saturée). Row 1 « pinned essentials » : compteur de résultats à gauche, lien « Étiquettes » (≥sm uniquement), select de tri, bouton « Filtres » avec badge `{{activeFilterCount}}` à droite. Row 2 « chips actifs » (rendue uniquement quand `activeFilterCount > 0`) : un badge supprimable par filtre actif (« Non lus seulement », « Non indexés », « Âge : 16+ » par valeur sélectionnée — un chip distinct par âge car `ageRatingFilter` est multi-select, « Saga : Tome unique », « 🌶 2 Romance sensuelle ») + lien underline « Tout effacer ». Le panneau de filtres est rendu en bottom-sheet plein-largeur sur mobile (`items-end`, `rounded-t-2xl`) / popover ancré à droite sur desktop (`sm:items-start sm:justify-end sm:w-[28rem] sm:rounded-xl`), backdrop noir semi-opaque cliquable pour fermer (`@click.self`), max-h 88vh (mobile) / 80vh (desktop) avec body scrollable et header+footer sticky. Sections : **Lecture** (grid 2 colonnes : « Non lus seulement », « Non indexés »), **Classification d'âge** (7 pills filtrées par `ageRatingsForUser` qui retire 16+/18+ pour les profils enfant en fonction de `currentUser.maxAge`), **Avancé** (header cliquable avec chevron rotatif qui toggle `advancedExpanded` — état persisté dans localStorage `nxt-filters-advanced` — contient Taille de série 4 pills indigo + Piment 6 pills rouges exactes 🌶 0..5 entièrement masquées si profil enfant + lien « Gérer les étiquettes » mobile-only). Footer sticky : « Tout effacer » (ghost, désactivé si aucun filtre) à gauche + « Voir les résultats » (primary brand) à droite. Nouvelles refs `filtersOpen=false` et `advancedExpanded` (persisté). Tables `seriesSizes` et `_ageRatings` + helper `seriesSizeLabel(v)`. Computeds `ageRatingsForUser`, `activeFilterCount` (unread + notIndexed + ageRatingFilter.length + seriesSize + spice≥0), `activeFilterChips` (un chip par valeur d'âge pour suppression individuelle, key `age:<v>`). Fonctions `toggleAdvancedExpanded`, `removeFilter(key)` (switch sur key incluant `age:<v>` parsé), `clearAllFilters` (reset tous les filtres mais préserve searchQuery et sortOrder). `onKeyDown` gagne un short-circuit Escape qui ferme `filtersOpen` avant le code arrow-key existant — fonctionne sur toute vue. Tous les anciens pills inline + la rangée scrollable `pills-scroll` retirés du markup. MCP `serverInfo.version` 1.129.0 → 1.130.0. v1.130.0**
 
+- [x] OPDS v2 : conformité à la spec https://drafts.opds.io/opds-2.0 + alignement sur le catalogue de référence — **Done: `internal/opds2/feed.go` — `Feed.Navigation` passe de `[]NavItem` à `[]Link` (Compact Collection de Link Objects, spec OPDS 2.0 §2.4). Le type `NavItem` est supprimé. `internal/server/handlers.go` — 11 sites de construction de nav items réécrits en `opds2.Link{...}` sans champ `Rel` (alignement test.opds.io/2.0/home.json) : `handleOPDS2Root` (5 entrées de base + Niveaux de piment + Liste de souhaits + Recommandations), `appendToReadV2NavItems` (Pile à lire + Pile à lire par user en multi-user), `handleOPDS2SpiceLevels` (6 niveaux), `handleOPDS2Wishlist`, `handleOPDS2Authors`, `handleOPDS2Tags`, `handleOPDS2Publishers`. Le `Rel: "subsection"` qui pré-existait sur authors/tags/publishers est aussi retiré pour rester fidèle à la référence. Les `links[]` (self/start/search) gardent leurs rels — seuls les `navigation[]` sont concernés par la suppression. Test existant `TestHandleOPDS2Root_HasSpiceNavItem` passe (type `*opds2.NavItem` remplacé par `*opds2.Link`). Nouveau test `TestHandleOPDS2Root_NavigationCompactCollection` qui assert (a) le body brut ne contient PAS `"current"`, (b) chaque navigation[i] a `Rel == nil` + title + href non vides, (c) links[] contient bien self/start/search avec `templated: true` sur search. MCP `serverInfo.version` 1.130.0 → 1.131.0. v1.131.0**
+
+  **Diffs observées vs. la référence test.opds.io/2.0/home.json** :
+  - **Navigation items SANS `rel`** dans la référence. Mon code émet `rel:"current"` partout → drop le rel sur tous les navigation items du root, sauf cas spec (`rel:"http://opds-spec.org/sort/new"` etc.) qui n'est pas mon usage. Deux causes documentées par la spec OPDS 2.0 :
+
+  **1. `rel: "current"` sur des entrées qui pointent vers des sous-catalogues.** La spec définit `current` comme « the destination of the link contains the current view of the resource described by the link's context » — sémantiquement faux pour « Tous les livres », « Par auteur », « Par genre », etc. qui sont des sous-feeds à parcourir. Le rel correct est `subsection`. Certains readers stricts ignorent ou rejettent les nav items dont le rel n'est pas dans leur liste blanche. Remplacer `Rel: "current"` par `Rel: "subsection"` dans `handleOPDS2Root` (`internal/server/handlers.go:3001-3030`) ET dans `appendToReadV2NavItems` (lignes 3041-3060) ET dans `handleOPDS2SpiceLevels` (~660-680), `handleOPDS2Authors` / `handleOPDS2Tags` / `handleOPDS2Publishers` (les nav items qu'ils émettent vers les sous-feeds par auteur/tag/éditeur ont déjà `rel:"subsection"` — vérifier que c'est cohérent).
+
+  **2. Compact-collection purity.** La spec : « A navigation collection ... It must be a compact collection. » Un compact collection est strictement `[]Link Object`. Mon Go type `opds2.NavItem` (`internal/opds2/feed.go:38-44`) sérialise en `{title, href, type, rel}` — c'est le shape exact d'un Link Object minus `templated`, donc fonctionnellement OK. Mais pour suivre la spec à la lettre et rester robuste, supprimer `NavItem` et utiliser `[]Link` directement dans `Feed.Navigation`. Le `Templated bool` reste `omitempty`, donc pas de pollution de l'output.
+
+  **3. Bonus :** vérifier que `Content-Type` reste exactement `application/opds+json; charset=utf-8` (déjà OK), et que toutes les hrefs `templated:true` ont effectivement le marqueur (la search link de la racine l'a).
+
+  Tests : ajouter un test sur la racine `/opds/v2` qui assert (a) **les navigation items n'ont PAS de rel** (alignement test.opds.io), (b) absence de `rel:"current"` dans tout le doc, (c) `links[].rel` correctement formé sur `self`/`start`/`search`. Tester en réel avec **Cantook (Android ou iOS)** — c'est le client cible — et Foliate (gtk) en backup. v1.131.0+.
+
+- [ ] OPDS v2 : exposer les filtres âge & piment en `facets` plutôt qu'en sous-feeds — la spec OPDS 2.0 prévoit un mécanisme natif (`facets`) qui permet aux clients de proposer une UI de filtrage à l'utilisateur sans naviguer sous-feed par sous-feed. **Cantook rend les facets en chips de filtre cliquables en haut de la liste de publications** — ce rendu est l'UX cible. Cf. spec §2.6 et l'exemple :
+
+  ```json
+  "facets": [
+    { "metadata": { "title": "Language" },
+      "links": [
+        { "href": "/fr", "type": "application/opds+json", "title": "French", "properties": { "numberOfItems": 10 } },
+        { "href": "/en", "type": "application/opds+json", "title": "English", "properties": { "numberOfItems": 40 } }
+      ]
+    }
+  ]
+  ```
+
+  **Types Go (`internal/opds2/feed.go`)** :
+  ```go
+  type Feed struct {
+      Metadata     FeedMetadata `json:"metadata"`
+      Links        []Link       `json:"links"`
+      Navigation   []Link       `json:"navigation,omitempty"` // post-correction Compact Collection
+      Publications []Publication `json:"publications,omitempty"`
+      Facets       []FacetGroup `json:"facets,omitempty"`     // NEW
+  }
+  type FacetGroup struct {
+      Metadata FacetMetadata `json:"metadata"`
+      Links    []Link        `json:"links"`
+  }
+  type FacetMetadata struct { Title string `json:"title"` }
+  ```
+  Étendre `Link` pour porter `Properties` :
+  ```go
+  type Link struct {
+      Rel       interface{}    `json:"rel,omitempty"`
+      Href      string         `json:"href"`
+      Type      string         `json:"type,omitempty"`
+      Title     string         `json:"title,omitempty"`
+      Templated bool           `json:"templated,omitempty"`
+      Properties *LinkProperties `json:"properties,omitempty"` // NEW
+  }
+  type LinkProperties struct {
+      NumberOfItems int `json:"numberOfItems,omitempty"`
+  }
+  ```
+
+  **Catalog API** : ajouter `catalog.Facets(query catalog.SearchQuery) (FacetCounts, error)` qui renvoie en une passe les comptages pour chaque bucket d'intérêt. La SearchQuery passée est celle du contexte courant (tag, author, unread, etc.) — les facets reflètent ce qui reste filtrable APRÈS application des filtres déjà actifs. Exemple :
+  ```go
+  type FacetCounts struct {
+      AgeRating map[int]int   // 0 → unclassified, 3, 6, 10, 12, 16, 18
+      Spice     map[int]int   // 0..5
+  }
+  ```
+  - sqlite : un seul `SELECT age_rating, COUNT(*) FROM books WHERE <filters> GROUP BY age_rating` + idem pour spice (filtré sur age >= 16).
+  - fs : itère la slice en mémoire avec un compteur ; OK jusqu'à plusieurs milliers de livres.
+  Le filtre MaxAgeRating de l'utilisateur enfant est appliqué — la map AgeRating ne contient alors que 3/6/10 et la map Spice est vide.
+
+  **Wiring sur les handlers** : `handleOPDS2Publications`, `handleOPDS2Unread`, `handleOPDS2AuthorBooks`, `handleOPDS2TagBooks`, `handleOPDS2PublisherBooks` appellent `s.catalog.Facets(...)` après leur `Search(...)`, transforment en `[]FacetGroup` via une nouvelle helper `buildFacetGroups(counts, currentQuery, baseURL, tok)` qui :
+  - construit un FacetGroup "Classification d'âge" avec un Link par age_rating non vide. `href` = baseURL + querystring courante avec `age_rating=N` ajouté/remplacé. `title` = label humain ("3+", "Tous publics", "Adulte 18+", "Non classifié" pour 0). `properties.numberOfItems` = count.
+  - construit un FacetGroup "Piment" si l'utilisateur n'est pas en profil enfant ET au moins un livre 16+/18+ existe. Un Link par valeur 0..5 effectivement présente. `href` = baseURL avec `spice=N`. `title` = label ("Sans", "Suggestif", …). `properties.numberOfItems` = count.
+  - n'ajoute PAS un FacetGroup vide.
+
+  **Effets collatéraux** :
+  - Les nav items "Niveaux de piment" du root v2 deviennent redondants. Garder dans la nav root pour une release, marquer deprecated dans le code, retirer ensuite.
+  - `/opds/v2/spice` peut rester comme alias rétrocompatible mais perd son rôle principal.
+  - L'UI Vue interne n'est PAS impactée — c'est purement pour les clients OPDS externes (Foliate, Thorium, Aldiko).
+
+  **Tests** :
+  - GET /opds/v2/publications renvoie un champ `facets` avec au moins le groupe "Classification d'âge" quand le catalogue contient des livres classifiés.
+  - Le groupe "Piment" est absent quand le caller est un profil enfant.
+  - Les hrefs des liens facet préservent le filtre courant (ex: appel `?tag=Fantasy` → les facets pointent vers `?tag=Fantasy&age_rating=N`).
+  - `properties.numberOfItems` correspond bien au nombre de livres après application du nouveau filtre (cohérence vérifiée par un second appel filtré).
+  - Aucun groupe vide n'apparaît.
+  - Spec compliance : chaque FacetGroup a `metadata.title` non vide, et `links` est une compact collection de Link Objects.
+
+- [ ] OPDS v2 : exposer pile-à-lire / recos / non-lus / derniers ajouts en `groups` sur la racine — la spec OPDS 2.0 §2.5 prévoit des `groups` qui permettent de présenter plusieurs collections dans une seule réponse (équivalent d'un dashboard pour les clients OPDS). **Cantook rend chaque acquisition group comme une carousel horizontale de couvertures sur l'écran d'accueil**, avec le titre du group au-dessus et un lien "Voir tout →" qui suit `links.self`. C'est exactement l'UX qu'on veut. Au lieu d'obliger l'utilisateur à naviguer dans 4 sous-feeds successifs, la racine `/opds/v2` renvoie directement N petites sections + un lien "voir tout" sur chacune. Refondre `handleOPDS2Root` (`internal/server/handlers.go:2990-3036`).
+
+  **Type Go (`internal/opds2/feed.go`)** :
+  ```go
+  type Feed struct {
+      Metadata     FeedMetadata `json:"metadata"`
+      Links        []Link       `json:"links"`
+      Navigation   []Link       `json:"navigation,omitempty"`
+      Publications []Publication `json:"publications,omitempty"`
+      Facets       []FacetGroup `json:"facets,omitempty"`
+      Groups       []Group      `json:"groups,omitempty"`        // NEW
+  }
+  type Group struct {
+      Metadata     GroupMetadata `json:"metadata"`
+      Links        []Link        `json:"links,omitempty"`         // self link towards the dedicated feed
+      Navigation   []Link        `json:"navigation,omitempty"`    // navigation group
+      Publications []Publication `json:"publications,omitempty"` // acquisition group
+  }
+  type GroupMetadata struct {
+      Title         string `json:"title"`
+      NumberOfItems int    `json:"numberOfItems,omitempty"`
+  }
+  ```
+  Per la spec : un Group est SOIT navigation, SOIT acquisition (pas les deux).
+
+  **Contenu de la racine `/opds/v2` après refonte** :
+
+  La racine conserve `navigation` (le main menu actuel : Tous les livres / Par auteur / Par genre / Par éditeur / Niveaux de piment) et y ajoute `groups` :
+
+  1. **Groupe "Pile à lire"** — `publications` = 10 premiers items de la pile de l'utilisateur courant ; `links.self` = `/opds/v2/to-read?token=…` ; `metadata.title = "Pile à lire"`, `numberOfItems` = total. Affiché seulement si l'utilisateur a une session ou un token user, ET sa pile n'est pas vide.
+
+  2. **Groupe "Recommandations reçues"** — `publications` = 10 dernières recos reçues ; `links.self` = `/opds/v2/recommendations?token=…` ; affiché seulement en mode multi-user ET si l'utilisateur a au moins 1 reco.
+
+  3. **Groupe "Derniers ajoutés"** — `publications` = 10 livres avec `added_desc` ; `links.self` = `/opds/v2/publications?sort=added_desc&token=…` (limite restreinte aux 10 premiers). Toujours présent.
+
+  4. **Groupe "Non lus"** — `publications` = 10 non-lus tirés par `added_desc` ; `links.self` = `/opds/v2/unread?token=…` ; affiché seulement si l'utilisateur a au moins 1 livre non lu.
+
+  Skip systématique des groupes vides. Le profil enfant voit les groupes filtrés par MaxAgeRating (les requêtes Search() le passent déjà).
+
+  **Helper** : nouvelle fonction `buildGroupAcquisition(title string, limit int, q catalog.SearchQuery, selfHref, tok string) (opds2.Group, error)` qui factorise les 4 appels — query Search + bookToPublication + Group{Metadata,Links,Publications}.
+
+  **Concurrence** : 4 requêtes Search sur la racine, à exécuter en parallèle via une errgroup pour ne pas allonger le TTFB. Chaque sous-call a un timeout court (1 s ?) — un sous-feed lent ne doit pas bloquer la racine ; en cas de timeout, on log et on omet le groupe.
+
+  **Compat clients** : les clients OPDS 2 qui n'implémentent pas `groups` (anciens Aldiko, KOReader) doivent continuer à voir `navigation` et trouver leurs sous-feeds via les entrées existantes. La spec dit `groups` est optionnel, donc OK.
+
+  **Tests** :
+  - Multi-user, utilisateur authentifié avec 5 livres dans sa pile → racine contient un Group "Pile à lire" avec `publications.length == 5`, `metadata.numberOfItems == 5`, `links[0].rel == "self"` pointant vers `/opds/v2/to-read?token=…`.
+  - Single-user fresh install → racine contient seulement "Derniers ajoutés" (autres groupes absents car vides).
+  - Profil enfant → racine ne contient AUCUN livre 16+/18+ dans les groupes (vérifier `bookToPublication` sur tous les groupes).
+  - Aucun Group sans `publications` ni `navigation` (spec viole sinon).
+  - Le `numberOfItems` du groupe correspond au total réel, pas à `len(publications)` (qui est borné à 10).
+
+- [ ] OPDS v2 : nettoyer les sous-feeds redondants et aligner la search sur la spec — après l'ajout des `facets` (filtres âge/piment) et des `groups` (pile-à-lire / recos / non-lus / derniers sur la racine), plusieurs sous-feeds dédiés deviennent redondants. Et la search templated link n'utilise pas le nom de variable canonique de la spec OPDS 2.0.
+
+  **Sous-feeds à retirer du `navigation` racine (mais GARDER les routes en arrière-compat pour 1-2 releases)** :
+  - `/opds/v2/spice` — remplacé par le FacetGroup "Piment"
+  - `/opds/v2/unread` — exposé désormais comme Group sur la racine + reste accessible via `?spice=…` / `?age_rating=…` sur `/publications`
+  - `/opds/v2/to-read` — exposé comme Group ; le lien dans nav root devient redondant
+  - `/opds/v2/recommendations` — idem
+  - `/opds/v2/wishlist` — peu utile en feed OPDS dédié (les wishlists ne sont pas des publications téléchargeables) ; déprécier complètement
+
+  Pour chaque route dépréciée :
+  1. Retirer l'entrée correspondante de `handleOPDS2Root` (champ `navigation`).
+  2. Conserver la route enregistrée dans `server.go` qui répond toujours pour les clients existants.
+  3. Ajouter un commentaire `// deprecated since vX.Y: feed surfaced via groups / facets on /opds/v2` dans le handler.
+  4. Une release plus tard : suppression complète du handler + la route.
+
+  Garder dans `navigation` racine seulement les sous-feeds qui restent essentiels :
+  - "Par auteur" → `/opds/v2/authors`
+  - "Par genre" → `/opds/v2/tags`
+  - "Par éditeur" → `/opds/v2/publishers`
+  - "Tous les livres" → `/opds/v2/publications` (entry-point pour les facets)
+
+  **Search templated link conforme à la spec** — la spec OPDS 2.0 utilise l'exemple :
+  ```json
+  { "rel": "search", "href": "search{?query}", "type": "application/opds+json", "templated": true }
+  ```
+  Le template variable name canonique est `query`. Actuellement la racine émet `/opds/v2/search{?q}` et `handleOPDS2Search` lit `r.URL.Query().Get("q")`. Aligner :
+  - `handleOPDS2Search` (`internal/server/handlers.go:3148-3189`) lit `r.URL.Query().Get("query")` en priorité ET retombe sur `Get("q")` pour la compat SPA Vue (`web/index.html` `loadBooks()` envoie `?q=`).
+  - Le link templated dans `handleOPDS2Root` devient `{Rel: "search", Href: "/opds/v2/search{?query}", Type: opds2.MIMEFeed, Templated: true}`.
+  - Aussi exposer la search link au TOP-LEVEL de `/opds/v2/publications` et tous les autres feeds OPDS v2 (pas seulement la racine) — c'est la convention OPDS pour que la barre de recherche du reader reste visible depuis n'importe quel sous-catalogue.
+
+  **Tests** :
+  - GET `/opds/v2` n'expose plus `/spice`, `/unread`, `/to-read`, `/recommendations`, `/wishlist` dans `navigation`. Garde `/authors`, `/tags`, `/publishers`, `/publications`.
+  - GET `/opds/v2/search?query=hobb` retourne 200 avec les bons résultats.
+  - GET `/opds/v2/search?q=hobb` (legacy SPA) retourne 200 aussi (compat préservée).
+  - Le link `rel:"search"` apparaît dans `links` de toutes les pages OPDS v2 (racine, publications, unread, author-books, etc.).
+  - Les routes dépréciées (`/spice`, `/to-read`, …) répondent toujours 200 pour les clients existants.
+
+- [ ] OPDS v2 : conformité du `bookToPublication` pour Cantook/Aldiko — la construction d'une Publication par `bookToPublication` (`internal/server/handlers.go:2886-2970`) embarque plusieurs résidus OPDS 1 que Cantook ignore. Comparaison avec https://test.opds.io/2.0/home.json (catalogue Feedbooks de référence) :
+
+  **1. Retirer `Rel:"http://opds-spec.org/image"` des entrées `images[]`.** La référence émet ses entrées d'images SANS rel — juste `{href, type, width, height}`. Pattern moderne OPDS 2. (Un livre de la référence garde le rel OPDS 1 par compat, mais tous les autres l'omettent — l'omission est le standard.)
+
+  **2. Ajouter `width` / `height` sur les liens d'image.** La référence émet systématiquement deux variantes :
+  ```json
+  "images": [
+    {"href": ".../small.jpg",  "type": "image/jpeg", "height": 169, "width": 110},
+    {"href": ".../normal.jpg", "type": "image/jpeg", "height": 400, "width": 260}
+  ]
+  ```
+  Cantook les utilise pour choisir la bonne taille selon le contexte (carousel / liste / fiche). Étendre `opds2.Link` :
+  ```go
+  type Link struct {
+      ... // existing
+      Width    int `json:"width,omitempty"`
+      Height   int `json:"height,omitempty"`
+  }
+  ```
+  Si dimensions inconnues (cover uploadée), tenter `image.DecodeConfig` sur le fichier au moment de l'extraction et persister width/height sur `catalog.Book`.
+
+  **3. URLs absolues pour `images[]` et acquisition links.** Certains Cantook (versions Android anciennes) résolvent mal les URLs relatives. Construire l'URL absolue via `externalURL(r)` (helper déjà utilisé pour le pairing) en respectant `X-Forwarded-Proto` / `X-Forwarded-Host` derrière reverse proxy. Appliquer aux 4 endroits :
+  - `withToken(b.CoverURL, tok)` → `externalURL(r) + withToken(b.CoverURL, tok)`
+  - `withToken(b.ThumbnailURL, tok)` → idem
+  - L'acquisition link `/opds/books/{id}/download?path=…` → idem
+  - Les self-link de Publication (si présent)
+
+  Pour faire ça proprement sans casser la signature, passer `r *http.Request` à `bookToPublication(b, tok, r)` (ou pré-calculer `baseURL` une fois et le passer en paramètre — moins intrusif).
+
+  **4. Acquisition link rel.** L'actuel `Rel:"http://opds-spec.org/acquisition"` est correct (acquisition générique / téléchargement). Cantook reconnaît aussi `acquisition/open-access` (gratuit), `acquisition/buy`, `acquisition/borrow`. Comme la bibliothèque nxt-opds est personnelle = libre accès pour l'utilisateur authentifié, utiliser **`http://opds-spec.org/acquisition/open-access`** plutôt qu'`acquisition` tout court : Cantook le présente alors avec un bouton « Télécharger » direct au lieu de demander confirmation.
+
+  **5. Publication self-link.** Ajouter un `Rel:"self"` sur chaque Publication pointant vers `/opds/v2/publications/{id}` (nouvelle route) qui renvoie la même Publication isolée dans son propre feed — Cantook l'utilise pour la fiche détail. Si ajouter la route est trop lourd, omettre le self-link suffit (Cantook se rabat sur les images + metadata).
+
+  **Bonus métadonnées (présents dans la référence)** :
+  - `metadata.author` accepte `{"name": "X", "sortAs": "Y, X"}` — utiliser `sortAs` quand l'auteur a `LastName, FirstName` connu (catalog.Author a un champ Sort). Cantook trie alpha sur sortAs.
+  - `metadata.subtitle` quand le titre a un sous-titre distinct (rare dans nxt-opds, optionnel).
+  - `metadata.numberOfPages` si calculé depuis l'EPUB (page count). Optionnel.
+  - `metadata.belongsTo.series` peut être un OBJET direct quand il n'y a qu'une série : `{"name": "...", "position": N}` au lieu d'un tableau d'un élément. Sérialisation plus compacte, autorisée par la spec.
+  - `subject` accepte `{"name": "X", "code": "BISAC_CODE"}` — Cantook reconnaît les codes BISAC pour grouper. Notre catalog ne stocke pas les codes, donc on garde juste `name`.
+
+  **Tests** :
+  - GET `/opds/v2/publications` : chaque publication dans `publications[]` a `images[].href` absolu (commence par `http://` ou `https://`).
+  - Aucun `rel` sur les éléments de `images[]`.
+  - `width` et `height` présents quand disponibles (ne pas casser quand absents).
+  - L'acquisition link a `rel="http://opds-spec.org/acquisition/open-access"`.
+  - Quand `Author.Sort != ""`, l'auteur est sérialisé en objet `{name, sortAs}`.
+  - Comparer manuellement la sortie sur 3 livres avec la structure de https://test.opds.io/2.0/home.json — alignement field-by-field.
+  - Tester l'ouverture du catalogue dans **Cantook** (Android ou iOS) avec un utilisateur authentifié et vérifier : (a) couvertures s'affichent (deux tailles), (b) bouton Télécharger direct sur la fiche, (c) facets+groups rendus correctement, (d) auteurs triés alphabétiquement (sortAs respecté).
+
 - [x] MCP : auto-résoudre user_id depuis l'auth sur les tools user-scopés — **Done: new `mcp.UserResolver` callback type + `Server.SetUserResolver()` so the host (server package) tells the MCP server which user is authenticated on each request; `internal/server/server.go` wires `s.mcpUserResolver` which reads `currentUserID(r)` (already injected by authMiddleware via the per-user OPDS token) and looks up `IsAdmin` via UserManager.UserByID. Inside `ServeHTTP`, a new `callContext{UserID, IsAdmin}` is built from the resolver and passed through `handleToolsCall` to each user-scoped tool. New `resolveUserScope(cc, args, "user_id")` helper centralises the precedence rules: (1) `args["user_id"]` non-empty → use it but require admin when it differs from `cc.UserID`; (2) empty → fall back to `cc.UserID`; (3) both empty → explicit error message asking the caller to authenticate or pass user_id explicitly. The 4 to-read tools (`list_to_read`, `add_to_read`, `remove_to_read`, `reorder_to_read`) use `resolveUserScope` directly. `add_wishlist_item`, `list_wishlist`, `list_recommendations` and `set_book_read` use tailored logic since they have a special "no userID = all users / global is_read" behaviour: a non-admin authenticated caller without user_id implicitly filters to their own scope, while admins / shared-token callers retain the legacy "all users" view. `delete_wishlist_item` (no user_id arg) gains an ownership check: when caller is a non-admin authenticated user, the targeted wishlist ID must appear in their own list. Schemas updated: `user_id` removed from `Required` on the 4 to-read tools, descriptions changed to « Optionnel — défaut: utilisateur authentifié. Admin uniquement pour … d'un autre utilisateur. ». MCP `serverInfo.version` bumped 1.99.0 → 1.121.0. 9 new tests in server_test.go cover auto-resolution (add_to_read/list_to_read/set_book_read/add_wishlist_item), unauthenticated-no-user_id error, cross-user-non-admin 403 (add_to_read + set_book_read + delete_wishlist_item), and cross-user-admin happy path. v1.121.0**
 
 ## Medium Priority

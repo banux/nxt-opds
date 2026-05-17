@@ -1398,7 +1398,7 @@ func TestHandleOPDS2Root_HasSpiceNavItem(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	var found *opds2.NavItem
+	var found *opds2.Link
 	for i, nv := range feed.Navigation {
 		if nv.Title == "Niveaux de piment" {
 			found = &feed.Navigation[i]
@@ -1410,6 +1410,67 @@ func TestHandleOPDS2Root_HasSpiceNavItem(t *testing.T) {
 	}
 	if !strings.Contains(found.Href, "/opds/v2/spice") {
 		t.Errorf("nav item href should point to /opds/v2/spice; got %q", found.Href)
+	}
+}
+
+// TestHandleOPDS2Root_NavigationCompactCollection verifies the OPDS v2 root
+// "navigation" field is a Compact Collection per spec
+// (https://drafts.opds.io/opds-2.0): a flat list of Link Objects with no
+// `rel` (matches the reference catalog https://test.opds.io/2.0/home.json).
+// In particular, the legacy `rel:"current"` must NOT appear anywhere in the
+// document, and `links[].rel` on self/start/search must remain well-formed.
+func TestHandleOPDS2Root_NavigationCompactCollection(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	// (a) Raw JSON must not contain rel:"current" anywhere.
+	if strings.Contains(rr.Body.String(), `"current"`) {
+		t.Errorf("OPDS v2 root must not emit rel:\"current\"; body=%s", rr.Body.String())
+	}
+
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(feed.Navigation) == 0 {
+		t.Fatal("expected at least one navigation item")
+	}
+	// (b) Every navigation item is a bare Link Object with NO rel set
+	// (aligns with test.opds.io/2.0/home.json reference).
+	for i, nv := range feed.Navigation {
+		if nv.Rel != nil {
+			t.Errorf("navigation[%d] %q has rel=%v; spec-aligned compact collection should have no rel", i, nv.Title, nv.Rel)
+		}
+		if nv.Title == "" {
+			t.Errorf("navigation[%d] missing title", i)
+		}
+		if nv.Href == "" {
+			t.Errorf("navigation[%d] %q missing href", i, nv.Title)
+		}
+	}
+
+	// (c) links[] on the root must keep self/start/search rels.
+	var hasSelf, hasStart, hasSearch bool
+	for _, l := range feed.Links {
+		switch l.Rel {
+		case "self":
+			hasSelf = true
+		case "start":
+			hasStart = true
+		case "search":
+			hasSearch = true
+			if !l.Templated {
+				t.Errorf("search link must be templated; got %+v", l)
+			}
+		}
+	}
+	if !hasSelf || !hasStart || !hasSearch {
+		t.Errorf("links[] missing required self/start/search rels; got %+v", feed.Links)
 	}
 }
 
