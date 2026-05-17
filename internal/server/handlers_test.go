@@ -1386,9 +1386,12 @@ func TestHandleRoot_HasSpiceNavEntry(t *testing.T) {
 	}
 }
 
-// TestHandleOPDS2Root_HasSpiceNavItem verifies the OPDS v2 root JSON exposes
-// a "Niveaux de piment" navigation item.
-func TestHandleOPDS2Root_HasSpiceNavItem(t *testing.T) {
+// TestHandleOPDS2Root_NavigationStripsDeprecatedSubFeeds verifies that the
+// OPDS v2 root no longer advertises the sub-feeds now surfaced via facets
+// (Piment) or groups (Pile à lire / Recommandations / Non lus / Liste de
+// souhaits).  Only Authors / Tags / Publishers / Publications stay in
+// `navigation`.
+func TestHandleOPDS2Root_NavigationStripsDeprecatedSubFeeds(t *testing.T) {
 	srv := newTestServer(t, Options{})
 	req := httptest.NewRequest(http.MethodGet, "/opds/v2", nil)
 	rr := httptest.NewRecorder()
@@ -1400,18 +1403,132 @@ func TestHandleOPDS2Root_HasSpiceNavItem(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	var found *opds2.Link
-	for i, nv := range feed.Navigation {
-		if nv.Title == "Niveaux de piment" {
-			found = &feed.Navigation[i]
-			break
+	deprecated := []string{"/opds/v2/spice", "/opds/v2/unread", "/opds/v2/to-read", "/opds/v2/recommendations", "/opds/v2/wishlist"}
+	for _, nv := range feed.Navigation {
+		for _, d := range deprecated {
+			if strings.Contains(nv.Href, d) {
+				t.Errorf("nav item %q must not point at deprecated %q; got href %q", nv.Title, d, nv.Href)
+			}
 		}
 	}
-	if found == nil {
-		t.Fatalf("OPDS v2 root missing 'Niveaux de piment' nav item; got %+v", feed.Navigation)
+	// Required: the 4 essential sub-feeds remain.
+	want := map[string]bool{"/opds/v2/publications": false, "/opds/v2/authors": false, "/opds/v2/tags": false, "/opds/v2/publishers": false}
+	for _, nv := range feed.Navigation {
+		for w := range want {
+			if strings.Contains(nv.Href, w) {
+				want[w] = true
+			}
+		}
 	}
-	if !strings.Contains(found.Href, "/opds/v2/spice") {
-		t.Errorf("nav item href should point to /opds/v2/spice; got %q", found.Href)
+	for w, found := range want {
+		if !found {
+			t.Errorf("essential nav item %q missing from root", w)
+		}
+	}
+
+	// Deprecated routes themselves still respond 200 (back-compat).
+	for _, d := range deprecated {
+		// Skip the user-specific ones that need auth/state to serve.
+		if d == "/opds/v2/to-read" || d == "/opds/v2/recommendations" {
+			continue
+		}
+		req2 := httptest.NewRequest(http.MethodGet, d, nil)
+		rr2 := httptest.NewRecorder()
+		srv.ServeHTTP(rr2, req2)
+		if rr2.Code != http.StatusOK && rr2.Code != http.StatusNotImplemented {
+			t.Errorf("GET %s: expected 200 (or 501 when backend lacks support), got %d", d, rr2.Code)
+		}
+	}
+}
+
+// TestHandleOPDS2Search_AcceptsCanonicalQueryVariable verifies the search
+// endpoint reads the spec-canonical ?query= variable.
+func TestHandleOPDS2Search_AcceptsCanonicalQueryVariable(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	uploadBook(t, srv, "hobbit.epub", "The Hobbit", "Tolkien")
+	uploadBook(t, srv, "rust.epub", "Rust in Action", "McNamara")
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/search?query=hobb", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("?query=: expected 200, got %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if feed.Metadata.NumberOfItems != 1 || len(feed.Publications) != 1 {
+		t.Errorf("?query=hobb expected 1 hit, got %d", feed.Metadata.NumberOfItems)
+	}
+}
+
+// TestHandleOPDS2Search_FallsBackOnLegacyQ verifies the legacy ?q= still
+// works (Vue SPA path is unchanged).
+func TestHandleOPDS2Search_FallsBackOnLegacyQ(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	uploadBook(t, srv, "hobbit.epub", "The Hobbit", "Tolkien")
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/search?q=hobb", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("?q=: expected 200, got %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if feed.Metadata.NumberOfItems != 1 {
+		t.Errorf("?q=hobb expected 1 hit, got %d", feed.Metadata.NumberOfItems)
+	}
+}
+
+// TestHandleOPDS2_SearchLinkPresentOnSubFeeds verifies the search templated
+// link is exposed in `links[]` of every OPDS v2 sub-feed (per OPDS convention
+// so the reader's search bar stays visible from any catalogue page).
+func TestHandleOPDS2_SearchLinkPresentOnSubFeeds(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	uploadBook(t, srv, "alpha.epub", "Alpha", "X")
+
+	paths := []string{
+		"/opds/v2",
+		"/opds/v2/publications",
+		"/opds/v2/authors",
+		"/opds/v2/tags",
+		"/opds/v2/publishers",
+		"/opds/v2/unread",
+		"/opds/v2/spice",
+	}
+	for _, p := range paths {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("GET %s: %d", p, rr.Code)
+			continue
+		}
+		var feed opds2.Feed
+		if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+			t.Errorf("%s: invalid JSON: %v", p, err)
+			continue
+		}
+		var found bool
+		for _, l := range feed.Links {
+			if l.Rel == "search" {
+				found = true
+				if !l.Templated {
+					t.Errorf("%s: search link must be templated", p)
+				}
+				if !strings.Contains(l.Href, "{?query}") {
+					t.Errorf("%s: search href should use canonical {?query}; got %q", p, l.Href)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s: missing rel=search link in links[]; got %+v", p, feed.Links)
+		}
 	}
 }
 

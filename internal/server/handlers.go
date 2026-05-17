@@ -658,6 +658,8 @@ func (s *Server) handleSpiceLevels(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOPDS2SpiceLevels is the OPDS 2.0 counterpart of handleSpiceLevels.
+// Deprecated since v1.134: surfaced via the "Piment" facet on /opds/v2/publications.
+// The route stays accessible for clients that bookmarked it.
 func (s *Server) handleOPDS2SpiceLevels(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 
@@ -666,6 +668,7 @@ func (s *Server) handleOPDS2SpiceLevels(w http.ResponseWriter, r *http.Request) 
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/spice", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 
@@ -2467,6 +2470,8 @@ func (s *Server) handleOPDSToRead(w http.ResponseWriter, r *http.Request) {
 // In multi-user mode, the user must be identified either by session cookie or
 // by a ?user=<id> query parameter (used by OPDS reader clients that
 // authenticate via the shared OPDS token).
+// Deprecated since v1.134 in `navigation` root: surfaced as a "Pile à lire"
+// acquisition group on /opds/v2.  The route stays for bookmarked clients.
 func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
 	if s.toReadManager == nil {
 		http.Error(w, "to-read list not supported", http.StatusNotImplemented)
@@ -2495,6 +2500,7 @@ func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken(selfHref, tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	for _, it := range items {
@@ -2675,6 +2681,7 @@ func (s *Server) handleOPDS2Wishlist(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/wishlist", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 
@@ -2720,6 +2727,7 @@ func (s *Server) handleOPDS2Recommendations(w http.ResponseWriter, r *http.Reque
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/recommendations", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	for _, bk := range books {
@@ -3101,10 +3109,27 @@ func addPaginationLinks2(feed *opds2.Feed, r *http.Request, offset, limit, total
 	feed.Links = append(feed.Links, opds2.Link{Rel: "last", Href: paginationLink(r, lastOffset, limit), Type: opds2.MIMEFeed})
 }
 
+// opds2SearchLink is the canonical OPDS 2.0 templated search link.  Per
+// spec §2.3.1 the variable name is "query" (Feedbooks/test.opds.io
+// convention) — strict clients (Cantook) require that exact spelling.
+// Surfaced on the root feed AND every sub-feed so the reader's search
+// bar stays available from any catalogue page.
+var opds2SearchLink = opds2.Link{
+	Rel:       "search",
+	Href:      "/opds/v2/search{?query}",
+	Type:      opds2.MIMEFeed,
+	Templated: true,
+}
+
 // handleOPDS2Root serves the OPDS 2.0 root navigation feed.  Per spec §2.5
 // it also exposes a "groups" section so clients (Cantook) can render the
 // user's pile-à-lire, recommendations, latest additions, and unread books
 // as carousels on the home screen — no extra navigation step required.
+//
+// Since v1.134, the deprecated sub-feeds (spice / unread / to-read /
+// recommendations / wishlist) no longer appear in `navigation` — they're
+// reachable via `facets` / `groups` instead.  The routes still respond
+// for clients that bookmarked them.
 func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
 	feed := &opds2.Feed{
@@ -3112,39 +3137,14 @@ func (s *Server) handleOPDS2Root(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
-			{Rel: "search", Href: "/opds/v2/search{?q}", Type: opds2.MIMEFeed, Templated: true},
+			opds2SearchLink,
 		},
 		Navigation: []opds2.Link{
 			{Title: "Tous les livres", Href: withToken("/opds/v2/publications", tok), Type: opds2.MIMEFeed},
 			{Title: "Par auteur", Href: withToken("/opds/v2/authors", tok), Type: opds2.MIMEFeed},
 			{Title: "Par genre", Href: withToken("/opds/v2/tags", tok), Type: opds2.MIMEFeed},
 			{Title: "Par éditeur", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed},
-			{Title: "Non lus", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed},
 		},
-	}
-	if s.maxAgeRatingForUser(currentUserID(r)) == 0 {
-		feed.Navigation = append(feed.Navigation, opds2.Link{
-			Title: "Niveaux de piment",
-			Href:  withToken("/opds/v2/spice", tok),
-			Type:  opds2.MIMEFeed,
-		})
-	}
-	if s.wishlistManager != nil {
-		feed.Navigation = append(feed.Navigation, opds2.Link{
-			Title: "Liste de souhaits",
-			Href:  withToken("/opds/v2/wishlist", tok),
-			Type:  opds2.MIMEFeed,
-		})
-	}
-	if s.recommender != nil && s.userManager != nil {
-		feed.Navigation = append(feed.Navigation, opds2.Link{
-			Title: "Recommandations",
-			Href:  withToken("/opds/v2/recommendations", tok),
-			Type:  opds2.MIMEFeed,
-		})
-	}
-	if s.toReadManager != nil {
-		s.appendToReadV2NavItems(feed, r, tok)
 	}
 
 	feed.Groups = s.buildRootGroups(r, tok)
@@ -3276,29 +3276,6 @@ func publicationsFromBooks(books []catalog.Book, tok string) []opds2.Publication
 	return out
 }
 
-// appendToReadV2NavItems is the OPDS v2 counterpart to appendToReadV1Entries.
-func (s *Server) appendToReadV2NavItems(feed *opds2.Feed, r *http.Request, tok string) {
-	if currentUserID(r) != "" || !s.hasMultipleUsers() {
-		feed.Navigation = append(feed.Navigation, opds2.Link{
-			Title: "Pile à lire",
-			Href:  withToken("/opds/v2/to-read", tok),
-			Type:  opds2.MIMEFeed,
-		})
-		return
-	}
-	users, err := s.userManager.Users()
-	if err != nil {
-		return
-	}
-	for _, u := range users {
-		href := "/opds/v2/to-read?user=" + url.QueryEscape(u.ID)
-		feed.Navigation = append(feed.Navigation, opds2.Link{
-			Title: "Pile à lire de " + u.Name,
-			Href:  withToken(href, tok),
-			Type:  opds2.MIMEFeed,
-		})
-	}
-}
 
 // handleOPDS2Unread serves the OPDS 2.0 acquisition feed filtered to unread books.
 // In multi-user mode, when the request is authenticated as a specific user
@@ -3333,6 +3310,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3383,6 +3361,7 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/publications", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3396,11 +3375,16 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 }
 
 // handleOPDS2Search performs a catalog search and returns an OPDS 2.0 feed.
+// Reads the spec-canonical ?query= variable first and falls back to ?q= so
+// the legacy Vue SPA path (web/index.html loadBooks) keeps working.
 func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("token")
-	q := r.URL.Query().Get("q")
+	q := r.URL.Query().Get("query")
 	if q == "" {
-		http.Error(w, "missing search query parameter 'q'", http.StatusBadRequest)
+		q = r.URL.Query().Get("q")
+	}
+	if q == "" {
+		http.Error(w, "missing search query parameter 'query'", http.StatusBadRequest)
 		return
 	}
 
@@ -3428,6 +3412,7 @@ func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3458,6 +3443,7 @@ func (s *Server) handleOPDS2Authors(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/authors", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3505,6 +3491,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3536,6 +3523,7 @@ func (s *Server) handleOPDS2Tags(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/tags", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3583,6 +3571,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3614,6 +3603,7 @@ func (s *Server) handleOPDS2Publishers(w http.ResponseWriter, r *http.Request) {
 		Links: []opds2.Link{
 			{Rel: "self", Href: withToken("/opds/v2/publishers", tok), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
@@ -3661,6 +3651,7 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 		Links: []opds2.Link{
 			{Rel: "self", Href: r.URL.RequestURI(), Type: opds2.MIMEFeed},
 			{Rel: "start", Href: withToken("/opds/v2", tok), Type: opds2.MIMEFeed},
+			opds2SearchLink,
 		},
 	}
 	addPaginationLinks2(feed, r, offset, limit, total)
