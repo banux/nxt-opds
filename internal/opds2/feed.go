@@ -77,6 +77,10 @@ type FeedMetadata struct {
 }
 
 // Link represents a link in the feed or in a publication.
+//
+// Width / Height are used on `images[]` entries so OPDS clients (Cantook
+// renders covers from these dimensions) can pick the right size variant.
+// They are emitted only when non-zero.
 type Link struct {
 	Rel        interface{}     `json:"rel,omitempty"` // string or []string
 	Href       string          `json:"href"`
@@ -84,6 +88,8 @@ type Link struct {
 	Title      string          `json:"title,omitempty"`
 	Templated  bool            `json:"templated,omitempty"`
 	Properties *LinkProperties `json:"properties,omitempty"`
+	Width      int             `json:"width,omitempty"`
+	Height     int             `json:"height,omitempty"`
 }
 
 // Publication represents a book in an acquisition feed.

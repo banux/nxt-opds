@@ -2141,6 +2141,92 @@ func TestHandleOPDS2Root_GroupsNoEmptyEntries(t *testing.T) {
 	}
 }
 
+// TestBookToPublication_CantookConformity verifies that the JSON shape
+// returned for an OPDS 2.0 acquisition feed matches the conventions
+// expected by Cantook / Aldiko / Feedbooks-style readers (per the
+// reference catalog https://test.opds.io/2.0/home.json):
+//
+//   - images[] entries carry NO `rel` (legacy OPDS 1 image rels dropped).
+//   - acquisition links use `rel = "http://opds-spec.org/acquisition/open-access"`
+//     (Cantook then renders a direct "Télécharger" button).
+//   - All emitted URLs (images + acquisition) are ABSOLUTE — they start
+//     with the request's external base URL (http://host).
+func TestBookToPublication_CantookConformity(t *testing.T) {
+	srv := newTestServer(t, Options{})
+	uploadBook(t, srv, "alpha.epub", "Alpha", "Author A")
+
+	req := httptest.NewRequest(http.MethodGet, "/opds/v2/publications", nil)
+	req.Host = "books.example.com"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /opds/v2/publications: %d - %s", rr.Code, rr.Body.String())
+	}
+	var feed opds2.Feed
+	if err := json.Unmarshal(rr.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(feed.Publications) == 0 {
+		t.Fatalf("expected at least one publication")
+	}
+	pub := feed.Publications[0]
+
+	// (a) images[] entries must have NO rel.
+	for i, img := range pub.Images {
+		if img.Rel != nil {
+			t.Errorf("images[%d] must not carry rel; got %v", i, img.Rel)
+		}
+		if img.Href == "" {
+			t.Errorf("images[%d] missing href", i)
+			continue
+		}
+		// (c) URL must be absolute.
+		if !strings.HasPrefix(img.Href, "http://") && !strings.HasPrefix(img.Href, "https://") {
+			t.Errorf("images[%d] href must be absolute (start with http(s)://); got %q", i, img.Href)
+		}
+	}
+
+	// (b) acquisition rel must be open-access.
+	var acqCount int
+	for _, l := range pub.Links {
+		if l.Rel == "http://opds-spec.org/acquisition/open-access" {
+			acqCount++
+			if !strings.HasPrefix(l.Href, "http://") && !strings.HasPrefix(l.Href, "https://") {
+				t.Errorf("acquisition link must have an absolute href; got %q", l.Href)
+			}
+			// Must NOT carry the legacy rel.
+		}
+		if l.Rel == "http://opds-spec.org/acquisition" {
+			t.Errorf("legacy bare 'acquisition' rel should be replaced by open-access; got %+v", l)
+		}
+	}
+	if acqCount == 0 {
+		t.Errorf("expected at least one acquisition link with rel=open-access; got %+v", pub.Links)
+	}
+}
+
+// TestAbsURL_LeavesAlreadyAbsoluteUnchanged is a tiny unit test on the
+// absURL helper to make sure already-absolute URLs survive untouched
+// (otherwise a future caller that hands an external URL would get a
+// double prefix).
+func TestAbsURL_LeavesAlreadyAbsoluteUnchanged(t *testing.T) {
+	cases := []struct{ base, in, want string }{
+		{"https://x.example", "/covers/abc", "https://x.example/covers/abc"},
+		{"https://x.example", "https://cdn/y.jpg", "https://cdn/y.jpg"},
+		{"https://x.example", "http://other/y.jpg", "http://other/y.jpg"},
+		{"https://x.example", "data:image/png;base64,xx", "data:image/png;base64,xx"},
+		{"", "/covers/abc", "/covers/abc"},
+		{"https://x.example", "covers/abc", "https://x.example/covers/abc"},
+		{"https://x.example", "", ""},
+	}
+	for _, c := range cases {
+		got := absURL(c.base, c.in)
+		if got != c.want {
+			t.Errorf("absURL(%q, %q) = %q; want %q", c.base, c.in, got, c.want)
+		}
+	}
+}
+
 // TestHandleOPDS2Root_GroupsHideAdultForChild verifies that a child user
 // never sees a 16+/18+ book in any root Group — the MaxAgeRating filter
 // flows through to Search() and the to-read post-filter clips items too.

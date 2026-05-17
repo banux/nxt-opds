@@ -2504,7 +2504,7 @@ func (s *Server) handleOPDS2ToRead(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	for _, it := range items {
-		feed.Publications = append(feed.Publications, bookToPublication(it.Book, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(it.Book, tok, externalURL(r)))
 	}
 	writeOPDS2(w, http.StatusOK, feed)
 }
@@ -2731,7 +2731,7 @@ func (s *Server) handleOPDS2Recommendations(w http.ResponseWriter, r *http.Reque
 		},
 	}
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 	writeOPDS2(w, http.StatusOK, feed)
 }
@@ -2889,9 +2889,29 @@ func writeOPDS2(w http.ResponseWriter, status int, feed *opds2.Feed) {
 	_ = enc.Encode(feed)
 }
 
+// absURL prefixes href with baseURL when href is a server-relative path.
+// Already-absolute href (http:// / https:// / data:) are left untouched.
+// Returns href verbatim when baseURL is empty (test code path).
+func absURL(baseURL, href string) string {
+	if baseURL == "" || href == "" {
+		return href
+	}
+	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "data:") {
+		return href
+	}
+	if !strings.HasPrefix(href, "/") {
+		href = "/" + href
+	}
+	return baseURL + href
+}
+
 // bookToPublication converts a catalog.Book to an opds2.Publication.
 // tok is the OPDS authentication token to append to all URLs (may be empty).
-func bookToPublication(b catalog.Book, tok string) opds2.Publication {
+// baseURL, when non-empty, is prepended to every server-relative URL emitted
+// by this function (images, acquisition links) so the resulting JSON is
+// resolvable by OPDS clients that don't resolve relative URLs (older Cantook
+// on Android, some Aldiko builds).  Pass externalURL(r) at the call site.
+func bookToPublication(b catalog.Book, tok, baseURL string) opds2.Publication {
 	pub := opds2.Publication{
 		Metadata: opds2.PubMetadata{
 			Type:        "http://schema.org/Book",
@@ -2945,27 +2965,30 @@ func bookToPublication(b catalog.Book, tok string) opds2.Publication {
 		}
 	}
 
-	// Acquisition links
+	// Acquisition links — use `acquisition/open-access` so Cantook shows a
+	// direct "Télécharger" button (the bare `acquisition` rel triggers an
+	// extra confirmation step on Cantook iOS/Android).
 	for _, f := range b.Files {
 		pub.Links = append(pub.Links, opds2.Link{
-			Rel:  "http://opds-spec.org/acquisition",
-			Href: withToken("/opds/books/"+b.ID+"/download?path="+url.QueryEscape(f.Path), tok),
+			Rel:  "http://opds-spec.org/acquisition/open-access",
+			Href: absURL(baseURL, withToken("/opds/books/"+b.ID+"/download?path="+url.QueryEscape(f.Path), tok)),
 			Type: f.MIMEType,
 		})
 	}
 
-	// Cover / thumbnail
+	// Cover / thumbnail.  Per test.opds.io/2.0/home.json the modern OPDS 2
+	// convention omits `rel` on `images[]` entries (the legacy OPDS 1 rels
+	// `http://opds-spec.org/image{,/thumbnail}` are dropped).  Cantook
+	// detects the cover from membership in images[], not from the rel.
 	if b.CoverURL != "" {
 		pub.Images = append(pub.Images, opds2.Link{
-			Rel:  "http://opds-spec.org/image",
-			Href: withToken(b.CoverURL, tok),
+			Href: absURL(baseURL, withToken(b.CoverURL, tok)),
 			Type: "image/jpeg",
 		})
 	}
 	if b.ThumbnailURL != "" {
 		pub.Images = append(pub.Images, opds2.Link{
-			Rel:  "http://opds-spec.org/image/thumbnail",
-			Href: withToken(b.ThumbnailURL, tok),
+			Href: absURL(baseURL, withToken(b.ThumbnailURL, tok)),
 			Type: "image/jpeg",
 		})
 	}
@@ -3166,6 +3189,7 @@ const rootGroupLimit = 10
 func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
 	userID := currentUserID(r)
 	maxAge := s.maxAgeRatingForUser(userID)
+	baseURL := externalURL(r)
 	var groups []opds2.Group
 
 	// 1. Pile à lire — only when the user is identified AND the list is non-empty.
@@ -3190,7 +3214,7 @@ func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
 					Links: []opds2.Link{
 						{Rel: "self", Href: withToken("/opds/v2/to-read", tok), Type: opds2.MIMEFeed},
 					},
-					Publications: publicationsFromBooks(books, tok),
+					Publications: publicationsFromBooks(books, tok, baseURL),
 				})
 			}
 		}
@@ -3217,7 +3241,7 @@ func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
 					Links: []opds2.Link{
 						{Rel: "self", Href: withToken("/opds/v2/recommendations", tok), Type: opds2.MIMEFeed},
 					},
-					Publications: publicationsFromBooks(trimmed, tok),
+					Publications: publicationsFromBooks(trimmed, tok, baseURL),
 				})
 			}
 		}
@@ -3239,7 +3263,7 @@ func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
 			Links: []opds2.Link{
 				{Rel: "self", Href: withToken("/opds/v2/publications?sort=added_desc", tok), Type: opds2.MIMEFeed},
 			},
-			Publications: publicationsFromBooks(books, tok),
+			Publications: publicationsFromBooks(books, tok, baseURL),
 		})
 	}
 
@@ -3259,7 +3283,7 @@ func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
 			Links: []opds2.Link{
 				{Rel: "self", Href: withToken("/opds/v2/unread", tok), Type: opds2.MIMEFeed},
 			},
-			Publications: publicationsFromBooks(books, tok),
+			Publications: publicationsFromBooks(books, tok, baseURL),
 		})
 	}
 
@@ -3268,10 +3292,11 @@ func (s *Server) buildRootGroups(r *http.Request, tok string) []opds2.Group {
 
 // publicationsFromBooks is a small helper that maps a slice of books to an
 // OPDS 2.0 Publications slice using the existing bookToPublication helper.
-func publicationsFromBooks(books []catalog.Book, tok string) []opds2.Publication {
+// baseURL is forwarded to bookToPublication so emitted URLs can be absolute.
+func publicationsFromBooks(books []catalog.Book, tok, baseURL string) []opds2.Publication {
 	out := make([]opds2.Publication, 0, len(books))
 	for _, b := range books {
-		out = append(out, bookToPublication(b, tok))
+		out = append(out, bookToPublication(b, tok, baseURL))
 	}
 	return out
 }
@@ -3317,7 +3342,7 @@ func (s *Server) handleOPDS2Unread(w http.ResponseWriter, r *http.Request) {
 	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/unread", tok)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -3368,7 +3393,7 @@ func (s *Server) handleOPDS2Publications(w http.ResponseWriter, r *http.Request)
 	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/publications", tok)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -3418,7 +3443,7 @@ func (s *Server) handleOPDS2Search(w http.ResponseWriter, r *http.Request) {
 	addPaginationLinks2(feed, r, offset, limit, total)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -3498,7 +3523,7 @@ func (s *Server) handleOPDS2AuthorBooks(w http.ResponseWriter, r *http.Request) 
 	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/authors/"+url.PathEscape(author), tok)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -3578,7 +3603,7 @@ func (s *Server) handleOPDS2TagBooks(w http.ResponseWriter, r *http.Request) {
 	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/tags/"+url.PathEscape(tag), tok)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
@@ -3658,7 +3683,7 @@ func (s *Server) handleOPDS2PublisherBooks(w http.ResponseWriter, r *http.Reques
 	feed.Facets = s.buildFacetGroups(r, q, "/opds/v2/publishers/"+url.PathEscape(publisher), tok)
 
 	for _, bk := range books {
-		feed.Publications = append(feed.Publications, bookToPublication(bk, tok))
+		feed.Publications = append(feed.Publications, bookToPublication(bk, tok, externalURL(r)))
 	}
 
 	writeOPDS2(w, http.StatusOK, feed)
