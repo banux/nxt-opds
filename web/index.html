@@ -1171,9 +1171,16 @@
               </div>
             </template>
             <template v-if="currentBook.lastMaintenanceAt">
-              <div class="flex gap-2">
+              <div class="flex gap-2 items-center">
                 <dt class="text-gray-500 dark:text-gray-400">Indexé le</dt>
                 <dd class="text-gray-900 dark:text-gray-100 font-medium">{{ formatMaintenanceDate(new Date(currentBook.lastMaintenanceAt)) }}</dd>
+                <button @click="clearMaintenance(currentBook)" :disabled="clearingMaintenance"
+                  title="Retirer la date d'indexation pour relancer le traitement par le libraire"
+                  class="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
               </div>
             </template>
             <template v-if="currentBook.isRead && currentBook.readAt">
@@ -4140,6 +4147,33 @@ createApp({
       })
     }
 
+    const clearingMaintenance = ref(false)
+
+    async function clearMaintenance(book) {
+      if (!book) return
+      if (!window.confirm(`Retirer la date d'indexation de « ${book.title} » ? Le libraire pourra ainsi le retraiter.`)) return
+      clearingMaintenance.value = true
+      try {
+        const res = await apiFetch('/api/books/' + book.id, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ lastMaintenanceAt: 0 }),
+        })
+        if (!res.ok) throw new Error(await res.text() || 'Échec')
+        const updated = await res.json()
+        if (currentBook.value && currentBook.value.id === updated.id) {
+          currentBook.value = updated
+        }
+        const idx = books.value.findIndex(b => b.id === updated.id)
+        if (idx !== -1) books.value[idx] = updated
+        showToast('Date d\'indexation retirée', 'success')
+      } catch (e) {
+        showToast('Erreur : ' + e.message, 'error')
+      } finally {
+        clearingMaintenance.value = false
+      }
+    }
+
     // ---- Read timestamp (current user's read date — shown on the book detail page) ----
     function formatReadDate(d) {
       if (!d) return ''
@@ -5256,6 +5290,7 @@ createApp({
       uploadDialog, uploadFile, uploading, uploadError, uploadSuccess, dragging,
       onFileSelect, onDrop, doUpload, closeUpload,
       formatMaintenanceDate, formatReadDate,
+      clearingMaintenance, clearMaintenance,
       refreshing, doRefresh,
       appVersion, latestVersion, updateAvailable, updateReleaseURL, updateReleaseNotes,
       showUpdateDialog, updating, updateError, updateApplied, restarting,

@@ -497,7 +497,7 @@ func (b *Backend) Refresh() error {
 			// Log but don't abort; best-effort indexing.
 			continue
 		}
-		b.updateMaintenanceAt(bk.ID)
+		// Don't mark as indexed yet — let the librarian skill process it.
 	}
 
 	// Delete books whose files have been removed from disk.
@@ -569,12 +569,6 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	}
 
 	return tx.Commit()
-}
-
-// updateMaintenanceAt sets last_maintenance_at to NOW for the given book ID.
-// It is called after a book has been fully parsed and its cover extracted.
-func (b *Backend) updateMaintenanceAt(id string) {
-	_, _ = b.db.Exec(`UPDATE books SET last_maintenance_at = ? WHERE id = ?`, time.Now().Unix(), id)
 }
 
 // CoverPath returns the filesystem path to the cached cover image for a book ID.

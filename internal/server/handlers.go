@@ -1235,7 +1235,8 @@ type bookUpdateRequest struct {
 	Rating          *int    `json:"rating"`
 	AgeRating       *int    `json:"ageRating"`
 	SpiceRating     *int    `json:"spiceRating"`
-	// LastMaintenanceAt: Unix ms timestamp; -1 means "now".
+	// LastMaintenanceAt: Unix ms timestamp; -1 means "now"; 0 clears the field
+	// so the librarian re-processes the book.
 	LastMaintenanceAt *int64  `json:"lastMaintenanceAt"`
 }
 

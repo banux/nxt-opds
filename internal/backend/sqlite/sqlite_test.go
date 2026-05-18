@@ -436,8 +436,9 @@ func TestSQLiteBackend_NotIndexedFilter(t *testing.T) {
 	}
 	defer b.Close()
 
-	// After New(), Refresh() is called, so all books should be indexed
-	// Get all books first
+	// After New(), Refresh() is called. Books discovered on disk must NOT be
+	// auto-marked as indexed — the librarian skill is what enriches and stamps
+	// last_maintenance_at. Refresh just adds raw rows.
 	allBooks, _, err := b.Search(catalog.SearchQuery{Limit: 50})
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
@@ -445,51 +446,25 @@ func TestSQLiteBackend_NotIndexedFilter(t *testing.T) {
 	if len(allBooks) != 2 {
 		t.Errorf("expected 2 books total, got %d", len(allBooks))
 	}
-	t.Logf("All books: %v", len(allBooks))
-	for _, b := range allBooks {
-		t.Logf("  - %s: LastMaintenanceAt=%v (IsZero=%v)", b.Title, b.LastMaintenanceAt, b.LastMaintenanceAt.IsZero())
+	for _, bk := range allBooks {
+		if !bk.LastMaintenanceAt.IsZero() {
+			t.Errorf("freshly-discovered book %q should have zero LastMaintenanceAt, got %v", bk.Title, bk.LastMaintenanceAt)
+		}
 	}
 
-	// All books should be indexed (not indexed count = 0)
+	// Both books should be reported as not-indexed.
 	notIndexedBooks, total, err := b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
 	if err != nil {
 		t.Fatalf("Search(NotIndexed) error: %v", err)
 	}
-	t.Logf("NotIndexed books count: %d (total=%d)", len(notIndexedBooks), total)
-	if total != 0 {
-		t.Errorf("expected 0 not-indexed books (all should be indexed by Refresh), got %d", total)
+	if total != 2 {
+		t.Errorf("expected 2 not-indexed books after Refresh, got %d", total)
 	}
 
-	// Manually create a book with zero lastMaintenanceAt
-	zeroBook := catalog.Book{
-		ID:       "test-zero",
-		Title:    "Zero Maintenance Book",
-		Language: "en",
-		Files: []catalog.File{
-			{Path: "/tmp/test.epub", MIMEType: "application/epub+zip", Size: 1000},
-		},
-	}
-	if err := b.insertBook(zeroBook); err != nil {
-		t.Fatalf("insertBook() error: %v", err)
-	}
-	// Don't call updateMaintenanceAt, so lastMaintenanceAt remains 0
-
-	// Now search for not indexed books
-	notIndexedBooks, total, err = b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
-	if err != nil {
-		t.Fatalf("Search(NotIndexed) after insert error: %v", err)
-	}
-	t.Logf("NotIndexed books after insert: count=%d, total=%d", len(notIndexedBooks), total)
-	if total != 1 {
-		t.Errorf("expected 1 not-indexed book, got %d (total=%d)", len(notIndexedBooks), total)
-	}
-	if len(notIndexedBooks) != 1 {
-		t.Errorf("expected 1 book in result, got %d", len(notIndexedBooks))
-	}
-
-	// Mark the book as indexed
+	// Mark one of them as indexed via UpdateBook.
 	now := time.Now()
-	updated, err := b.UpdateBook("test-zero", catalog.BookUpdate{
+	target := notIndexedBooks[0].ID
+	updated, err := b.UpdateBook(target, catalog.BookUpdate{
 		LastMaintenanceAt: &now,
 	})
 	if err != nil {
@@ -498,16 +473,27 @@ func TestSQLiteBackend_NotIndexedFilter(t *testing.T) {
 	if updated.LastMaintenanceAt.IsZero() {
 		t.Error("LastMaintenanceAt should not be zero after update")
 	}
-	t.Logf("Updated book: LastMaintenanceAt=%v", updated.LastMaintenanceAt)
 
-	// Now search for not indexed books again
-	notIndexedBooks, total, err = b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
+	// Now only one book should remain not-indexed.
+	_, total, err = b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
 	if err != nil {
 		t.Fatalf("Search(NotIndexed) after update error: %v", err)
 	}
-	t.Logf("NotIndexed books after update: count=%d, total=%d", len(notIndexedBooks), total)
-	if total != 0 {
-		t.Errorf("expected 0 not-indexed books after update, got %d (total=%d)", len(notIndexedBooks), total)
+	if total != 1 {
+		t.Errorf("expected 1 not-indexed book after marking one indexed, got %d", total)
+	}
+
+	// Clearing back to zero should bring it back into the not-indexed set.
+	var zero time.Time
+	if _, err := b.UpdateBook(target, catalog.BookUpdate{LastMaintenanceAt: &zero}); err != nil {
+		t.Fatalf("UpdateBook(clear) error: %v", err)
+	}
+	_, total, err = b.Search(catalog.SearchQuery{NotIndexed: true, Limit: 50})
+	if err != nil {
+		t.Fatalf("Search(NotIndexed) after clear error: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected 2 not-indexed books after clearing maintenance date, got %d", total)
 	}
 }
 
