@@ -1,0 +1,19 @@
+# robots.txt — nxt-opds & librarian
+User-agent: *
+Allow: /
+
+# Crawlers IA / moteurs génératifs explicitement autorisés (GEO)
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://banux.github.io/nxt-opds/sitemap.xml

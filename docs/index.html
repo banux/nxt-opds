@@ -4,11 +4,95 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>nxt-opds — Bibliothèque eBook auto-hébergée &amp; agent librarian</title>
-<meta name="description" content="nxt-opds : serveur de bibliothèque eBook personnel en Go avec catalogue OPDS et UI Vue 3. librarian : agent IA qui enrichit automatiquement vos métadonnées via MCP. Deux projets open-source qui fonctionnent ensemble." />
+<meta name="description" content="nxt-opds est un serveur de bibliothèque eBook auto-hébergé, open-source, écrit en Go, avec catalogue OPDS 1.2/2.0 et interface Vue 3. librarian est un agent IA en Go qui enrichit automatiquement les métadonnées (tags, résumés, classification d'âge) via le protocole MCP. Deux projets open-source complémentaires." />
+<meta name="keywords" content="nxt-opds, librarian, serveur OPDS, bibliothèque eBook auto-hébergée, self-hosted ebook server, catalogue OPDS, Go, Vue 3, MCP, Model Context Protocol, agent IA bibliothèque, EPUB, lecteur OPDS, open source" />
+<meta name="author" content="banux" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<link rel="canonical" href="https://banux.github.io/nxt-opds/" />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-<meta property="og:title" content="nxt-opds &amp; librarian" />
-<meta property="og:description" content="Votre bibliothèque eBook auto-hébergée, et l'agent IA qui la maintient toute seule." />
+
+<!-- Open Graph -->
+<meta property="og:site_name" content="nxt-opds &amp; librarian" />
+<meta property="og:title" content="nxt-opds &amp; librarian — bibliothèque eBook auto-hébergée maintenue par une IA" />
+<meta property="og:description" content="nxt-opds : serveur de bibliothèque eBook open-source en Go (catalogue OPDS + UI Vue 3). librarian : l'agent IA qui enrichit le catalogue via MCP." />
 <meta property="og:type" content="website" />
+<meta property="og:url" content="https://banux.github.io/nxt-opds/" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:image" content="https://banux.github.io/nxt-opds/favicon.svg" />
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="nxt-opds &amp; librarian" />
+<meta name="twitter:description" content="Bibliothèque eBook auto-hébergée (OPDS, Go, Vue 3) maintenue automatiquement par un agent IA via MCP." />
+<meta name="twitter:image" content="https://banux.github.io/nxt-opds/favicon.svg" />
+
+<!-- Données structurées : projets logiciels (GEO / rich results) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://banux.github.io/nxt-opds/#website",
+      "url": "https://banux.github.io/nxt-opds/",
+      "name": "nxt-opds & librarian",
+      "inLanguage": "fr",
+      "description": "Site de présentation des projets open-source nxt-opds (serveur de bibliothèque eBook OPDS) et librarian (agent IA de maintenance via MCP)."
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "name": "nxt-opds",
+      "url": "https://banux.github.io/nxt-opds/",
+      "codeRepository": "https://github.com/banux/nxt-opds",
+      "programmingLanguage": ["Go", "JavaScript"],
+      "runtimePlatform": "Go 1.24",
+      "applicationCategory": "Serveur de bibliothèque eBook auto-hébergé",
+      "operatingSystem": "Linux, macOS, Windows, Docker",
+      "license": "https://github.com/banux/nxt-opds/blob/main/LICENSE",
+      "author": { "@type": "Person", "name": "banux", "url": "https://github.com/banux" },
+      "description": "Serveur de bibliothèque eBook personnel léger écrit en Go, avec catalogue OPDS 1.2 et 2.0, interface web Vue 3, lecteur EPUB intégré, support multi-utilisateurs, classification d'âge, PWA et serveur MCP. Distribué en un seul binaire statique.",
+      "keywords": "OPDS, eBook, EPUB, self-hosted, Go, Vue 3, MCP, PWA, SQLite"
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "name": "librarian",
+      "url": "https://github.com/banux/nxt-opds-librarian",
+      "codeRepository": "https://github.com/banux/nxt-opds-librarian",
+      "programmingLanguage": "Go",
+      "applicationCategory": "Agent IA / outil de maintenance de catalogue",
+      "operatingSystem": "Linux, macOS, Windows, Docker",
+      "author": { "@type": "Person", "name": "banux", "url": "https://github.com/banux" },
+      "description": "Agent Go autonome qui pilote une ou plusieurs bibliothèques nxt-opds via leur serveur MCP : enrichissement automatique des métadonnées (tags, résumés, classification d'âge, séries), assistant conversationnel sur le catalogue et maintenance en lot. Compatible avec plusieurs backends LLM (Anthropic, Ollama Cloud).",
+      "keywords": "agent IA, MCP, Model Context Protocol, LLM, enrichissement métadonnées, Anthropic, Ollama, automatisation bibliothèque"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Qu'est-ce que nxt-opds ?",
+          "acceptedAnswer": { "@type": "Answer", "text": "nxt-opds est un serveur de bibliothèque eBook personnel et auto-hébergé écrit en Go. Il expose un catalogue OPDS 1.2 et 2.0 consultable depuis n'importe quel lecteur OPDS (KyBook, Moon+ Reader, Calibre), fournit une interface web Vue 3 avec lecteur EPUB intégré, et se distribue en un seul binaire statique avec frontend embarqué." }
+        },
+        {
+          "@type": "Question",
+          "name": "Qu'est-ce que librarian ?",
+          "acceptedAnswer": { "@type": "Answer", "text": "librarian est un agent IA autonome écrit en Go qui se connecte à une ou plusieurs instances nxt-opds via leur serveur MCP. Il enrichit automatiquement les métadonnées des livres (tags, résumés, classification d'âge, séries), répond à des questions sur le catalogue et exécute des batches de maintenance. Il fonctionne avec plusieurs backends LLM comme Anthropic ou Ollama Cloud." }
+        },
+        {
+          "@type": "Question",
+          "name": "Comment nxt-opds et librarian communiquent-ils ?",
+          "acceptedAnswer": { "@type": "Answer", "text": "nxt-opds expose un serveur MCP (Model Context Protocol). librarian s'y connecte comme client MCP après un appairage sécurisé par code one-time, sans copier-coller de secrets. L'agent lit et écrit ensuite le catalogue en s'appuyant sur un LLM pour raisonner sur chaque livre." }
+        },
+        {
+          "@type": "Question",
+          "name": "nxt-opds est-il gratuit et open-source ?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Oui. nxt-opds et librarian sont deux projets open-source publiés sur GitHub par banux. nxt-opds se lance via un binaire Go ou via Docker ; librarian s'installe avec go install ou via une image Docker d'environ 25 Mo." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <style>
   :root {
     --blue: #2563eb;
@@ -206,6 +290,15 @@
   pre .s { color: #86efac; }
   .qs-card h3 { font-size: 1.1rem; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
 
+  /* ---------- FAQ ---------- */
+  .faq-list { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .faq-item {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px 24px;
+  }
+  .faq-item h3 { font-size: 1.08rem; margin-bottom: 8px; color: var(--text); }
+  .faq-item p { color: var(--muted); font-size: 0.96rem; margin: 0; }
+
   /* ---------- Footer ---------- */
   footer { border-top: 1px solid var(--border); padding: 40px 0; text-align: center; color: var(--muted); font-size: 0.9rem; }
   footer .flinks { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
@@ -223,6 +316,7 @@
       <a href="#architecture">Architecture</a>
       <a href="#features">Fonctionnalités</a>
       <a href="#quickstart">Démarrage</a>
+      <a href="#faq">FAQ</a>
       <a class="gh" href="https://github.com/banux/nxt-opds" target="_blank" rel="noopener">
         <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
@@ -422,6 +516,35 @@ librarian pair \
 
 <span class="c"># Enrichir toute la bibliothèque</span>
 librarian batch --instance example</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">Questions fréquentes</div>
+      <h2>FAQ</h2>
+      <p>L'essentiel sur nxt-opds et librarian.</p>
+    </div>
+    <div class="faq-list">
+      <div class="faq-item">
+        <h3>Qu'est-ce que nxt-opds ?</h3>
+        <p>nxt-opds est un serveur de bibliothèque eBook personnel et auto-hébergé écrit en Go. Il expose un catalogue OPDS 1.2 et 2.0 consultable depuis n'importe quel lecteur OPDS (KyBook, Moon+ Reader, Calibre), fournit une interface web Vue 3 avec lecteur EPUB intégré, et se distribue en un seul binaire statique avec frontend embarqué.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Qu'est-ce que librarian ?</h3>
+        <p>librarian est un agent IA autonome écrit en Go qui se connecte à une ou plusieurs instances nxt-opds via leur serveur MCP. Il enrichit automatiquement les métadonnées des livres (tags, résumés, classification d'âge, séries), répond à des questions sur le catalogue et exécute des batches de maintenance. Il fonctionne avec plusieurs backends LLM comme Anthropic ou Ollama Cloud.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Comment nxt-opds et librarian communiquent-ils ?</h3>
+        <p>nxt-opds expose un serveur MCP (Model Context Protocol). librarian s'y connecte comme client MCP après un appairage sécurisé par code one-time, sans copier-coller de secrets. L'agent lit et écrit ensuite le catalogue en s'appuyant sur un LLM pour raisonner sur chaque livre.</p>
+      </div>
+      <div class="faq-item">
+        <h3>nxt-opds est-il gratuit et open-source ?</h3>
+        <p>Oui. nxt-opds et librarian sont deux projets open-source publiés sur GitHub par banux. nxt-opds se lance via un binaire Go ou via Docker ; librarian s'installe avec <code>go install</code> ou via une image Docker d'environ 25 Mo.</p>
       </div>
     </div>
   </div>
